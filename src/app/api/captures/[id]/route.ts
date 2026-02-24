@@ -18,7 +18,12 @@ export async function GET(
             return new NextResponse('Capture not found', { status: 404 })
         }
 
-        // Check if file exists
+        // If screenshotPath is a URL (Supabase), redirect to it
+        if (capture.screenshotPath.startsWith('http')) {
+            return NextResponse.redirect(capture.screenshotPath)
+        }
+
+        // Check if local file exists
         if (!fs.existsSync(capture.screenshotPath)) {
             console.error(`[API] File not found: ${capture.screenshotPath}`)
             return new NextResponse('File not found on server', { status: 404 })

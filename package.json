@@ -8,14 +8,16 @@
     "start": "next start",
     "lint": "eslint",
     "worker": "tsx src/scripts/worker.ts",
+    "monitor": "tsx src/scripts/monitor-storage.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.97.0",
     "@prisma/client": "^5.22.0",
+    "@supabase/supabase-js": "^2.97.0",
     "@types/bcryptjs": "^2.4.6",
     "bcryptjs": "^3.0.3",
     "date-fns": "^4.1.0",
+    "dotenv": "^16.4.7",
     "framer-motion": "^12.34.3",
     "jose": "^6.1.3",
     "jszip": "^3.10.1",
@@ -23,7 +25,8 @@
     "next": "16.1.6",
     "pg": "^8.18.0",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "resend": "^6.9.2"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.1",

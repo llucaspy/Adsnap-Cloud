@@ -1,10 +1,52 @@
 'use client'
 
-import { LayoutDashboard, Activity, PlusCircle, Library, Archive, Settings, Sparkles, Zap, Instagram, Linkedin, Github, ShieldCheck, LogOut } from 'lucide-react'
+import { LayoutDashboard, Activity, PlusCircle, Library, Archive, Settings, Sparkles, Zap, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database } from 'lucide-react'
 import { Logo } from './Logo'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
+import { getStorageUsage } from '@/app/actions'
+
+function StorageMonitor() {
+    const [usage, setUsage] = useState<{ used: number; limit: number; percentage: number; formattedUsed: string } | null>(null)
+
+    useEffect(() => {
+        getStorageUsage().then(setUsage)
+        // Refresh every 5 minutes
+        const interval = setInterval(() => {
+            getStorageUsage().then(setUsage)
+        }, 1000 * 60 * 5)
+        return () => clearInterval(interval)
+    }, [])
+
+    if (!usage) return null
+
+    const isHighUsage = usage.percentage > 85
+    const isCriticalUsage = usage.percentage > 95
+
+    return (
+        <div className="px-4 py-4 rounded-2xl bg-white/5 border border-white/10 space-y-3">
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                    <Database size={14} className={isCriticalUsage ? 'text-red-500' : isHighUsage ? 'text-orange-500' : 'text-accent'} />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-white/40">Storage</span>
+                </div>
+                <span className="text-[10px] font-bold text-white/60">{usage.percentage.toFixed(1)}%</span>
+            </div>
+
+            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                <div
+                    className={`h-full transition-all duration-1000 ${isCriticalUsage ? 'bg-red-500' : isHighUsage ? 'bg-orange-500' : 'bg-accent'}`}
+                    style={{ width: `${usage.percentage}%` }}
+                />
+            </div>
+
+            <p className="text-[9px] font-medium text-white/30 text-center">
+                {usage.formattedUsed} de 1024 MB usados
+            </p>
+        </div>
+    )
+}
 
 export function Sidebar() {
     const pathname = usePathname()
@@ -162,6 +204,8 @@ export function Sidebar() {
                     <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
                     <span className="text-sm font-medium">Sair</span>
                 </button>
+
+                {user?.role === 'admin' && <StorageMonitor />}
 
                 {/* Developer Credits - Lucas Paim */}
                 <div

@@ -108,6 +108,39 @@ export function SettingsView() {
                     </div>
                 </div>
 
+                {/* Storage Monitoring Group */}
+                <div className="glass-panel p-8 space-y-6">
+                    <div className="flex items-center gap-3 mb-2">
+                        <Gauge className="w-5 h-5 text-accent" />
+                        <h2 className="text-xl font-bold text-white">Monitoramento de Armazenamento</h2>
+                    </div>
+
+                    <div className="space-y-4">
+                        <div className="space-y-2">
+                            <label className="text-xs font-black uppercase tracking-widest text-white/40">Frequência de Verificação (Horas)</label>
+                            <div className="flex items-center gap-4">
+                                <input
+                                    type="range"
+                                    min="1"
+                                    max="168"
+                                    step="1"
+                                    value={settings.storageCheckFrequency || 24}
+                                    onChange={e => setSettings({ ...settings, storageCheckFrequency: parseInt(e.target.value) })}
+                                    className="flex-1 h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-accent"
+                                />
+                                <span className="text-sm font-bold text-accent min-w-[3rem] text-right">
+                                    {settings.storageCheckFrequency || 24}h
+                                </span>
+                            </div>
+                            <p className="text-[10px] text-white/20 italic">
+                                Define o intervalo em que o Nexus verificará o uso do Supabase e disparará alertas por e-mail.
+                                <br />
+                                24h = Diário | 168h = Semanal
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
                 {/* Automation & UI Group */}
                 <div className="glass-panel p-8">
                     <div className="flex items-center gap-3 mb-6">
@@ -164,7 +197,7 @@ export function SettingsView() {
                         )}
                     </button>
                 </div>
-            </form>
+            </form >
         </div >
     )
 }

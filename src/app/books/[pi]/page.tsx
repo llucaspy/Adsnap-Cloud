@@ -35,8 +35,14 @@ export default async function PiDetailPage({ params }: { params: Promise<{ pi: s
             ? foundFormat.label
             : (campaign.format?.includes('x') ? campaign.format : 'Formato Indefinido')
 
-        // 2. Filter Captures (File existence check)
+        // 2. Filter Captures (Handle Cloud Storage URLs)
         const validCaptures = campaign.captures.filter(c => {
+            if (!c.screenshotPath) return false;
+
+            // If it's a URL (Supabase), it's valid for the frontend
+            if (c.screenshotPath.startsWith('http')) return true;
+
+            // If it's a local path, check if it exists
             try {
                 return fs.existsSync(c.screenshotPath)
             } catch {

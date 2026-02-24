@@ -468,3 +468,77 @@ export async function deleteCapture(id: string) {
         return { success: false, error: (error as Error).message };
     }
 }
+
+export async function getAdminMetrics() {
+    try {
+        // 1. Supabase Storage (already implemented logic)
+        const storageResult = await (prisma as any).$queryRawUnsafe<any[]>(
+            `SELECT SUM((metadata->>'size')::bigint) as total_size 
+             FROM storage.objects 
+             WHERE bucket_id = 'screenshots'`
+        )
+        const storageBytes = Number(storageResult[0]?.total_size || 0)
+
+        // 2. Supabase Database Size
+        const dbResult = await (prisma as any).$queryRawUnsafe<any[]>(
+            `SELECT pg_database_size(current_database()) as total_size`
+        )
+        const dbBytes = Number(dbResult[0]?.total_size || 0)
+
+        // 3. Resend Email Usage (Tracked via NexusLogs)
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+
+        const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
+
+        const [dailyEmails, monthlyEmails] = await Promise.all([
+            prisma.nexusLog.count({
+                where: {
+                    level: 'SYSTEM',
+                    message: { contains: '[ALERTA STORAGE]' }, // For now, alerts are the only emails
+                    createdAt: { gte: today }
+                }
+            }),
+            prisma.nexusLog.count({
+                where: {
+                    level: 'SYSTEM',
+                    message: { contains: '[ALERTA STORAGE]' },
+                    createdAt: { gte: firstDayOfMonth }
+                }
+            })
+        ])
+
+        // 4. Nexus Health
+        const settings = await prisma.settings.findFirst()
+        const lastRun = settings?.storageCheckLastRun
+
+        return {
+            storage: {
+                used: storageBytes,
+                limit: 1024 * 1024 * 1024, // 1GB
+                percentage: (storageBytes / (1024 * 1024 * 1024)) * 100,
+                formatted: (storageBytes / (1024 * 1024)).toFixed(2) + ' MB'
+            },
+            database: {
+                used: dbBytes,
+                limit: 500 * 1024 * 1024, // 500MB free tier
+                percentage: (dbBytes / (500 * 1024 * 1024)) * 100,
+                formatted: (dbBytes / (1024 * 1024)).toFixed(2) + ' MB'
+            },
+            resend: {
+                dailyUsed: dailyEmails,
+                dailyLimit: 100,
+                monthlyUsed: monthlyEmails,
+                monthlyLimit: 3000,
+                percentage: (dailyEmails / 100) * 100
+            },
+            health: {
+                lastRun: lastRun,
+                isHealthy: lastRun ? (new Date().getTime() - lastRun.getTime() < 24 * 60 * 60 * 1000) : false
+            }
+        }
+    } catch (error) {
+        console.error('[Actions] Error fetching dashboard metrics:', error)
+        throw error
+    }
+}

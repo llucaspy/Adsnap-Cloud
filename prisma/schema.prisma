@@ -51,9 +51,11 @@ model Settings {
   webhookUrl        String?
   performanceMode   Boolean  @default(false)
   feedPollingRate   Int      @default(5000)
-  maintenanceMode   Boolean  @default(false)
-  bannerFormats     String   @default("[]") // JSON: [{id, label, width, height, selector}]
-  updatedAt         DateTime @updatedAt
+  maintenanceMode      Boolean  @default(false)
+  bannerFormats        String   @default("[]") // JSON: [{id, label, width, height, selector}]
+  storageCheckFrequency Int     @default(24) // Frequency in hours
+  storageCheckLastRun  DateTime?
+  updatedAt            DateTime @updatedAt
 }
 
 model User {
@@ -65,4 +67,12 @@ model User {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+model NexusLog {
+  id         String   @id @default(cuid())
+  level      String   // INFO | SUCCESS | ERROR | SYSTEM
+  message    String
+  details    String?  // JSON ou stack trace
+  campaignId String?
+  createdAt  DateTime @default(now())
 }

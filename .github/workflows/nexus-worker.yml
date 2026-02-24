@@ -31,3 +31,6 @@ jobs:
       - name: Run Nexus Worker
         run: npm run worker
 
+      - name: Run Storage Monitor
+        run: npm run monitor
+
