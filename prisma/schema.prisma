@@ -1,0 +1,67 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Campaign {
+  id             String    @id @default(cuid())
+  agency         String
+  client         String
+  campaignName   String    @default("")  // Nome da campanha
+  pi             String
+  format         String
+  url            String
+  device         String    @default("desktop")
+  status         String    @default("PENDING") // PENDING | QUEUED | PROCESSING | SUCCESS | FAILED | QUARANTINE
+  segmentation   String    @default("PRIVADO")  // PRIVADO | GOV_FEDERAL | GOV_ESTADUAL | INTERNO
+  flightStart    DateTime?  // Início da veiculação
+  flightEnd      DateTime?  // Fim da veiculação
+  isArchived     Boolean   @default(false)
+  isScheduled    Boolean   @default(false)
+  scheduledTimes String    @default("[]")  // JSON array: ["10:00", "14:00"]
+  lastCaptureAt  DateTime?
+  retryCount     Int       @default(0)
+  captures       Capture[]
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model Capture {
+  id             String   @id @default(cuid())
+  campaignId     String
+  campaign       Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  screenshotPath String
+  status         String   @default("SUCCESS") // SUCCESS | FAILED | QUARANTINE
+  auditNotes     String?  // Razão da falha (ex: "Banner cortado", "Banner não encontrado")
+  createdAt      DateTime @default(now())
+}
+
+model Settings {
+  id                Int      @id @default(1)
+  nexusMaxRetries   Int      @default(3)
+  nexusTimeout      Int      @default(60000)
+  nexusDelay        Int      @default(3000)
+  autoCleanupDays   Int      @default(30)
+  webhookUrl        String?
+  performanceMode   Boolean  @default(false)
+  feedPollingRate   Int      @default(5000)
+  maintenanceMode   Boolean  @default(false)
+  bannerFormats     String   @default("[]") // JSON: [{id, label, width, height, selector}]
+  updatedAt         DateTime @updatedAt
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String   // bcrypt hash
+  name      String
+  role      String   @default("user") // "admin" | "user"
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

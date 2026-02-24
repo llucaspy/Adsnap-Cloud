@@ -1,0 +1,470 @@
+'use server'
+
+import prisma from '@/lib/prisma'
+import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
+import { processCampaign } from '@/lib/captureService'
+import { nexusLogStore } from '@/lib/nexusLogStore'
+
+export async function getNexusActivity() {
+    return nexusLogStore.getLogs()
+}
+
+export async function runCapture(campaignId: string) {
+    const result = await processCampaign(campaignId)
+    revalidatePath('/')
+    return result
+}
+
+export async function getCampaignDetailsByPi(pi: string) {
+    const campaign = await prisma.campaign.findFirst({
+        where: { pi },
+        orderBy: { createdAt: 'desc' },
+        select: {
+            agency: true,
+            client: true,
+            campaignName: true,
+            format: true,
+            url: true,
+            device: true,
+            segmentation: true,
+            flightStart: true,
+            flightEnd: true
+        }
+    })
+    return campaign
+}
+
+export async function createCampaign(formData: FormData) {
+    const agency = formData.get('agency') as string
+    const client = formData.get('client') as string
+    const campaignName = formData.get('campaignName') as string
+    const pi = formData.get('pi') as string
+    const format = formData.get('format') as string
+    const url = formData.get('url') as string
+    const device = (formData.get('device') as string) || 'desktop'
+    const segmentation = (formData.get('segmentation') as string) || 'PRIVADO'
+
+    // Flight dates
+    const flightStartStr = formData.get('flightStart') as string
+    const flightEndStr = formData.get('flightEnd') as string
+    const flightStart = flightStartStr ? new Date(flightStartStr) : null
+    const flightEnd = flightEndStr ? new Date(flightEndStr) : null
+
+    // Scheduling fields - now supports multiple times
+    const isScheduled = formData.get('isScheduled') === 'true'
+    const scheduledTimesStr = formData.get('scheduledTimes') as string
+    const scheduledTimes = scheduledTimesStr || '[]'
+
+    if (!agency || !client || !pi || !format || !url) {
+        throw new Error('Todos os campos são obrigatórios')
+    }
+
+    const campaign = await prisma.campaign.create({
+        data: {
+            agency,
+            client,
+            campaignName,
+            pi,
+            format,
+            url,
+            device,
+            segmentation,
+            flightStart,
+            flightEnd,
+            status: 'PENDING',
+            isScheduled,
+            scheduledTimes,
+        },
+    })
+
+    revalidatePath('/')
+    return campaign
+}
+
+export async function createMultipleCampaigns(payload: {
+    agency: string
+    client: string
+    campaignName: string
+    pi: string
+    segmentation: string
+    flightStart: string | null
+    flightEnd: string | null
+    isScheduled: boolean
+    scheduledTimes: string
+    mediaEntries: { url: string; device: string; format: string }[]
+}) {
+    const {
+        agency, client, campaignName, pi, segmentation,
+        flightStart: flightStartStr, flightEnd: flightEndStr,
+        isScheduled, scheduledTimes, mediaEntries
+    } = payload
+
+    if (!agency || !client || !pi || mediaEntries.length === 0) {
+        throw new Error('Dados da campanha e pelo menos um formato são obrigatórios')
+    }
+
+    const flightStart = flightStartStr ? new Date(flightStartStr) : null
+    const flightEnd = flightEndStr ? new Date(flightEndStr) : null
+
+    const results = []
+
+    for (const entry of mediaEntries) {
+        if (!entry.url || !entry.format) continue
+
+        const campaign = await prisma.campaign.create({
+            data: {
+                agency,
+                client,
+                campaignName,
+                pi,
+                format: entry.format,
+                url: entry.url,
+                device: entry.device || 'desktop',
+                segmentation,
+                flightStart,
+                flightEnd,
+                status: 'PENDING',
+                isScheduled,
+                scheduledTimes,
+            },
+        })
+        results.push(campaign)
+    }
+
+    revalidatePath('/')
+    revalidatePath('/monitoring')
+    return { success: true, count: results.length }
+}
+
+export async function archiveCampaign(id: string, isArchived: boolean = true) {
+    await prisma.campaign.update({
+        where: { id },
+        data: { isArchived }
+    })
+    revalidatePath('/')
+}
+
+export async function deleteCampaign(id: string) {
+    await prisma.campaign.delete({
+        where: { id }
+    })
+    revalidatePath('/')
+}
+
+export async function updateCampaign(id: string, formData: FormData) {
+    const agency = formData.get('agency') as string
+    const client = formData.get('client') as string
+    const campaignName = formData.get('campaignName') as string
+    const pi = formData.get('pi') as string
+    const format = formData.get('format') as string
+    const url = formData.get('url') as string
+    const device = (formData.get('device') as string) || 'desktop'
+    const segmentation = (formData.get('segmentation') as string) || 'PRIVADO'
+
+    // Flight dates
+    const flightStartStr = formData.get('flightStart') as string
+    const flightEndStr = formData.get('flightEnd') as string
+    const flightStart = flightStartStr ? new Date(flightStartStr) : null
+    const flightEnd = flightEndStr ? new Date(flightEndStr) : null
+
+    // Scheduling fields - now supports multiple times
+    const isScheduled = formData.get('isScheduled') === 'true'
+    const scheduledTimesStr = formData.get('scheduledTimes') as string
+    const scheduledTimes = scheduledTimesStr || '[]'
+
+    if (!agency || !client || !pi || !format || !url) {
+        throw new Error('Todos os campos são obrigatórios')
+    }
+
+    const campaign = await prisma.campaign.update({
+        where: { id },
+        data: {
+            agency,
+            client,
+            campaignName,
+            pi,
+            format,
+            url,
+            device,
+            segmentation,
+            flightStart,
+            flightEnd,
+            isScheduled,
+            scheduledTimes,
+        },
+    })
+
+    revalidatePath('/')
+    revalidatePath('/monitoring')
+    return campaign
+}
+
+// Get schedule usage stats for UI display
+export async function getScheduleUsage(): Promise<Record<string, number>> {
+    const campaigns = await prisma.campaign.findMany({
+        where: {
+            isScheduled: true,
+            isArchived: false
+        },
+        select: { scheduledTimes: true as any }
+    })
+
+    const usage: Record<string, number> = {}
+
+    for (const campaign of campaigns) {
+        try {
+            const times = JSON.parse((campaign as any).scheduledTimes) as string[]
+            for (const time of times) {
+                usage[time] = (usage[time] || 0) + 1
+            }
+        } catch {
+            // Ignore invalid JSON
+        }
+    }
+
+    return usage
+}
+
+export async function getQueueStatus() {
+    const campaigns = await prisma.campaign.findMany({
+        where: {
+            status: { in: ['QUEUED', 'PROCESSING'] },
+            isArchived: false
+        },
+        select: {
+            id: true,
+            client: true,
+            status: true,
+            campaignName: true as any
+        }
+    }) as any
+    return campaigns
+}
+
+export async function runAllCaptures() {
+    console.log('[Nexus] Starting manual global capture process...')
+
+    // Generate BRT-normalized "today" at 00:00 UTC for consistent date comparison
+    const brtNowStr = new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' });
+    const brtNow = new Date(brtNowStr);
+    const today = new Date(Date.UTC(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate()));
+
+    // Find only campaigns currently in their airing period
+    const campaigns = await prisma.campaign.findMany({
+        where: {
+            isArchived: false,
+            status: { notIn: ['EXPIRED', 'FINISHED'] },
+            OR: [
+                // Currently in flight (flightEnd includes the full last day until 23:59)
+                {
+                    flightStart: { lte: today },
+                    flightEnd: { gte: today }
+                },
+                // Legacy campaigns without flight dates
+                {
+                    flightStart: null,
+                    flightEnd: null
+                }
+            ]
+        } as any
+    })
+
+    if (campaigns.length === 0) return { success: true, count: 0 }
+
+    // Mark as QUEUED
+    nexusLogStore.addLog(`Nexus: Lote de ${campaigns.length} capturas enfileirado manualmente.`, 'SYSTEM')
+    // Using a loop instead of updateMany if the latter is missing on the proxy
+    for (const c of campaigns) {
+        await (prisma as any).campaign.update({
+            where: { id: c.id },
+            data: { status: 'QUEUED' }
+        })
+    }
+
+    // Process sequentially in background
+    (async () => {
+        for (const campaign of campaigns) {
+            await prisma.campaign.update({
+                where: { id: campaign.id },
+                data: { status: 'PROCESSING' }
+            })
+            await processCampaign(campaign.id)
+            await new Promise(resolve => setTimeout(resolve, 2000))
+        }
+    })()
+
+    return { success: true, count: campaigns.length }
+}
+
+export async function bulkCreateCampaigns(campaigns: any[]) {
+    console.log(`[Nexus] Bulk creating ${campaigns.length} campaigns...`)
+
+    const results = []
+
+    for (const data of campaigns) {
+        try {
+            const campaign = await prisma.campaign.create({
+                data: {
+                    agency: data.agency || 'Adsnap',
+                    client: data.client || 'Sem Cliente',
+                    campaignName: data.campaignName || data.client || 'Nova Campanha',
+                    pi: data.pi || '000',
+                    format: data.format || 'Display',
+                    url: data.url,
+                    device: data.device || 'desktop',
+                    segmentation: data.segmentation || 'PRIVADO',
+                    flightStart: data.flightStart ? new Date(data.flightStart) : null,
+                    flightEnd: data.flightEnd ? new Date(data.flightEnd) : null,
+                    status: 'PENDING',
+                    isScheduled: false,
+                    scheduledTimes: '[]'
+                }
+            })
+            results.push({ success: true, id: campaign.id })
+        } catch (err) {
+            console.error('Bulk item error:', err)
+            results.push({ success: false, error: (err as Error).message })
+        }
+    }
+
+    revalidatePath('/')
+    revalidatePath('/monitoring')
+
+    return {
+        success: true,
+        createdCount: results.filter(r => r.success).length,
+        failedCount: results.filter(r => !r.success).length
+    }
+}
+
+// --- NEXUS CONTROL ACTIONS ---
+
+export async function stopAllCaptures() {
+    // Reset all QUEUED and PROCESSING campaigns to PENDING
+    const result = await prisma.campaign.updateMany({
+        where: {
+            status: { in: ['QUEUED', 'PROCESSING'] },
+            isArchived: false
+        },
+        data: { status: 'PENDING' }
+    })
+
+    nexusLogStore.addLog(`Nexus: Interrupção forçada. ${result.count} campanha(s) resetada(s).`, 'SYSTEM')
+    revalidatePath('/')
+
+    return { success: true, stoppedCount: result.count }
+}
+
+export async function scheduleAllCampaigns(time: string) {
+    // Validate time format (HH:mm)
+    const timeRegex = /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/
+    if (!timeRegex.test(time)) {
+        return { success: false, error: 'Formato de horário inválido. Use HH:mm (ex: 14:30)' }
+    }
+
+    // Get all active (non-archived) campaigns
+    const campaigns = await prisma.campaign.findMany({
+        where: { isArchived: false }
+    })
+
+    let updatedCount = 0
+
+    for (const campaign of campaigns) {
+        let currentTimes: string[] = []
+        try {
+            currentTimes = JSON.parse(campaign.scheduledTimes || '[]')
+        } catch {
+            currentTimes = []
+        }
+
+        // Add time if not already present
+        if (!currentTimes.includes(time)) {
+            currentTimes.push(time)
+            currentTimes.sort() // Keep times sorted
+        }
+
+        await prisma.campaign.update({
+            where: { id: campaign.id },
+            data: {
+                isScheduled: true,
+                scheduledTimes: JSON.stringify(currentTimes)
+            }
+        })
+        updatedCount++
+    }
+
+    nexusLogStore.addLog(`Nexus: ${updatedCount} campanha(s) agendada(s) para ${time}.`, 'SUCCESS')
+    revalidatePath('/')
+
+    return { success: true, updatedCount, time }
+}
+
+// --- SETTINGS ACTIONS ---
+
+export async function getSettings() {
+    let settings = await prisma.settings.findUnique({
+        where: { id: 1 }
+    })
+
+    if (!settings) {
+        // Create initial default settings
+        settings = await prisma.settings.create({
+            data: { id: 1 }
+        })
+    }
+
+    return settings
+}
+
+export async function updateSettings(data: any) {
+    const settings = await prisma.settings.update({
+        where: { id: 1 },
+        data: {
+            nexusMaxRetries: Number(data.nexusMaxRetries),
+            nexusTimeout: Number(data.nexusTimeout),
+            nexusDelay: Number(data.nexusDelay),
+            autoCleanupDays: Number(data.autoCleanupDays),
+            webhookUrl: data.webhookUrl,
+            performanceMode: Boolean(data.performanceMode),
+            feedPollingRate: Number(data.feedPollingRate),
+            maintenanceMode: Boolean(data.maintenanceMode),
+            bannerFormats: data.bannerFormats,
+        } as any
+    })
+
+    nexusLogStore.addLog('Nexus: Configurações globais atualizadas.', 'SYSTEM')
+    revalidatePath('/')
+    return settings
+}
+
+export async function deleteCapture(id: string) {
+    console.log(`[Nexus] Requesting deletion of capture ${id}...`);
+    try {
+        const capture = await prisma.capture.findUnique({
+            where: { id },
+            select: { screenshotPath: true }
+        });
+
+        if (capture && capture.screenshotPath) {
+            const fs = require('fs');
+            if (fs.existsSync(capture.screenshotPath)) {
+                fs.unlinkSync(capture.screenshotPath);
+                console.log(`[Nexus] File deleted: ${capture.screenshotPath}`);
+            }
+        }
+
+        await prisma.capture.delete({
+            where: { id }
+        });
+
+        revalidatePath('/');
+        revalidatePath('/books');
+
+        nexusLogStore.addLog(`Nexus: Evidência ${id} removida permanentemente.`, 'SYSTEM');
+        return { success: true };
+    } catch (error) {
+        console.error('[Delete Capture Error]', error);
+        return { success: false, error: (error as Error).message };
+    }
+}
