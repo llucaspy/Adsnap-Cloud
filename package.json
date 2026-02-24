@@ -4,10 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev -H 0.0.0.0",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
-    "worker": "tsx src/scripts/worker.ts"
+    "worker": "tsx src/scripts/worker.ts",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0",
