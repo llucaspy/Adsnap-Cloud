@@ -1,5 +1,5 @@
 import { chromium, devices, Page, Locator } from 'playwright'
-import prisma from '@/lib/prisma'
+import prisma from './prisma'
 import { supabase } from './supabase'
 import { nexusLogStore } from './nexusLogStore'
 
@@ -10,6 +10,8 @@ import { nexusLogStore } from './nexusLogStore'
 export async function processCampaign(campaignId: string) {
     console.log('[Nexus] ========= INICIANDO CAPTURA =========')
     console.log('[Nexus] Campaign ID:', campaignId)
+    await nexusLogStore.addLog(`Nexus: Iniciando processamento da campanha ${campaignId}`, 'SYSTEM', undefined, campaignId);
+
     try {
         const settings = await prisma.settings.findUnique({ where: { id: 1 } }) || {
             nexusMaxRetries: 3,
@@ -23,7 +25,7 @@ export async function processCampaign(campaignId: string) {
 
         while (retryCount < MAX_RETRIES) {
             if (retryCount > 0) {
-                nexusLogStore.addLog(`Nexus: Tentativa ${retryCount + 1}/${MAX_RETRIES}...`, 'ERROR');
+                await nexusLogStore.addLog(`Nexus: Tentativa ${retryCount + 1}/${MAX_RETRIES}...`, 'ERROR', undefined, campaignId);
                 await new Promise(resolve => setTimeout(resolve, settings.nexusDelay));
             }
 
@@ -36,21 +38,29 @@ export async function processCampaign(campaignId: string) {
                     where: { id: campaignId },
                     data: { retryCount: 0 }
                 });
+                await nexusLogStore.addLog(`Nexus: Sucesso total na campanha ${campaignId}`, 'SUCCESS', undefined, campaignId);
                 return result;
             }
 
-            // Here result is inferred as { success: false, error: string }
             lastError = result.error || 'Erro desconhecido';
             retryCount++;
 
-            // Removed unused retryCount update here as it's handled by the loop condition
-            // await prisma.campaign.update({
-            //     where: { id: campaignId },
-            //     data: { retryCount }
-            // });
+            await nexusLogStore.addLog(`Nexus: Falha na tentativa ${retryCount}. Erro: ${lastError}`, 'ERROR', undefined, campaignId);
         }
 
-        nexusLogStore.addLog(`Nexus: Quarentena aplicada para ${campaignId}`, 'ERROR');
+        console.log(`[Nexus] Quarentena aplicada para ${campaignId}. Motivo: ${lastError}`);
+        await nexusLogStore.addLog(`Nexus: Quarentena aplicada. Todas as tentativas falharam.`, 'ERROR', `Último erro: ${lastError}`, campaignId);
+
+        // Save failure to database as a record even in quarantine
+        await prisma.capture.create({
+            data: {
+                campaignId,
+                status: 'QUARANTINE',
+                screenshotPath: '', // No image
+                auditNotes: `Nexus Quarentena: ${lastError}`
+            }
+        });
+
         await prisma.campaign.update({
             where: { id: campaignId },
             data: { status: 'QUARANTINE' }
@@ -58,8 +68,11 @@ export async function processCampaign(campaignId: string) {
 
         return { success: false, error: lastError, quarantined: true };
     } catch (e) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        const stack = e instanceof Error ? e.stack : undefined;
         console.error('[Nexus Critical Error]', e);
-        return { success: false, error: String(e) };
+        await nexusLogStore.addLog(`Nexus: Erro crítico no processCampaign`, 'ERROR', `${errorMsg}\n\nStack: ${stack}`, campaignId);
+        return { success: false, error: errorMsg };
     }
 }
 
@@ -153,6 +166,7 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
 
     if (!campaign) throw new Error('Campanha não encontrada');
     console.log('[Nexus] Campanha encontrada:', campaign.client, '-', campaign.format)
+    await nexusLogStore.addLog(`Nexus: Processando ${campaign.client} - Formato: ${campaign.format}`, 'INFO', undefined, campaignId);
 
     // Parse Settings Formats
     let bannerConfig = null;
@@ -175,53 +189,59 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
                 targetW = dims[0];
                 targetH = dims[1];
             }
+            await nexusLogStore.addLog(`Nexus: Formato '${campaign.format}' não configurado. Fallback dimensões: ${targetW}x${targetH}`, 'SYSTEM', undefined, campaignId);
         }
     } catch (e) {
         console.error('[Nexus] Erro ao processar formatos:', e);
-        // Fallback simple parse
         const dims = campaign.format.toLowerCase().split('x').map(Number);
         targetW = dims[0];
         targetH = dims[1];
     }
 
-    if (!targetW || !targetH) throw new Error('Formato inválido ou não configurado: ' + campaign.format);
+    if (!targetW || !targetH) {
+        const error = `Formato inválido ou não configurado: ${campaign.format}`;
+        await nexusLogStore.addLog(`Nexus: ${error}`, 'ERROR', undefined, campaignId);
+        throw new Error(error);
+    }
 
     let browser;
     try {
         console.log('[Nexus] Iniciando browser...')
-        nexusLogStore.addLog(`Nexus: Iniciando ${campaign.client} (${targetW}x${targetH})`, 'SYSTEM');
+        await nexusLogStore.addLog(`Nexus: Lançando browser Playwright (${targetW}x${targetH})`, 'SYSTEM', undefined, campaignId);
         const isMobile = campaign.device === 'mobile';
 
         browser = await chromium.launch({ headless: true });
 
         const context = await browser.newContext(isMobile ? {
             ...devices['iPhone 13'],
-            viewport: { width: 390, height: 722 }, // Altura ajustada para o frame (850 - 48 - 80)
+            viewport: { width: 390, height: 722 },
         } : {
-            viewport: { width: 1920, height: 928 }, // Altura ajustada para o frame (1080 - 12 - 60 - 80)
+            viewport: { width: 1920, height: 928 },
         });
 
         const page = await context.newPage();
 
         // Navigate
-        console.log('[Nexus] Navegando...')
+        console.log(`[Nexus] Navegando para: ${campaign.url}`);
+        await nexusLogStore.addLog(`Nexus: Navegando para a URL`, 'SYSTEM', campaign.url, campaignId);
+
         try {
             await page.goto(campaign.url, {
-                waitUntil: 'domcontentloaded', // Keep fast initial load
+                waitUntil: 'domcontentloaded',
                 timeout: settings.nexusTimeout
             });
         } catch (navError) {
-            console.log('[Nexus] Navegação inicial finalizada (possível timeout inofensivo).');
+            const navMsg = navError instanceof Error ? navError.message : String(navError);
+            console.log('[Nexus] Navegação inicial finalizada com aviso/timeout:', navMsg);
+            await nexusLogStore.addLog(`Nexus: Aviso na navegação (prosseguindo)`, 'INFO', navMsg, campaignId);
         }
 
-        // WARM-UP: Smart Scroll to trigger lazy-loaded ads
-        // Ads often require scrolling to be injected into the DOM
-
-        // Skip scroll for small MOBILE banners (320x50, 320x100) which are usually at the top
+        // WARM-UP: Smart Scroll
         const isSmallMobileBanner = isMobile && targetH <= 150;
 
         if (!isSmallMobileBanner) {
             console.log('[Nexus] Realizando scroll de aquecimento (Lazy Load Check)...');
+            await nexusLogStore.addLog('Nexus: Realizando scroll para carregar anúncios (Lazy Load)', 'SYSTEM', undefined, campaignId);
             await page.evaluate(async () => {
                 return new Promise<void>((resolve) => {
                     let totalHeight = 0;
@@ -236,43 +256,36 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
                             window.scrollTo(0, 0); // Reset to top
                             resolve();
                         }
-                    }, 50); // Fast scroll
+                    }, 50);
                 });
             });
-            await page.waitForTimeout(8000); // Wait for scripts/iframes to react to scroll and render banners
+            await page.waitForTimeout(8000);
         } else {
-            console.log('[Nexus] Formato Mobile Top detectado (<=150px). Pulando scroll de aquecimento.');
-            // Give a small breathing room for top banners to render animations
-            await page.waitForTimeout(6000); // Extra time for mobile top banner iframes to render
+            console.log('[Nexus] Formato Mobile Top detectado (<=150px). Pulando scroll.');
+            await page.waitForTimeout(6000);
         }
 
         // ====================================================
-        // STRATEGY 1: EXPLICIT SELECTOR (If configured)
+        // STRATEGY 1: EXPLICIT SELECTOR
         // ====================================================
         if (bannerConfig && bannerConfig.selector) {
             console.log(`[Nexus] Tentando captura via seletor: ${bannerConfig.selector}`);
-            nexusLogStore.addLog(`Nexus: Buscando elemento '${bannerConfig.selector}'...`, 'SYSTEM');
+            await nexusLogStore.addLog(`Nexus: Buscando seletor configurado: ${bannerConfig.selector}`, 'SYSTEM', undefined, campaignId);
 
             try {
                 const locator = page.locator(bannerConfig.selector).first();
 
-                // Wait for element with extended timeout
-                await locator.waitFor({ state: 'attached', timeout: 20000 }); // Wait for presence in DOM
+                await locator.waitFor({ state: 'attached', timeout: 20000 });
 
-                // Try to force visibility if hidden
                 if (!await locator.isVisible()) {
                     console.log('[Nexus] Seletor existe mas não está visível. Tentando scroll...');
                     await locator.scrollIntoViewIfNeeded();
-                    await page.waitForTimeout(3000); // Wait for iframe content after scroll
+                    await page.waitForTimeout(3000);
                 }
 
-                // Now strict wait for visibility
                 await locator.waitFor({ state: 'visible', timeout: 5000 });
-
-                // Check bounding box
                 const box = await locator.boundingBox();
 
-                // Iframe logic
                 if (box && (box.width < 10 || box.height < 10)) {
                     console.log('[Nexus] Dimensões pequenas. Buscando iframe...');
                     const frameLocator = locator.locator('iframe').first();
@@ -284,13 +297,14 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
                 const finalBox = await locator.boundingBox();
 
                 if (finalBox && finalBox.width > 0 && finalBox.height > 0) {
-                    console.log(`[Nexus] Sucesso! (${Math.round(finalBox.width)}x${Math.round(finalBox.height)}).`);
+                    console.log(`[Nexus] Seletor encontrado! (${Math.round(finalBox.width)}x${Math.round(finalBox.height)})`);
+                    await nexusLogStore.addLog('Nexus: Seletor validado com sucesso', 'SUCCESS', `Dim: ${Math.round(finalBox.width)}x${Math.round(finalBox.height)}`, campaignId);
 
                     const viewportHeight = isMobile ? 722 : 928;
                     const targetScrollY = Math.max(0, finalBox.y + (finalBox.height / 2) - (viewportHeight / 2));
 
                     await page.evaluate((y) => window.scrollTo(0, y), targetScrollY);
-                    await page.waitForTimeout(3000); // Wait for iframe banner to fully render before screenshot
+                    await page.waitForTimeout(3000);
 
                     const screenshotBuffer = await page.screenshot({ type: 'png' });
                     await browser.close();
@@ -298,51 +312,47 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
                     const finalImage = await compositeStudioImage(screenshotBuffer, campaign.url, isMobile);
                     return await saveCapture(campaign, finalImage, campaignId);
                 } else {
-                    console.log('[Nexus] Box inválido.');
-                    nexusLogStore.addLog('Nexus: Elemento sem área visível.', 'ERROR');
+                    console.log('[Nexus] Box inválido para seletor.');
+                    await nexusLogStore.addLog('Nexus: Seletor localizado mas sem área visível', 'ERROR', undefined, campaignId);
                 }
             } catch (selError) {
-                console.warn('[Nexus] Falha no seletor:', selError);
-                nexusLogStore.addLog(`Nexus: Erro no seletor (${(selError as Error).message}).`, 'ERROR');
+                const msg = selError instanceof Error ? selError.message : String(selError);
+                console.warn('[Nexus] Falha no seletor:', msg);
+                await nexusLogStore.addLog(`Nexus: Falha no seletor (${msg}). Tentando Auto-Detecção...`, 'INFO', undefined, campaignId);
             }
         }
 
         // ====================================================
-        // STRATEGY 2: AUTO-DETECTION (Fallback)
+        // STRATEGY 2: AUTO-DETECTION
         // ====================================================
-        // Since we already scrolled, we can just scan now
         console.log('[Nexus] Iniciando Auto-Detecção...')
-        nexusLogStore.addLog('Nexus: Tentando detecção automática...', 'SYSTEM');
+        await nexusLogStore.addLog('Nexus: Iniciando script de detecção automática', 'SYSTEM', undefined, campaignId);
 
-        // Executa o script de detecção PARA OBTER LISTA DE CANDIDATOS
         const candidates = await page.evaluate<BannerCandidate[]>(eval(FIND_BANNER_SCRIPT), [targetW, targetH]);
 
         if (!candidates || candidates.length === 0) {
             console.log('[Nexus] Nenhum banner encontrado via script')
             await browser.close();
-            nexusLogStore.addLog('Nexus: Banner não localizado', 'ERROR');
+            await nexusLogStore.addLog('Nexus: Nenhum candidato a banner encontrado na página', 'ERROR', undefined, campaignId);
             return { success: false, error: 'Banner não localizado na página' };
         }
 
-        console.log(`[Nexus] ${candidates.length} candidatos encontrados.Verificando conteúdo...`);
+        console.log(`[Nexus] ${candidates.length} candidatos encontrados.`);
+        await nexusLogStore.addLog(`Nexus: ${candidates.length} candidatos identificados. Analisando conteúdo...`, 'SYSTEM', undefined, campaignId);
 
         let bestCandidate = null;
         let fallbackCandidate = null;
         let largestSizeKB = 0;
 
-        // VERIFICAÇÃO DE CONTEÚDO (evitar banners vazios/brancos)
-        nexusLogStore.addLog(`Nexus: Analisando ${candidates.length} candidatos...`, 'SYSTEM');
-
-        const MIN_STRICT_KB = 0.5; // Limite primário (500 bytes)
-        const MIN_FALLBACK_KB = 0.1; // Limite de emergência (100 bytes)
+        const MIN_STRICT_KB = 0.5;
+        const MIN_FALLBACK_KB = 0.1;
 
         for (const [index, candidate] of candidates.entries()) {
             console.log(`[Nexus] Verificando candidato #${index + 1}: ${Math.round(candidate.width)}x${Math.round(candidate.height)}`);
 
             try {
-                // Scroll suave para o candidato para garantir renderização
                 await page.evaluate((y) => window.scrollTo(0, y), Math.max(0, candidate.y - 300));
-                await page.waitForTimeout(3000); // Wait for candidate banner rendering
+                await page.waitForTimeout(3000);
 
                 const clip = {
                     x: candidate.x,
@@ -355,72 +365,68 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
                 const sizeKB = bannerBuffer.length / 1024;
                 console.log(`[Nexus] Candidato #${index + 1} - Tamanho: ${sizeKB.toFixed(2)} KB`);
 
-                // Atualiza o melhor fallback encontrado até agora
                 if (sizeKB > largestSizeKB) {
                     largestSizeKB = sizeKB;
                     fallbackCandidate = candidate;
                 }
 
-                // Verificação Estrita
                 if (sizeKB >= MIN_STRICT_KB) {
-                    console.log(`[Nexus] Candidato #${index + 1} validado (Estrito)!`);
+                    console.log(`[Nexus] Candidato #${index + 1} validado!`);
+                    await nexusLogStore.addLog(`Nexus: Candidato #${index + 1} validado (${sizeKB.toFixed(2)} KB)`, 'INFO', undefined, campaignId);
                     bestCandidate = candidate;
                     break;
                 } else {
-                    console.log(`[Nexus] Candidato #${index + 1} leve demais (${sizeKB.toFixed(2)} KB).`);
-                    nexusLogStore.addLog(`Nexus: Bloco #${index + 1} muito leve (${sizeKB.toFixed(2)} KB)`, 'SYSTEM');
+                    await nexusLogStore.addLog(`Nexus: Candidato #${index + 1} muito leve (${sizeKB.toFixed(2)} KB)`, 'INFO', undefined, campaignId);
                 }
             } catch (e) {
                 console.warn(`[Nexus] Erro ao analisar candidato #${index + 1}:`, e);
             }
         }
 
-        // Se nenhum passou no estrito, tentamos o fallback (o maior encontrado)
         if (!bestCandidate && fallbackCandidate && largestSizeKB >= MIN_FALLBACK_KB) {
-            console.log(`[Nexus] Usando fallback: Candidato com ${largestSizeKB.toFixed(2)} KB`);
-            nexusLogStore.addLog(`Nexus: Usando material alternativo (${largestSizeKB.toFixed(2)} KB)`, 'SYSTEM');
+            console.log(`[Nexus] Usando fallback: ${largestSizeKB.toFixed(2)} KB`);
+            await nexusLogStore.addLog(`Nexus: Usando melhor material alternativo encontrado (${largestSizeKB.toFixed(2)} KB)`, 'INFO', undefined, campaignId);
             bestCandidate = fallbackCandidate;
         }
 
         if (!bestCandidate) {
-            console.log('[Nexus] Falha: Nenhum conteúdo visual detectado em nenhum candidato.');
+            console.log('[Nexus] Falha: Nenhum conteúdo visual detectado.');
             await browser.close();
-            nexusLogStore.addLog('Nexus: Nenhum conteúdo visual detectado', 'ERROR');
+            await nexusLogStore.addLog('Nexus: Falha - Banners localizados mas parecem vazios ou invisíveis', 'ERROR', undefined, campaignId);
             return { success: false, error: 'Banners encontrados mas parecem vazios ou invisíveis' };
         }
 
-        console.log(`[Nexus] Banner FINAL: ${Math.round(bestCandidate.width)}x${Math.round(bestCandidate.height)} `);
-        nexusLogStore.addLog(`Nexus: Banner validado(${Math.round(bestCandidate.width)}x${Math.round(bestCandidate.height)})`, 'SYSTEM');
-
-        // ====================================================
-        // CENTRALIZAÇÃO INTELIGENTE
-        // ====================================================
         const viewportHeight = isMobile ? 722 : 928;
         const targetScrollY = Math.max(0, bestCandidate.y + (bestCandidate.height / 2) - (viewportHeight / 2));
 
         console.log(`[Nexus] Scroll final para Y = ${Math.round(targetScrollY)} `);
         await page.evaluate((y) => window.scrollTo(0, y), targetScrollY);
 
-        // Wait for potential sticky headers/animations to settle
-        await page.waitForTimeout(6000); // Extended wait for iframe banners to fully render before final screenshot
+        await page.waitForTimeout(6000);
 
-        // Take screenshot
-        console.log('[Nexus] Capturando...')
+        console.log('[Nexus] Capturando screenshot final...')
         const screenshotBuffer = await page.screenshot({ type: 'png' });
         await browser.close();
 
+        await nexusLogStore.addLog('Nexus: Browser finalizado. Iniciando composição estética...', 'SYSTEM', undefined, campaignId);
         const finalImage = await compositeStudioImage(screenshotBuffer, campaign.url, isMobile);
+
         return await saveCapture(campaign, finalImage, campaignId);
 
     } catch (err) {
         if (browser) await browser.close();
+        const msg = err instanceof Error ? err.message : String(err);
+        const stack = err instanceof Error ? err.stack : undefined;
         console.error('[Capture Error]', err);
-        return { success: false, error: String(err) };
+        await nexusLogStore.addLog(`Nexus: Erro fatal durante a captura`, 'ERROR', `${msg}\n\nStack: ${stack}`, campaignId);
+        return { success: false, error: msg };
     }
 }
 
 async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: string) {
     try {
+        await nexusLogStore.addLog(`Nexus: Iniciando upload para o Supabase Storage...`, 'SYSTEM', undefined, campaignId);
+
         // 1. Prepare filename and path
         const filename = `${campaignId}_${Date.now()}.png`;
         const safeAgency = (campaign.agency || 'Unknown').replace(/\W/g, '_');
@@ -439,7 +445,9 @@ async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: strin
 
         if (uploadError) {
             console.error('[Nexus Storage Error]', uploadError);
-            throw new Error(`Falha no upload para o Storage: ${uploadError.message}`);
+            const msg = `Falha no upload para o Storage: ${uploadError.message}`;
+            await nexusLogStore.addLog(`Nexus: Erro no Storage`, 'ERROR', msg, campaignId);
+            throw new Error(msg);
         }
 
         // 3. Get Public URL
@@ -447,30 +455,47 @@ async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: strin
             .from('screenshots')
             .getPublicUrl(storagePath);
 
+        console.log(`[Nexus] URL Pública gerada: ${publicUrl}`);
+        await nexusLogStore.addLog(`Nexus: Upload concluído. Salvando no banco de dados...`, 'SYSTEM', publicUrl, campaignId);
+
         // 4. Save to database using transaction
         await prisma.$transaction([
             prisma.capture.create({
                 data: {
                     campaignId,
                     screenshotPath: publicUrl,
-                    status: 'SUCCESS'
+                    status: 'SUCCESS',
+                    auditNotes: 'Captura realizada com sucesso via Nexus Engine Cloud.'
                 }
             }),
             prisma.campaign.update({
                 where: { id: campaignId },
                 data: {
                     status: 'SUCCESS',
-                    lastCaptureAt: new Date()
+                    lastCaptureAt: new Date(),
+                    retryCount: 0
                 }
             })
         ]);
 
-        nexusLogStore.addLog(`Nexus: Captura concluída e enviada para nuvem!`, 'SYSTEM');
+        await nexusLogStore.addLog(`Nexus: Processo finalizado com sucesso!`, 'SUCCESS', undefined, campaignId);
         return { success: true, filePath: publicUrl };
 
     } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
         console.error('[Nexus saveCapture Error]', err);
-        nexusLogStore.addLog(`Nexus: Erro ao salvar captura (${(err as Error).message})`, 'ERROR');
+        await nexusLogStore.addLog(`Nexus: Erro ao salvar captura final`, 'ERROR', msg, campaignId);
+
+        // Ensure failed state in database
+        try {
+            await prisma.campaign.update({
+                where: { id: campaignId },
+                data: { status: 'FAILED' }
+            });
+        } catch (dbErr) {
+            console.error('[Nexus saveCapture DB Fallback Error]', dbErr);
+        }
+
         throw err;
     }
 }

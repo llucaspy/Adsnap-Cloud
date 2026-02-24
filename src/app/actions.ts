@@ -469,20 +469,42 @@ export async function deleteCapture(id: string) {
     }
 }
 
-export async function getAdminMetrics() {
+export async function getStorageUsage() {
     try {
-        // 1. Supabase Storage (already implemented logic)
-        const storageResult = await (prisma as any).$queryRawUnsafe<any[]>(
+        const result = await (prisma as any).$queryRawUnsafe(
             `SELECT SUM((metadata->>'size')::bigint) as total_size 
              FROM storage.objects 
              WHERE bucket_id = 'screenshots'`
-        )
+        ) as any[]
+        const bytesUsed = Number(result[0]?.total_size || 0)
+        const totalLimit = 1024 * 1024 * 1024 // 1GB
+        const percentage = (bytesUsed / totalLimit) * 100
+        return {
+            used: bytesUsed,
+            limit: totalLimit,
+            percentage: Math.min(percentage, 100),
+            formattedUsed: (bytesUsed / (1024 * 1024)).toFixed(2) + ' MB'
+        }
+    } catch (error) {
+        console.error('[Actions] Error fetching storage usage:', error)
+        return { used: 0, limit: 1024 * 1024 * 1024, percentage: 0, formattedUsed: '0 MB' }
+    }
+}
+
+export async function getAdminMetrics() {
+    try {
+        // 1. Supabase Storage (already implemented logic)
+        const storageResult = await (prisma as any).$queryRawUnsafe(
+            `SELECT SUM((metadata->>'size')::bigint) as total_size 
+             FROM storage.objects 
+             WHERE bucket_id = 'screenshots'`
+        ) as any[]
         const storageBytes = Number(storageResult[0]?.total_size || 0)
 
         // 2. Supabase Database Size
-        const dbResult = await (prisma as any).$queryRawUnsafe<any[]>(
+        const dbResult = await (prisma as any).$queryRawUnsafe(
             `SELECT pg_database_size(current_database()) as total_size`
-        )
+        ) as any[]
         const dbBytes = Number(dbResult[0]?.total_size || 0)
 
         // 3. Resend Email Usage (Tracked via NexusLogs)

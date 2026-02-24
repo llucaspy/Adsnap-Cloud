@@ -31,11 +31,11 @@ async function monitorStorage() {
         const resend = new Resend(process.env.RESEND_API_KEY)
 
         // 1. Get total storage size
-        const result = await (prisma as any).$queryRawUnsafe<any[]>(
+        const result = await (prisma as any).$queryRawUnsafe(
             `SELECT SUM((metadata->>'size')::bigint) as total_size 
              FROM storage.objects 
              WHERE bucket_id = 'screenshots'`
-        )
+        ) as any[]
 
         const bytesUsed = Number(result[0]?.total_size || 0)
         const totalLimit = 1024 * 1024 * 1024 // 1GB in bytes

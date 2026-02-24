@@ -5,7 +5,7 @@ import { nexusLogStore } from '../lib/nexusLogStore'
 
 async function worker() {
     console.log('[Nexus Worker] Iniciando processamento de fila...')
-    nexusLogStore.addLog('Nexus Worker: Iniciando ciclo de capturas', 'SYSTEM')
+    await nexusLogStore.addLog('Nexus Worker: Iniciando ciclo de capturas', 'SYSTEM')
 
     try {
         // 1. Buscar campanhas que precisam de captura
@@ -13,20 +13,18 @@ async function worker() {
         // - Que não foram arquivadas
         const campaigns = await prisma.campaign.findMany({
             where: {
-                status: { in: ['PENDING', 'QUEUED', 'PROCESSING'] },
-                isArchived: false,
+                status: { in: ['PENDING', 'QUEUED'] },
+                isArchived: false
             },
-            orderBy: { createdAt: 'asc' }
         })
 
         if (campaigns.length === 0) {
-            console.log('[Nexus Worker] Nenhuma campanha pendente encontrada.')
-            nexusLogStore.addLog('Nexus Worker: Fila vazia', 'SYSTEM')
+            console.log('[Nexus Worker] Campanha não encontrada para debug.')
             return
         }
 
         console.log(`[Nexus Worker] Encontradas ${campaigns.length} campanhas para processar.`)
-        nexusLogStore.addLog(`Nexus Worker: Processando ${campaigns.length} itens`, 'SYSTEM')
+        await nexusLogStore.addLog(`Nexus Worker: Processando ${campaigns.length} itens`, 'SYSTEM')
 
         for (const campaign of campaigns) {
             console.log(`[Nexus Worker] Processando: ${campaign.client} - ${campaign.format}`)
@@ -52,10 +50,10 @@ async function worker() {
 
     } catch (error) {
         console.error('[Nexus Worker] Erro fatal no worker:', error)
-        nexusLogStore.addLog('Nexus Worker: Erro fatal durante a execução', 'ERROR')
+        await nexusLogStore.addLog('Nexus Worker: Erro fatal durante a execução', 'ERROR')
     } finally {
         console.log('[Nexus Worker] Ciclo finalizado.')
-        nexusLogStore.addLog('Nexus Worker: Ciclo finalizado', 'SYSTEM')
+        await nexusLogStore.addLog('Nexus Worker: Ciclo finalizado', 'SYSTEM')
         await prisma.$disconnect()
     }
 }

@@ -38,6 +38,11 @@
     "**/*.mts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "check-*.ts",
+    "test-*.ts",
+    "test-*.js",
+    "migrate-*.js",
+    "*.js"
   ]
 }

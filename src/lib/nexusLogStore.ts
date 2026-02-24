@@ -1,7 +1,11 @@
+import prisma from './prisma';
+
 type NexusLog = {
     message: string;
     timestamp: number;
     type: 'INFO' | 'SUCCESS' | 'ERROR' | 'SYSTEM';
+    details?: string;
+    campaignId?: string;
 };
 
 class NexusLogStore {
@@ -18,15 +22,33 @@ class NexusLogStore {
         return NexusLogStore.instance;
     }
 
-    public addLog(message: string, type: NexusLog['type'] = 'INFO') {
+    public async addLog(message: string, type: NexusLog['type'] = 'INFO', details?: string, campaignId?: string) {
+        // Log to memory (for UI)
         this.logs.push({
             message,
             timestamp: Date.now(),
-            type
+            type,
+            details,
+            campaignId
         });
 
         if (this.logs.length > this.MAX_LOGS) {
             this.logs.shift();
+        }
+
+        // Log to database (Persistent)
+        try {
+            await prisma.nexusLog.create({
+                data: {
+                    level: type,
+                    message,
+                    details,
+                    campaignId,
+                    createdAt: new Date()
+                }
+            });
+        } catch (err) {
+            console.error('[NexusLogStore] Failed to save log to DB:', err);
         }
     }
 

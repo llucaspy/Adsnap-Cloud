@@ -20,37 +20,10 @@ export async function POST(request: NextRequest) {
         const sanitizedEmail = String(email).trim().toLowerCase()
         console.log('[Auth API] Attempting login for:', sanitizedEmail)
 
-        // Find user by email - use any cast because Prisma generate is failing to update types
-        let user: any = null
-        try {
-            // Tenta usar o modelo padrão (pode falhar se o client estiver desatualizado)
-            if ((prisma as any).user) {
-                user = await (prisma as any).user.findUnique({
-                    where: { email: sanitizedEmail }
-                })
-                console.log('[Auth API] User found via prisma.user')
-            } else {
-                console.warn('[Auth API] prisma.user is undefined, falling back to queryRaw')
-                const users = await (prisma as any).$queryRawUnsafe(
-                    `SELECT * FROM "User" WHERE email = ? LIMIT 1`,
-                    sanitizedEmail
-                )
-                user = Array.isArray(users) ? users[0] : null
-                if (user) console.log('[Auth API] User found via $queryRaw')
-            }
-        } catch (err: any) {
-            console.error('[Auth API] Primary lookup failed, trying final fallback...', err.message)
-            try {
-                // Última tentativa com raw query direta caso a anterior falhe por sintaxe
-                const users: any = await (prisma as any).$queryRawUnsafe(
-                    `SELECT * FROM User WHERE email = '${sanitizedEmail}' LIMIT 1`
-                )
-                user = Array.isArray(users) ? users[0] : null
-            } catch (fallbackErr: any) {
-                console.error('[Auth API] Final fallback failed:', fallbackErr.message)
-                return NextResponse.json({ error: 'Erro crítico no banco: ' + fallbackErr.message }, { status: 500 })
-            }
-        }
+        // Find user by email
+        let user = await prisma.user.findUnique({
+            where: { email: sanitizedEmail }
+        })
 
         if (!user) {
             console.warn('[Auth API] User not found:', sanitizedEmail)

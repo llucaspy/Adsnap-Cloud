@@ -1,4 +1,17 @@
-const jwt = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indkb3VmeXRnaWtsZ2dzaXpnZ2lhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE5NDIxMjIsImV4cCI6MjA4NzUxODEyMn0.ynG9VfAkFyOHcyO_ZRIAONX9mCtqXbSxQTnSV7woV3Q';
-const payload = jwt.split('.')[1];
-const decoded = Buffer.from(payload, 'base64').toString();
-console.log(decoded);
+const key = process.argv[2];
+if (!key) {
+    console.log('Usage: node decode-jwt.js <key>');
+    process.exit(1);
+}
+
+try {
+    const parts = key.split('.');
+    if (parts.length !== 3) {
+        console.log('Invalid JWT format');
+        process.exit(1);
+    }
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+    console.log(JSON.stringify(payload, null, 2));
+} catch (e) {
+    console.error('Error decoding JWT:', e.message);
+}
