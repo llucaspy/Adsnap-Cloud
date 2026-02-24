@@ -1,5 +1,4 @@
 import prisma from '@/lib/prisma'
-import fs from 'fs'
 import { startOfDay } from 'date-fns'
 import { NexusCore } from '@/components/NexusCore'
 import { LiveMetricStream } from '@/components/LiveMetricStream'
@@ -13,45 +12,51 @@ export const dynamic = 'force-dynamic'
 export default async function PresentationHome() {
   const today = startOfDay(new Date())
 
-  // Fetch Stats for the Live Stream
-  const [totalToday, failedToday, rawRecentCaptures] = await Promise.all([
-    prisma.capture.count({ where: { createdAt: { gte: today }, status: 'SUCCESS' } }),
-    prisma.capture.count({ where: { createdAt: { gte: today }, status: 'FAILED' } }),
-    prisma.capture.findMany({
-      take: 20, // Fetch more to allow for filtering
-      orderBy: { createdAt: 'desc' },
-      include: { campaign: true }
-    })
-  ])
+  // Default Stats if DB fails
+  let stats = {
+    totalCapturesToday: 0,
+    activePis: 0,
+    activeCampaigns: 0,
+    totalFormats: 0,
+    successRate: 100
+  }
+  let recentCaptures: any[] = []
 
-  // Fetch Campaigns for Stats
-  const campaigns = await prisma.campaign.findMany({
-    where: { isArchived: false }
-  })
+  try {
+    // Fetch Stats for the Live Stream
+    const [totalToday, failedToday, rawRecentCaptures] = await Promise.all([
+      prisma.capture.count({ where: { createdAt: { gte: today }, status: 'SUCCESS' } }).catch(() => 0),
+      prisma.capture.count({ where: { createdAt: { gte: today }, status: 'FAILED' } }).catch(() => 0),
+      prisma.capture.findMany({
+        take: 10,
+        orderBy: { createdAt: 'desc' },
+        include: { campaign: true }
+      }).catch(() => [])
+    ])
 
-  // Calculate Aggregated Stats
-  const distinctPis = new Set(campaigns.map(c => c.pi)).size
-  // Campaign is distinct combination of PI + CampaignName
-  const distinctCampaigns = new Set(campaigns.map(c => `${c.pi}-${c.campaignName}`)).size
-  const totalFormats = campaigns.length
+    // Fetch Campaigns for Stats
+    const campaigns = await prisma.campaign.findMany({
+      where: { isArchived: false }
+    }).catch(() => [])
 
-  // Filter out captures where the file doesn't exist on disk
-  const recentCaptures = rawRecentCaptures.filter(capture => {
-    try {
-      return fs.existsSync(capture.screenshotPath)
-    } catch {
-      return false
+    // Calculate Aggregated Stats
+    const distinctPis = new Set((campaigns as any[]).map(c => c.pi)).size
+    const distinctCampaigns = new Set((campaigns as any[]).map(c => `${c.pi}-${c.campaignName}`)).size
+    const totalFormats = (campaigns as any[]).length
+
+    recentCaptures = (rawRecentCaptures as any[])
+
+    stats = {
+      totalCapturesToday: totalToday,
+      activePis: distinctPis,
+      activeCampaigns: distinctCampaigns,
+      totalFormats: totalFormats,
+      successRate: totalToday + failedToday > 0
+        ? Math.round((totalToday / (totalToday + failedToday)) * 100)
+        : 100
     }
-  }).slice(0, 10)
-
-  const stats = {
-    totalCapturesToday: totalToday,
-    activePis: distinctPis,
-    activeCampaigns: distinctCampaigns,
-    totalFormats: totalFormats,
-    successRate: totalToday + failedToday > 0
-      ? Math.round((totalToday / (totalToday + failedToday)) * 100)
-      : 100
+  } catch (err) {
+    console.error('[LandingPage] Failed to fetch live metrics:', err)
   }
 
   return (
