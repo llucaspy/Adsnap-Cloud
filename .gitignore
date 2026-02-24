@@ -50,3 +50,6 @@ next-env.d.ts
 .nexus-logs
 
 /Comprovantes
+
+.vercel
+.env*.local
