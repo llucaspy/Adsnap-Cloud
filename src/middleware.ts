@@ -8,6 +8,7 @@ function getJwtSecret() {
 
 // Rotas públicas que NÃO exigem autenticação
 const PUBLIC_ROUTES = [
+    '/',
     '/login',
     '/api/auth',
     '/api/cron',
@@ -68,6 +69,6 @@ export const config = {
          * - favicon.ico
          * - public files (images, etc.)
          */
-        '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+        '/((?!api/auth|api/cron|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
     ],
 }
