@@ -4,6 +4,8 @@ on:
   schedule:
     - cron: '*/15 * * * *' # Roda a cada 15 minutos
   workflow_dispatch: # Permite rodar manualmente
+  repository_dispatch: # Permite gatilhos externos via API
+    types: [nexus-trigger]
 
 jobs:
   nexus-capture:

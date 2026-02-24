@@ -11,9 +11,19 @@ export async function getNexusActivity() {
 }
 
 export async function runCapture(campaignId: string) {
-    const result = await processCampaign(campaignId)
+    // On Vercel, we only queue. The GitHub worker will do the actual capture.
+    await prisma.campaign.update({
+        where: { id: campaignId },
+        data: { status: 'QUEUED' }
+    })
+
+    nexusLogStore.addLog(`Nexus: Campanha individual enfileirada.`, 'SYSTEM')
+
+    // Attempt to trigger worker immediately
+    await triggerNexusWorker()
+
     revalidatePath('/')
-    return result
+    return { success: true, message: 'Capture queued for GitHub Worker' }
 }
 
 export async function getCampaignDetailsByPi(pi: string) {
@@ -274,27 +284,65 @@ export async function runAllCaptures() {
 
     // Mark as QUEUED
     nexusLogStore.addLog(`Nexus: Lote de ${campaigns.length} capturas enfileirado manualmente.`, 'SYSTEM')
-    // Using a loop instead of updateMany if the latter is missing on the proxy
-    for (const c of campaigns) {
-        await (prisma as any).campaign.update({
-            where: { id: c.id },
-            data: { status: 'QUEUED' }
-        })
+
+    // Batch update to QUEUED
+    await prisma.campaign.updateMany({
+        where: { id: { in: campaigns.map((c: any) => c.id) } },
+        data: { status: 'QUEUED' }
+    })
+
+    // Trigger GitHub Worker
+    await triggerNexusWorker()
+
+    revalidatePath('/')
+    return { success: true, count: campaigns.length }
+}
+
+/**
+ * Triggers the GitHub Actions worker immediately via workflow_dispatch.
+ * Requires GITHUB_TOKEN and GITHUB_REPO to be set in Vercel.
+ */
+export async function triggerNexusWorker() {
+    const token = process.env.GITHUB_TOKEN
+    const repo = process.env.GITHUB_REPO // Format: "owner/repo"
+
+    if (!token || !repo) {
+        console.warn('[Nexus] Missing GITHUB_TOKEN or GITHUB_REPO. Skipping manual trigger.')
+        nexusLogStore.addLog('Nexus: Gatilho manual ignorado (Faltam chaves do GitHub)', 'INFO')
+        return false
     }
 
-    // Process sequentially in background
-    (async () => {
-        for (const campaign of campaigns) {
-            await prisma.campaign.update({
-                where: { id: campaign.id },
-                data: { status: 'PROCESSING' }
-            })
-            await processCampaign(campaign.id)
-            await new Promise(resolve => setTimeout(resolve, 2000))
-        }
-    })()
+    try {
+        console.log(`[Nexus] Triggering GitHub worker for ${repo}...`)
+        const response = await fetch(
+            `https://api.github.com/repos/${repo}/actions/workflows/nexus-worker.yml/dispatches`,
+            {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Accept': 'application/vnd.github+json',
+                    'X-GitHub-Api-Version': '2022-11-28'
+                },
+                body: JSON.stringify({
+                    ref: 'main' // Trigger the main branch
+                })
+            }
+        )
 
-    return { success: true, count: campaigns.length }
+        if (response.ok) {
+            console.log('[Nexus] GitHub worker triggered successfully.')
+            nexusLogStore.addLog('Nexus: Worker disparado com sucesso no GitHub', 'SUCCESS')
+            return true
+        } else {
+            const error = await response.text()
+            console.error('[Nexus] GitHub trigger failed:', error)
+            nexusLogStore.addLog(`Nexus: Falha ao disparar GitHub Worker: ${response.status}`, 'ERROR')
+            return false
+        }
+    } catch (err) {
+        console.error('[Nexus] Error triggering GitHub worker:', err)
+        return false
+    }
 }
 
 export async function bulkCreateCampaigns(campaigns: any[]) {

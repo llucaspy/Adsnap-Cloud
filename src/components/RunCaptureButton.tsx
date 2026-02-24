@@ -9,11 +9,11 @@ export function RunCaptureButton({ id, variant = 'compact' }: { id: string, vari
 
     const handleClick = () => {
         startTransition(async () => {
-            const result = await runCapture(id)
+            const result = await runCapture(id) as any
             if (result.success) {
-                // Could show a toast here
+                // Success - the worker was triggered
             } else {
-                alert('Erro: ' + result.error)
+                alert('Erro: ' + (result.message || result.error || 'Falha ao enfileirar'))
             }
         })
     }
