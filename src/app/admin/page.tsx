@@ -3,6 +3,8 @@ import { getSession } from '@/lib/auth'
 import { AdminView } from '@/components/AdminView'
 import { MetricsDashboard } from '@/components/MetricsDashboard'
 
+export const dynamic = 'force-dynamic'
+
 export default async function AdminPage() {
     const session = await getSession()
 

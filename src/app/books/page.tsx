@@ -7,6 +7,8 @@ import Link from 'next/link'
 import { BackToTopButton } from '@/components/BackToTopButton'
 import { PIFolderCard } from '@/components/PIFolderCard'
 
+export const dynamic = 'force-dynamic'
+
 export default async function BooksPage() {
     // 1. Fetch all captures from non-archived campaigns
     const captures = await prisma.capture.findMany({

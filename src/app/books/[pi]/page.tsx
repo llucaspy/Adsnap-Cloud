@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { BookCampaignList } from '@/components/BookCampaignList'
 
+export const dynamic = 'force-dynamic'
+
 export default async function PiDetailPage({ params }: { params: Promise<{ pi: string }> }) {
     const { pi } = await params
 

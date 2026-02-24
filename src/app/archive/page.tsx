@@ -4,6 +4,8 @@ import { RotateCcw, Trash2, History, Clock } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
+export const dynamic = 'force-dynamic'
+
 export default async function ArchivePage() {
     const campaigns = await prisma.campaign.findMany({
         where: { isArchived: true },

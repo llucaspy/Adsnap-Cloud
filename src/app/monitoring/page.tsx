@@ -1,6 +1,8 @@
 import prisma from '@/lib/prisma'
 import { MonitoringView } from '@/components/MonitoringView'
 
+export const dynamic = 'force-dynamic'
+
 export default async function MonitoringPage() {
     // Data fetching on server
     const campaigns = await prisma.campaign.findMany({

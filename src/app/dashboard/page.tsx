@@ -3,6 +3,8 @@ import prisma from '@/lib/prisma'
 import fs from 'fs'
 import { startOfDay } from 'date-fns'
 
+export const dynamic = 'force-dynamic'
+
 export default async function DashboardPage() {
     const today = startOfDay(new Date())
 

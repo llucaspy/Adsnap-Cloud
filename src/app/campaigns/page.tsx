@@ -2,6 +2,8 @@ import prisma from '@/lib/prisma'
 import { CreateCampaignFlow } from '@/components/CreateCampaignFlow'
 import { Sparkles, Zap } from 'lucide-react'
 
+export const dynamic = 'force-dynamic'
+
 export default async function CampaignsPage() {
     const existingCampaigns = await prisma.campaign.findMany({
         select: { pi: true },
