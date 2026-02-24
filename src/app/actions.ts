@@ -326,7 +326,8 @@ export async function triggerNexusWorker() {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Accept': 'application/vnd.github+json',
-                    'X-GitHub-Api-Version': '2022-11-28'
+                    'X-GitHub-Api-Version': '2022-11-28',
+                    'User-Agent': 'Adsnap-Nexus-Agent'
                 },
                 body: JSON.stringify({
                     ref: 'main' // Trigger the main branch
