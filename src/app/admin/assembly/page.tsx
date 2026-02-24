@@ -2,6 +2,8 @@ import { redirect } from 'next/navigation'
 import { getSession } from '@/lib/auth'
 import { AssemblyView } from '@/components/AssemblyView'
 
+export const dynamic = 'force-dynamic'
+
 export default async function AssemblyPage() {
     const session = await getSession()
 

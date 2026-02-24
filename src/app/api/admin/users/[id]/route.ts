@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+
+export const dynamic = 'force-dynamic'
 import { requireAdmin, hashPassword } from '@/lib/auth'
 
 // PUT /api/admin/users/[id] — Update user (admin only)
