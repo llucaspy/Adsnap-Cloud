@@ -477,6 +477,16 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
 
     } catch (error) {
         console.error('Nexus AI Error:', error)
+        const errorMsg = error instanceof Error ? error.message : String(error)
+
+        // Log to persistent store
+        try {
+            const { nexusLogStore } = await import('@/lib/nexusLogStore')
+            await nexusLogStore.addLog(`Nexus AI: Falha ao processar comando - ${errorMsg}`, 'ERROR')
+        } catch (logErr) {
+            console.error('Failed to log AI error:', logErr)
+        }
+
         return { message: "Erro interno nos circuitos neurais. Tente novamente.", success: false }
     }
 }

@@ -3,7 +3,6 @@
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { processCampaign } from '@/lib/captureService'
 import { nexusLogStore } from '@/lib/nexusLogStore'
 
 export async function getNexusActivity() {
