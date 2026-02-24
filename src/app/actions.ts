@@ -304,12 +304,17 @@ export async function runAllCaptures() {
  */
 export async function triggerNexusWorker() {
     const token = process.env.GITHUB_TOKEN
-    const repo = process.env.GITHUB_REPO // Format: "owner/repo"
+    let repo = process.env.GITHUB_REPO // Expected: "owner/repo"
 
     if (!token || !repo) {
         console.warn('[Nexus] Missing GITHUB_TOKEN or GITHUB_REPO. Skipping manual trigger.')
         nexusLogStore.addLog('Nexus: Gatilho manual ignorado (Faltam chaves do GitHub)', 'INFO')
         return false
+    }
+
+    // Sanitize repo if it's a full URL
+    if (repo.includes('github.com/')) {
+        repo = repo.split('github.com/')[1].replace(/\/$/, '').replace(/\.git$/, '')
     }
 
     try {
