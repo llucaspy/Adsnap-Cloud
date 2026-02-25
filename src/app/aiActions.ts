@@ -487,6 +487,6 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
             console.error('Failed to log AI error:', logErr)
         }
 
-        return { message: "Erro interno nos circuitos neurais. Tente novamente.", success: false }
+        return { message: `Erro interno nos circuitos neurais: ${errorMsg}`, success: false }
     }
 }

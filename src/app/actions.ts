@@ -19,7 +19,10 @@ export async function runCapture(campaignId: string) {
     nexusLogStore.addLog(`Nexus: Campanha individual enfileirada.`, 'SYSTEM')
 
     // Attempt to trigger worker immediately
-    await triggerNexusWorker()
+    const triggered = await triggerNexusWorker()
+    if (!triggered) {
+        nexusLogStore.addLog('Nexus: Worker não disparado (verifique GITHUB_TOKEN e GITHUB_REPO)', 'ERROR')
+    }
 
     revalidatePath('/')
     return { success: true, message: 'Capture queued for GitHub Worker' }
@@ -291,7 +294,10 @@ export async function runAllCaptures() {
     })
 
     // Trigger GitHub Worker
-    await triggerNexusWorker()
+    const triggered = await triggerNexusWorker()
+    if (!triggered) {
+        nexusLogStore.addLog('Nexus: Worker não disparado (verifique GITHUB_TOKEN e GITHUB_REPO)', 'ERROR')
+    }
 
     revalidatePath('/')
     return { success: true, count: campaigns.length }
