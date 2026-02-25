@@ -15,7 +15,7 @@ export function NeuralActivityFeed() {
         const fetchActivity = async () => {
             try {
                 const data = await getNexusActivity()
-                if (data.length > 0) {
+                if (data && data.length > 0) {
                     setLogs(data)
                     setIsIdle(false)
                 } else {
@@ -26,7 +26,8 @@ export function NeuralActivityFeed() {
             }
         }
 
-        const interval = setInterval(fetchActivity, 2000)
+        fetchActivity()
+        const interval = setInterval(fetchActivity, 3000) // 3s polling for "stream" feel
         return () => clearInterval(interval)
     }, [])
 
@@ -63,14 +64,19 @@ export function NeuralActivityFeed() {
                     </div>
                 ) : (
                     logs.map((log, i) => (
-                        <div
-                            key={i}
-                            className={`transition-all duration-300 ${i === logs.length - 1 ? 'text-accent-light font-bold bg-accent/5 py-0.5 px-2 rounded-sm' : 'text-white/60'}`}
-                        >
-                            <span className="opacity-50 mr-2 font-normal">
-                                {mounted ? `[${new Date(log.timestamp).toLocaleTimeString()}]` : '[--:--:--]'}
-                            </span>
-                            {log.message}
+                        <div key={i} className={`font-mono text-[9px] border-l-2 pl-3 py-1.5 transition-all animate-in fade-in slide-in-from-left-2 duration-300 ${i === logs.length - 1 ? 'border-accent bg-accent/5' : 'border-white/10'}`}>
+                            <div className="flex items-center gap-2 mb-0.5">
+                                <span className={`text-[8px] font-black uppercase tracking-widest ${log.type === 'SUCCESS' ? 'text-green-400' :
+                                        log.type === 'ERROR' ? 'text-red-400' :
+                                            log.type === 'SYSTEM' ? 'text-purple-400' : 'text-accent'
+                                    }`}>
+                                    [{log.type || 'INFO'}]
+                                </span>
+                                <span className="text-white/20 text-[7px] font-bold">
+                                    {new Date(log.timestamp).toLocaleTimeString()}
+                                </span>
+                            </div>
+                            <p className="text-white/70 leading-relaxed font-medium">{log.message}</p>
                         </div>
                     ))
                 )}

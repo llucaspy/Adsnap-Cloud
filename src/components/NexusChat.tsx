@@ -76,17 +76,23 @@ export function NexusChat() {
     useEffect(() => {
         const fetchLogs = async () => {
             try {
-                const res = await fetch('/api/nexus/logs')
-                if (!res.ok) throw new Error('Failed to fetch')
-                const data = await res.ok ? await res.json() : []
-                if (Array.isArray(data)) setLogs(data)
+                const { getNexusActivity } = await import('@/app/actions')
+                const data = await getNexusActivity()
+                if (Array.isArray(data)) {
+                    // Adapt the data format if necessary or update the rendering
+                    setLogs(data.map(d => ({
+                        message: d.message,
+                        level: d.type,
+                        createdAt: d.timestamp
+                    })).reverse()) // Most recent at the top for the chat terminal
+                }
             } catch (err) {
                 console.error('Failed to fetch nexus logs:', err)
             }
         }
 
         fetchLogs()
-        const interval = setInterval(fetchLogs, 5000)
+        const interval = setInterval(fetchLogs, 3000)
         return () => clearInterval(interval)
     }, [])
 

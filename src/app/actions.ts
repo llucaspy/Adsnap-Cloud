@@ -6,8 +6,23 @@ import { redirect } from 'next/navigation'
 import { nexusLogStore } from '@/lib/nexusLogStore'
 
 export async function getNexusActivity() {
-    return nexusLogStore.getLogs()
+    try {
+        const logs = await prisma.nexusLog.findMany({
+            take: 50,
+            orderBy: { createdAt: 'desc' }
+        });
+
+        return logs.map(log => ({
+            message: log.message,
+            type: log.level,
+            timestamp: log.createdAt.getTime()
+        })).reverse(); // Reverse to show chronological order in the feed
+    } catch (error) {
+        console.error('[Actions] Failed to fetch nexus activity:', error);
+        return [];
+    }
 }
+
 
 export async function runCapture(campaignId: string) {
     // On Vercel, we only queue. The GitHub worker will do the actual capture.
