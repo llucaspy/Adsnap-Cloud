@@ -525,12 +525,31 @@ export async function deleteCapture(id: string) {
         });
 
         if (capture && capture.screenshotPath) {
-            const fs = require('fs');
-            if (fs.existsSync(capture.screenshotPath)) {
-                fs.unlinkSync(capture.screenshotPath);
-                console.log(`[Nexus] File deleted: ${capture.screenshotPath}`);
+            // 1. If it's a Supabase URL, remove from Storage
+            if (capture.screenshotPath.startsWith('http')) {
+                const { supabase } = await import('@/lib/supabase')
+                // Extract part after 'screenshots/'
+                const path = capture.screenshotPath.split('screenshots/')[1]
+                if (path) {
+                    const { error } = await supabase.storage.from('screenshots').remove([path])
+                    if (error) console.error('[Nexus Storage] Delete error:', error)
+                    else console.log(`[Nexus Storage] File removed: ${path}`)
+                }
+            }
+            // 2. Legacy fallback for local files
+            else {
+                const fs = require('fs');
+                try {
+                    if (fs.existsSync(capture.screenshotPath)) {
+                        fs.unlinkSync(capture.screenshotPath);
+                        console.log(`[Nexus] Local file deleted: ${capture.screenshotPath}`);
+                    }
+                } catch (e) {
+                    console.error('[Nexus] Local file delete fail:', e);
+                }
             }
         }
+
 
         await prisma.capture.delete({
             where: { id }
