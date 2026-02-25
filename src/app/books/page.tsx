@@ -27,9 +27,8 @@ export default async function BooksPage() {
 
     // 2. Group by day AND PI
     const groupedCaptures = captures.reduce((acc: any, capture: any) => {
-        if (!fs.existsSync(capture.screenshotPath)) return acc
-
         const dateKey = format(capture.createdAt, 'yyyy-MM-dd')
+
         if (!acc[dateKey]) {
             acc[dateKey] = {
                 date: capture.createdAt,

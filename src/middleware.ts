@@ -13,6 +13,7 @@ const PUBLIC_ROUTES = [
     '/api/auth',
     '/api/cron',
     '/api/debug',
+    '/api/nexus',
 ]
 
 function isPublicRoute(pathname: string): boolean {
