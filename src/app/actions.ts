@@ -312,8 +312,12 @@ export async function triggerNexusWorker() {
     let repo = process.env.GITHUB_REPO // Expected: "owner/repo"
 
     if (!token || !repo) {
-        console.warn('[Nexus] Missing GITHUB_TOKEN or GITHUB_REPO. Skipping manual trigger.')
-        nexusLogStore.addLog('Nexus: Gatilho manual ignorado (Faltam chaves do GitHub)', 'INFO')
+        const missing = [];
+        if (!token) missing.push('GITHUB_TOKEN');
+        if (!repo) missing.push('GITHUB_REPO');
+
+        console.warn(`[Nexus] Missing environment variables: ${missing.join(', ')}. Skipping manual trigger.`);
+        nexusLogStore.addLog(`Nexus: Gatilho manual ignorado (Faltam chaves: ${missing.join(', ')})`, 'INFO');
         return false
     }
 

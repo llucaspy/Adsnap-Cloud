@@ -12,6 +12,7 @@ const PUBLIC_ROUTES = [
     '/login',
     '/api/auth',
     '/api/cron',
+    '/api/debug',
 ]
 
 function isPublicRoute(pathname: string): boolean {

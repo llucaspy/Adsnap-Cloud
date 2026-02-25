@@ -21,6 +21,9 @@ export function NexusChat() {
     const [pendingCampaigns, setPendingCampaigns] = useState<any[]>([])
     const [showPreview, setShowPreview] = useState(false)
     const [queueStatus, setQueueStatus] = useState<{ client: string, status: string, count: number } | null>(null)
+    const [logs, setLogs] = useState<any[]>([])
+    const [showLogs, setShowLogs] = useState(false)
+
 
     useEffect(() => {
         if (scrollRef.current) {
@@ -71,20 +74,20 @@ export function NexusChat() {
     // while ANY page is open.
     // =====================================================
     useEffect(() => {
-        const triggerCron = async () => {
+        const fetchLogs = async () => {
             try {
-                await fetch('/api/cron/process')
-                console.log('[NexusSync] Global Cron trigger sent.')
+                const res = await fetch('/api/nexus/logs')
+                if (!res.ok) throw new Error('Failed to fetch')
+                const data = await res.ok ? await res.json() : []
+                if (Array.isArray(data)) setLogs(data)
             } catch (err) {
-                console.error('[NexusSync] Failed to trigger global cron:', err)
+                console.error('Failed to fetch nexus logs:', err)
             }
         }
 
-        // Run immediately on mount, then every 60 seconds
-        triggerCron()
-        const cronInterval = setInterval(triggerCron, 60000) // 60 seconds
-
-        return () => clearInterval(cronInterval)
+        fetchLogs()
+        const interval = setInterval(fetchLogs, 5000)
+        return () => clearInterval(interval)
     }, [])
 
     const handleSend = async (customPrompt?: string) => {
@@ -201,41 +204,73 @@ export function NexusChat() {
                             </div>
                         </div>
                     </div>
-                    <button
-                        onClick={() => setMessages([messages[0]])}
-                        className="w-10 h-10 rounded-xl bg-white/5 hover:bg-red-500/20 text-white/20 hover:text-red-400 transition-all flex items-center justify-center"
-                    >
-                        <Trash2 size={16} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setShowLogs(!showLogs)}
+                            className={`w-10 h-10 rounded-xl transition-all flex items-center justify-center border ${showLogs ? 'bg-accent/20 border-accent/40 text-accent' : 'bg-white/5 border-white/10 text-white/20 hover:text-white'}`}
+                        >
+                            <MessageSquare size={16} />
+                        </button>
+                        <button
+                            onClick={() => setMessages([messages[0]])}
+                            className="w-10 h-10 rounded-xl bg-white/5 hover:bg-red-500/20 text-white/20 hover:text-red-400 transition-all border border-white/10 flex items-center justify-center"
+                        >
+                            <Trash2 size={16} />
+                        </button>
+                    </div>
                 </div>
 
                 {/* Messages Area */}
-                <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
-                    {messages.map((msg, i) => (
-                        <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-4 duration-500`}>
-                            <div className={`max-w-[85%] relative ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
-                                <div
-                                    className={`p-3 rounded-xl text-[12px] font-medium leading-relaxed transition-all shadow-lg ${msg.role === 'user'
-                                        ? 'bg-accent text-white rounded-tr-none'
-                                        : 'bg-white/5 text-white/90 rounded-tl-none border border-white/10'
-                                        }`}
-                                >
-                                    {msg.content}
-
-                                    {msg.type === 'action' && (
-                                        <div className="mt-2 pt-2 border-t border-white/5 flex items-center gap-1.5 text-[8px] font-black text-accent uppercase tracking-widest">
-                                            <Zap size={8} className="animate-pulse" />
-                                            Confirmado
-                                        </div>
-                                    )}
-                                </div>
-                                <span className="text-[7px] font-black text-white/10 uppercase tracking-widest mt-1.5 block">
-                                    {msg.role === 'user' ? 'Usuário' : 'Nexus'}
-                                </span>
+                <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar relative">
+                    {showLogs ? (
+                        <div className="space-y-3 animate-in fade-in duration-500">
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-[10px] font-black text-accent uppercase tracking-widest">Logs do Nexus</span>
+                                <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />
                             </div>
+                            {logs.length === 0 ? (
+                                <div className="text-[10px] text-white/20 font-medium italic py-10 text-center">Nenhum evento registrado...</div>
+                            ) : (
+                                logs.map((log, i) => (
+                                    <div key={i} className="font-mono text-[9px] border-l border-white/10 pl-3 py-1">
+                                        <div className="flex items-center gap-2 mb-0.5">
+                                            <span className={`text-[8px] font-bold ${log.level === 'SUCCESS' ? 'text-green-400' : log.level === 'ERROR' ? 'text-red-400' : 'text-accent'}`}>
+                                                [{log.level}]
+                                            </span>
+                                            <span className="text-white/20">{new Date(log.createdAt).toLocaleTimeString()}</span>
+                                        </div>
+                                        <p className="text-white/60 leading-relaxed font-medium">{log.message}</p>
+                                    </div>
+                                ))
+                            )}
                         </div>
-                    ))}
-                    {isTyping && (
+                    ) : (
+                        messages.map((msg, i) => (
+                            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-4 duration-500`}>
+                                <div className={`max-w-[85%] relative ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
+                                    <div
+                                        className={`p-3 rounded-xl text-[12px] font-medium leading-relaxed transition-all shadow-lg ${msg.role === 'user'
+                                            ? 'bg-accent text-white rounded-tr-none'
+                                            : 'bg-white/5 text-white/90 rounded-tl-none border border-white/10'
+                                            }`}
+                                    >
+                                        {msg.content}
+
+                                        {msg.type === 'action' && (
+                                            <div className="mt-2 pt-2 border-t border-white/5 flex items-center gap-1.5 text-[8px] font-black text-accent uppercase tracking-widest">
+                                                <Zap size={8} className="animate-pulse" />
+                                                Confirmado
+                                            </div>
+                                        )}
+                                    </div>
+                                    <span className="text-[7px] font-black text-white/10 uppercase tracking-widest mt-1.5 block">
+                                        {msg.role === 'user' ? 'Usuário' : 'Nexus'}
+                                    </span>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                    {isTyping && !showLogs && (
                         <div className="flex justify-start">
                             <div className="bg-white/5 p-3 rounded-xl rounded-tl-none border border-white/10 flex items-center gap-2.5">
                                 <div className="flex gap-1">
