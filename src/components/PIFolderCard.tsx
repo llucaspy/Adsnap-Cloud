@@ -11,12 +11,13 @@ interface PIFolderCardProps {
     captureCount: number
     thumbnailId: string
     accentColor: string
+    date: string
 }
 
-export function PIFolderCard({ pi, client, campaignName, captureCount, thumbnailId, accentColor }: PIFolderCardProps) {
+export function PIFolderCard({ pi, client, campaignName, captureCount, thumbnailId, accentColor, date }: PIFolderCardProps) {
     return (
         <Link
-            href={`/books/${pi}`}
+            href={`/books/${pi}?date=${date}`}
             className="group relative block bg-white/[0.03] border border-white/10 rounded-[2rem] overflow-hidden transition-all duration-500 hover:border-accent/40 hover:shadow-[0_20px_50px_rgba(168,85,247,0.15)] hover:translate-y-[-4px]"
         >
             {/* Hover Glow Effect */}

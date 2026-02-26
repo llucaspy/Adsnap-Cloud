@@ -5,17 +5,40 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { BookCampaignList } from '@/components/BookCampaignList'
 
+import { startOfDay, endOfDay, parse } from 'date-fns'
+
 export const dynamic = 'force-dynamic'
 
-export default async function PiDetailPage({ params }: { params: Promise<{ pi: string }> }) {
+export default async function PiDetailPage({
+    params,
+    searchParams
+}: {
+    params: Promise<{ pi: string }>,
+    searchParams: Promise<{ date?: string }>
+}) {
     const { pi } = await params
+    const { date } = await searchParams
+
+    let dateFilter = {}
+    if (date) {
+        const parsedDate = parse(date, 'yyyy-MM-dd', new Date())
+        dateFilter = {
+            createdAt: {
+                gte: startOfDay(parsedDate),
+                lte: endOfDay(parsedDate)
+            }
+        }
+    }
 
     const [campaigns, settings] = await Promise.all([
         prisma.campaign.findMany({
             where: { pi },
             include: {
                 captures: {
-                    where: { status: 'SUCCESS' },
+                    where: {
+                        status: 'SUCCESS',
+                        ...dateFilter
+                    },
                     orderBy: { createdAt: 'desc' }
                 }
             },

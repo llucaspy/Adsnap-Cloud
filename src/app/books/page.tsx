@@ -196,6 +196,7 @@ export default async function BooksPage() {
                                             captureCount={piGroup.captures.length}
                                             thumbnailId={piGroup.captures[0].id}
                                             accentColor={sectionColor}
+                                            date={group.fullDate.split('/').reverse().join('-')} // Convert dd/MM/yyyy to yyyy-MM-dd
                                         />
                                     ))}
                                 </div>
