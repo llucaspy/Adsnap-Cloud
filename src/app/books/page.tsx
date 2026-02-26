@@ -56,7 +56,10 @@ export default async function BooksPage() {
         return acc
     }, {})
 
-    const timeline = Object.values(groupedCaptures).sort((a: any, b: any) =>
+    const timeline = Object.entries(groupedCaptures).map(([dateKey, group]: [string, any]) => ({
+        ...group,
+        dateKey
+    })).sort((a: any, b: any) =>
         b.date.getTime() - a.date.getTime()
     ) as any[]
 
@@ -144,7 +147,8 @@ export default async function BooksPage() {
             )}
 
             <div className="space-y-32 relative z-10">
-                {timeline.map((group, index) => {
+                {timeline.map((group: any, index) => {
+                    const { dateKey } = group;
                     const colors = ['var(--accent)', 'var(--secondary)', 'var(--tertiary)', 'var(--success)'];
                     const sectionColor = colors[index % colors.length];
 
@@ -192,14 +196,14 @@ export default async function BooksPage() {
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
                                     {group.sortedPiGroups.map((piGroup: any) => (
                                         <PIFolderCard
-                                            key={piGroup.pi}
+                                            key={`${dateKey}-${piGroup.pi}`}
                                             pi={piGroup.pi}
                                             client={piGroup.client}
                                             campaignName={piGroup.campaignName}
                                             captureCount={piGroup.captures.length}
                                             thumbnailId={piGroup.captures[0].id}
                                             accentColor={sectionColor}
-                                            date={group.fullDate.split('/').reverse().join('-')} // Convert dd/MM/yyyy to yyyy-MM-dd
+                                            date={dateKey}
                                         />
                                     ))}
                                 </div>

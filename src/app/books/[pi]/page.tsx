@@ -21,18 +21,13 @@ export default async function PiDetailPage({
 
     let dateFilter = {}
     if (date) {
-        // Force the date range to match Brazil Time (UTC-3)
-        // Regardless of where the server (Vercel) is located.
-        const parsedDate = parse(date, 'yyyy-MM-dd', new Date())
+        // Robust construction using ISO strings to be absolutely independent 
+        // of server local time. 00:00 BRT = 03:00 UTC.
+        // date is "YYYY-MM-DD"
+        const brtStart = new Date(`${date}T03:00:00.000Z`)
 
-        // Start: yyyy-MM-dd 00:00:00 BRT = 03:00:00 UTC
-        const brtStart = new Date(parsedDate)
-        brtStart.setUTCHours(3, 0, 0, 0)
-
-        // End: yyyy-MM-dd 23:59:59 BRT = 02:59:59 UTC (Next Day)
-        const brtEnd = new Date(parsedDate)
-        brtEnd.setUTCDate(brtEnd.getUTCDate() + 1)
-        brtEnd.setUTCHours(2, 59, 59, 999)
+        // End of day is 23:59:59 BRT = 02:59:59 UTC of next day
+        const brtEnd = new Date(brtStart.getTime() + (24 * 60 * 60 * 1000) - 1)
 
         dateFilter = {
             createdAt: {
@@ -40,6 +35,10 @@ export default async function PiDetailPage({
                 lte: brtEnd
             }
         }
+        console.log(`[PI Detail] Filter for ${date}:`, {
+            brtStart: brtStart.toISOString(),
+            brtEnd: brtEnd.toISOString()
+        })
     }
 
     const [campaigns, settings] = await Promise.all([
