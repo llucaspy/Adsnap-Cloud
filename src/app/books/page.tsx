@@ -28,13 +28,16 @@ export default async function BooksPage() {
 
     // 2. Group by day AND PI
     const groupedCaptures = captures.reduce((acc: any, capture: any) => {
-        const dateKey = format(capture.createdAt, 'yyyy-MM-dd')
+        // Correct for Brazil Time (UTC-3) for display grouping
+        // We shift the time so that the UTC date matches the Brazil date, then use UTC methods.
+        const brtTime = new Date(capture.createdAt.getTime() - (3 * 60 * 60 * 1000))
+        const dateKey = brtTime.toISOString().split('T')[0]
 
         if (!acc[dateKey]) {
             acc[dateKey] = {
-                date: capture.createdAt,
-                label: format(capture.createdAt, "dd 'de' MMMM", { locale: ptBR }),
-                fullDate: format(capture.createdAt, "dd/MM/yyyy"),
+                date: brtTime,
+                label: format(brtTime, "dd 'de' MMMM", { locale: ptBR, useAdditionalDayOfYearTokens: false }), // Note: date-fns format might still use local time if not careful, but for daily labels it's usually fine
+                fullDate: `${brtTime.getUTCDate().toString().padStart(2, '0')}/${(brtTime.getUTCMonth() + 1).toString().padStart(2, '0')}/${brtTime.getUTCFullYear()}`,
                 piGroups: {}
             }
         }

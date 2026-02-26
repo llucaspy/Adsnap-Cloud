@@ -21,11 +21,23 @@ export default async function PiDetailPage({
 
     let dateFilter = {}
     if (date) {
+        // Force the date range to match Brazil Time (UTC-3)
+        // Regardless of where the server (Vercel) is located.
         const parsedDate = parse(date, 'yyyy-MM-dd', new Date())
+
+        // Start: yyyy-MM-dd 00:00:00 BRT = 03:00:00 UTC
+        const brtStart = new Date(parsedDate)
+        brtStart.setUTCHours(3, 0, 0, 0)
+
+        // End: yyyy-MM-dd 23:59:59 BRT = 02:59:59 UTC (Next Day)
+        const brtEnd = new Date(parsedDate)
+        brtEnd.setUTCDate(brtEnd.getUTCDate() + 1)
+        brtEnd.setUTCHours(2, 59, 59, 999)
+
         dateFilter = {
             createdAt: {
-                gte: startOfDay(parsedDate),
-                lte: endOfDay(parsedDate)
+                gte: brtStart,
+                lte: brtEnd
             }
         }
     }
@@ -81,7 +93,7 @@ export default async function PiDetailPage({
             formatLabel,
             captures: validCaptures
         }
-    })
+    }).filter(c => c.captures.length > 0) // REMOVE empty formats for the selected day
 
     if (processedCampaigns.length === 0) {
         notFound()
