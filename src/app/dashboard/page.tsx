@@ -15,7 +15,10 @@ export default async function DashboardPage() {
         prisma.capture.count({ where: { createdAt: { gte: today }, status: 'FAILED' } }),
         prisma.campaign.count({ where: { status: 'QUARANTINE', isArchived: false } }),
         prisma.capture.findMany({
-            where: { createdAt: { gte: today } },
+            where: {
+                createdAt: { gte: today },
+                status: 'SUCCESS'
+            },
             take: 8,
             orderBy: { createdAt: 'desc' },
             include: { campaign: true }
@@ -39,8 +42,12 @@ export default async function DashboardPage() {
         quarantined: quarantined
     }
 
-    // Filter out captures where the file doesn't exist on disk
+    // Filter out captures where the file doesn't exist on disk (if local)
     const recentCaptures = rawRecentCaptures.filter(capture => {
+        if (!capture.screenshotPath) return false;
+        // If it's a URL (Supabase), it's valid for the frontend
+        if (capture.screenshotPath.startsWith('http')) return true;
+
         try {
             return fs.existsSync(capture.screenshotPath)
         } catch {

@@ -28,6 +28,7 @@ export default async function PresentationHome() {
       prisma.capture.count({ where: { createdAt: { gte: today }, status: 'SUCCESS' } }).catch(() => 0),
       prisma.capture.count({ where: { createdAt: { gte: today }, status: 'FAILED' } }).catch(() => 0),
       prisma.capture.findMany({
+        where: { status: 'SUCCESS' },
         take: 10,
         orderBy: { createdAt: 'desc' },
         include: { campaign: true }

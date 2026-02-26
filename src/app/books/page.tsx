@@ -13,6 +13,7 @@ export default async function BooksPage() {
     // 1. Fetch all captures from non-archived campaigns
     const captures = await prisma.capture.findMany({
         where: {
+            status: 'SUCCESS',
             campaign: {
                 isArchived: false
             }

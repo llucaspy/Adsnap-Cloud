@@ -15,6 +15,7 @@ export default async function PiDetailPage({ params }: { params: Promise<{ pi: s
             where: { pi },
             include: {
                 captures: {
+                    where: { status: 'SUCCESS' },
                     orderBy: { createdAt: 'desc' }
                 }
             },

@@ -71,17 +71,25 @@ export async function GET(request: Request) {
             } as any
         })
 
-        // Step 3: Filter by current time
+        // Step 3: Filter by scheduled time (Robust: already passed and not yet captured)
         const campaignsToQueue = scheduledCampaigns.filter((campaign: any) => {
             try {
-                const times = JSON.parse((campaign as any).scheduledTimes || '[]') as string[]
-                return times.some(t => t.trim() === currentTime)
+                const times = JSON.parse(campaign.scheduledTimes || '[]') as string[]
+                const lastCapture = campaign.lastCaptureAt ? new Date(campaign.lastCaptureAt) : null;
+
+                return times.some((t: string) => {
+                    const [h, m] = t.split(':').map(Number);
+                    const hasPassed = brtNow.getTime() >= (new Date(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate(), h, m)).getTime();
+                    const notCapturedYet = !lastCapture || lastCapture.getTime() < (new Date(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate(), h, m)).getTime();
+
+                    return hasPassed && notCapturedYet;
+                });
             } catch (e) {
                 return false
             }
         })
 
-        console.log(`[Cron] Enqueuing ${campaignsToQueue.length} campaigns for ${currentTime}`)
+        console.log(`[Cron] Enqueuing ${campaignsToQueue.length} campaigns.`)
 
         // Step 4: Mark as QUEUED
         if (campaignsToQueue.length > 0) {
