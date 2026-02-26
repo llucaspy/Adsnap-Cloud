@@ -6,17 +6,21 @@ import { startOfDay } from 'date-fns'
 export const dynamic = 'force-dynamic'
 
 export default async function DashboardPage() {
-    const today = startOfDay(new Date())
+    // Robust construction for "Today" in Brazil Time (UTC-3)
+    const now = new Date()
+    const brtCheck = new Date(now.getTime() - (3 * 60 * 60 * 1000))
+    const dateStr = brtCheck.toISOString().split('T')[0]
+    const brtStart = new Date(`${dateStr}T03:00:00.000Z`)
 
     // Fetch Stats
     const [totalToday, campaigns, failedToday, quarantined, rawRecentCaptures] = await Promise.all([
-        prisma.capture.count({ where: { createdAt: { gte: today }, status: 'SUCCESS' } }),
+        prisma.capture.count({ where: { createdAt: { gte: brtStart }, status: 'SUCCESS' } }),
         prisma.campaign.findMany({ where: { isArchived: false } }),
-        prisma.capture.count({ where: { createdAt: { gte: today }, status: 'FAILED' } }),
+        prisma.capture.count({ where: { createdAt: { gte: brtStart }, status: 'FAILED' } }),
         prisma.campaign.count({ where: { status: 'QUARANTINE', isArchived: false } }),
         prisma.capture.findMany({
             where: {
-                createdAt: { gte: today },
+                createdAt: { gte: brtStart },
                 status: 'SUCCESS'
             },
             take: 8,
