@@ -89,13 +89,13 @@ export function NexusRegistrationPreview({ campaigns: initialCampaigns, onClose,
                 className="relative w-full max-w-6xl h-[85vh] flex flex-col rounded-[2rem] overflow-hidden transition-all duration-500 shadow-2xl border border-white/10 animate-slide-up"
                 style={{
                     background: 'rgba(15, 15, 25, 0.95)',
-                    boxShadow: '0 0 80px rgba(168, 85, 247, 0.15)'
+                    boxShadow: '0 0 80px rgba(0,0,0,0.8)'
                 }}
             >
                 {/* Header */}
                 <div className="p-8 border-b border-white/5 bg-white/2 flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-accent to-purple-600 flex items-center justify-center shadow-lg">
+                        <div className="w-12 h-12 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center shadow-lg">
                             <Sparkles size={24} className="text-white" />
                         </div>
                         <div>
@@ -131,7 +131,7 @@ export function NexusRegistrationPreview({ campaigns: initialCampaigns, onClose,
                             {data.map((campaign) => (
                                 <div
                                     key={campaign.id}
-                                    className={`group relative p-6 rounded-2xl border transition-all duration-300 ${editingId === campaign.id ? 'bg-accent/5 border-accent/30 shadow-[0_0_30px_rgba(168,85,247,0.1)]' : 'bg-white/2 border-white/5 hover:border-white/10'}`}
+                                    className={`group relative p-6 rounded-2xl border transition-all duration-300 ${editingId === campaign.id ? 'bg-white/[0.04] border-white/30 shadow-[0_0_30px_rgba(0,0,0,0.3)]' : 'bg-white/2 border-white/5 hover:border-white/10'}`}
                                 >
                                     <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-6 gap-6">
                                         {/* Client & PI */}
@@ -336,7 +336,7 @@ export function NexusRegistrationPreview({ campaigns: initialCampaigns, onClose,
                         <button
                             onClick={confirmAll}
                             disabled={isSubmitting || data.length === 0}
-                            className="flex-1 md:px-12 py-4 rounded-xl bg-gradient-to-r from-accent to-purple-600 font-bold text-white shadow-lg shadow-accent/25 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-3 min-w-[200px]"
+                            className="flex-1 md:px-12 py-4 rounded-xl bg-white font-bold text-black shadow-lg hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-3 min-w-[200px]"
                         >
                             {isSubmitting ? (
                                 <>

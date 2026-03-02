@@ -130,7 +130,7 @@ function NexusTerminal() {
                         background: 'var(--bg-glass)',
                         backdropFilter: 'blur(8px)',
                         overflow: 'hidden',
-                        boxShadow: '0 0 20px var(--accent-muted), 0 0 60px rgba(168, 85, 247, 0.05)',
+                        boxShadow: '0 0 20px var(--accent-muted), 0 0 60px rgba(0,0,0,0.3)',
                         height: 420,
                         display: 'flex',
                         flexDirection: 'column' as const,
@@ -150,7 +150,7 @@ function NexusTerminal() {
                         <div style={{ display: 'flex', gap: 6 }}>
                             <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'rgba(239, 68, 68, 0.7)' }} />
                             <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'rgba(245, 158, 11, 0.7)' }} />
-                            <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'rgba(168, 85, 247, 0.7)' }} />
+                            <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'rgba(150, 150, 150, 0.6)' }} />
                         </div>
                         <span
                             style={{

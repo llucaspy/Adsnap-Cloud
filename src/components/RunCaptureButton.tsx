@@ -26,7 +26,7 @@ export function RunCaptureButton({ id, variant = 'compact' }: { id: string, vari
                 className="p-3 rounded-xl transition-all disabled:opacity-50 flex items-center justify-center group"
                 style={{
                     background: 'var(--gradient-primary)',
-                    boxShadow: '0 0 20px rgba(168, 85, 247, 0.3)'
+                    boxShadow: '0 0 20px rgba(255,255,255,0.12)'
                 }}
                 title="Capturar Agora"
             >

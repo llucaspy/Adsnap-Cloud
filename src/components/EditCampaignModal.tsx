@@ -243,7 +243,7 @@ export function EditCampaignModal({ campaign, formats, onClose, onSaved }: EditC
                 }
                 .modal-input:focus {
                     border-color: var(--accent, #a855f7);
-                    box-shadow: 0 0 0 3px rgba(168,85,247,0.1);
+                    box-shadow: 0 0 0 3px rgba(255,255,255,0.08);
                 }
                 .modal-input::placeholder {
                     color: rgba(255,255,255,0.2);

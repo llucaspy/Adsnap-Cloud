@@ -124,9 +124,9 @@ export default async function PiDetailPage({
                             <span
                                 className="text-[10px] font-bold uppercase tracking-[0.2em] px-4 py-2 rounded-lg backdrop-blur-md"
                                 style={{
-                                    background: 'rgba(168, 85, 247, 0.1)',
-                                    color: 'var(--accent-light)',
-                                    border: '1px solid rgba(168, 85, 247, 0.2)'
+                                    background: 'rgba(255,255,255,0.05)',
+                                    color: 'rgba(255,255,255,0.6)',
+                                    border: '1px solid rgba(255,255,255,0.15)'
                                 }}
                             >
                                 PI {pi}
@@ -155,7 +155,7 @@ export default async function PiDetailPage({
                             border: '1px solid var(--border)',
                         }}
                     >
-                        <Download size={20} className="group-hover:text-[var(--accent)] transition-colors" />
+                        <Download size={20} className="group-hover:text-white transition-colors" />
                         Exportar Relatório PDF
                     </button>
                 </div>

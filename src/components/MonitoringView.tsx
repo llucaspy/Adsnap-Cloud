@@ -136,7 +136,7 @@ export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns
                     <div className="flex flex-col md:flex-row md:items-end justify-between gap-8">
                         <div className="space-y-6">
                             <div className="flex items-center gap-5">
-                                <div className="w-14 h-14 rounded-2xl bg-accent/20 flex items-center justify-center text-accent shadow-[0_0_30px_rgba(168,85,247,0.3)] border border-accent/20">
+                                <div className="w-14 h-14 rounded-2xl bg-white/8 border border-white/15 flex items-center justify-center text-white/60">
                                     <Activity size={28} />
                                 </div>
                                 <div>
@@ -266,7 +266,7 @@ export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns
                         <p className="text-white/20 font-medium">Os filtros neurais não detectaram campanhas com estes parâmetros.</p>
                         <button
                             onClick={() => { setSearch(''); setActiveFilter('all'); setStatusFilter('all'); }}
-                            className="mt-8 px-8 py-3 rounded-2xl bg-accent text-white font-black text-xs uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-[0_10px_30px_rgba(168,85,247,0.3)]"
+                            className="mt-8 px-8 py-3 rounded-2xl bg-white text-black font-black text-xs uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-xl"
                         >
                             Resetar Parâmetros
                         </button>
@@ -709,7 +709,7 @@ function FilterButton({ active, onClick, icon: Icon, label, dotColor }: { active
         <button
             onClick={onClick}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-[0.1em] transition-all min-w-[80px] justify-center ${active
-                ? 'bg-accent text-white shadow-[0_10px_20px_rgba(168,85,247,0.3)] scale-105'
+                ? 'bg-white text-black shadow-[0_10px_20px_rgba(0,0,0,0.4)] scale-105'
                 : 'text-white/30 hover:text-white/60 hover:bg-white/5'
                 }`}
         >
@@ -725,7 +725,7 @@ function StatBox({ label, value, color, pulse = false, onClick, active = false }
         <div
             onClick={onClick}
             className={`flex flex-col group cursor-pointer transition-all duration-200 p-4 rounded-2xl border border-white/[0.03] ${onClick ? 'hover:scale-105 active:scale-95 hover:border-white/10 hover:bg-white/[0.05]' : ''
-                } ${active ? 'bg-white/[0.08] border-accent/30 shadow-[0_0_20px_rgba(168,85,247,0.1)]' : 'bg-white/[0.02]'}`}
+                } ${active ? 'bg-white/[0.08] border-white/25 shadow-[0_0_20px_rgba(255,255,255,0.05)]' : 'bg-white/[0.02]'}`}
         >
             <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30 mb-2 group-hover:text-white/50 transition-colors duration-200" style={{ fontFamily: 'var(--font-body)' }}>
                 {label}

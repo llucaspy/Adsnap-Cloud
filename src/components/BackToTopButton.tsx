@@ -33,7 +33,7 @@ export function BackToTopButton() {
     return (
         <button
             onClick={scrollToTop}
-            className={`fixed bottom-8 left-72 w-14 h-14 rounded-full bg-accent text-white shadow-[0_0_30px_rgba(168,85,247,0.4)] flex items-center justify-center transition-all duration-500 z-[9999] ${isVisible
+            className={`fixed bottom-8 left-72 w-14 h-14 rounded-full bg-white text-black shadow-[0_0_30px_rgba(255,255,255,0.15)] flex items-center justify-center transition-all duration-500 z-[9999] ${isVisible
                 ? 'opacity-100 translate-y-0 pointer-events-auto'
                 : 'opacity-0 translate-y-12 pointer-events-none'
                 } hover:scale-110 active:scale-95`}

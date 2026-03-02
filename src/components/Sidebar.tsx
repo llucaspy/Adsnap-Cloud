@@ -1,6 +1,6 @@
 'use client'
 
-import { LayoutDashboard, Activity, PlusCircle, Library, Archive, Settings, Sparkles, Zap, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database } from 'lucide-react'
+import { LayoutDashboard, Activity, PlusCircle, Library, Archive, Settings, Sparkles, Zap, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database, MessageCircle } from 'lucide-react'
 import { Logo } from './Logo'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
@@ -12,7 +12,6 @@ function StorageMonitor() {
 
     useEffect(() => {
         getStorageUsage().then(setUsage)
-        // Refresh every 5 minutes
         const interval = setInterval(() => {
             getStorageUsage().then(setUsage)
         }, 1000 * 60 * 5)
@@ -25,23 +24,23 @@ function StorageMonitor() {
     const isCriticalUsage = usage.percentage > 95
 
     return (
-        <div className="px-4 py-4 rounded-2xl bg-white/5 border border-white/10 space-y-3">
+        <div className="px-4 py-4 rounded-2xl bg-white/[0.03] border border-white/8 space-y-3">
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                    <Database size={14} className={isCriticalUsage ? 'text-red-500' : isHighUsage ? 'text-orange-500' : 'text-accent'} />
-                    <span className="text-[10px] font-black uppercase tracking-widest text-white/40">Storage</span>
+                    <Database size={14} className={isCriticalUsage ? 'text-red-500' : isHighUsage ? 'text-orange-500' : 'text-white/50'} />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-white/30">Storage</span>
                 </div>
-                <span className="text-[10px] font-bold text-white/60">{usage.percentage.toFixed(1)}%</span>
+                <span className="text-[10px] font-bold text-white/50">{usage.percentage.toFixed(1)}%</span>
             </div>
 
             <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
                 <div
-                    className={`h-full transition-all duration-1000 ${isCriticalUsage ? 'bg-red-500' : isHighUsage ? 'bg-orange-500' : 'bg-accent'}`}
+                    className={`h-full transition-all duration-1000 ${isCriticalUsage ? 'bg-red-500' : isHighUsage ? 'bg-orange-500' : 'bg-white/60'}`}
                     style={{ width: `${usage.percentage}%` }}
                 />
             </div>
 
-            <p className="text-[9px] font-medium text-white/30 text-center">
+            <p className="text-[9px] font-medium text-white/25 text-center">
                 {usage.formattedUsed} de 1024 MB usados
             </p>
         </div>
@@ -106,7 +105,7 @@ export function Sidebar() {
             >
                 {/* System ID */}
                 <div className="flex items-center gap-2 ml-1">
-                    <div className="w-6 h-6 rounded-lg bg-accent flex items-center justify-center shadow-lg shadow-accent/20">
+                    <div className="w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center shadow-lg">
                         <Zap size={14} className="text-white" />
                     </div>
                     <span className="text-[11px] font-black uppercase tracking-[0.3em] text-white/40">Adsnap</span>
@@ -114,7 +113,7 @@ export function Sidebar() {
 
                 {/* Workspace Card */}
                 <div className="relative pt-3">
-                    <div className="absolute -top-2 left-4 px-2 py-0.5 bg-accent/10 border border-accent/20 rounded text-[7px] font-black uppercase text-accent tracking-[0.2em] z-10 backdrop-blur-sm">
+                    <div className="absolute -top-2 left-4 px-2 py-0.5 bg-white/8 border border-white/15 rounded text-[7px] font-black uppercase text-white/60 tracking-[0.2em] z-10 backdrop-blur-sm">
                         Client Workplace
                     </div>
                     <div className="bg-white border border-gray-200 rounded-2xl shadow-xl p-5 flex flex-col items-center gap-3">
@@ -141,10 +140,10 @@ export function Sidebar() {
                             href={item.href}
                             className="flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all duration-300 group relative overflow-hidden"
                             style={{
-                                background: isActive ? 'var(--accent-muted)' : 'transparent',
+                                background: isActive ? 'rgba(255,255,255,0.07)' : 'transparent',
                             }}
                         >
-                            {/* Gradient hover effect */}
+                            {/* Subtle hover overlay */}
                             <div
                                 className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
                                 style={{ background: 'var(--gradient-glow)' }}
@@ -153,7 +152,7 @@ export function Sidebar() {
                             <item.icon
                                 size={20}
                                 style={{
-                                    color: isActive ? 'var(--accent-light)' : 'var(--text-muted)',
+                                    color: isActive ? '#ffffff' : 'var(--text-muted)',
                                 }}
                                 className="relative z-10 group-hover:scale-110 transition-transform duration-300"
                             />
@@ -169,7 +168,7 @@ export function Sidebar() {
                             {isActive && (
                                 <div
                                     className="ml-auto w-2 h-2 rounded-full animate-pulse-glow relative z-10"
-                                    style={{ background: 'var(--accent)' }}
+                                    style={{ background: 'rgba(255,255,255,0.7)' }}
                                 />
                             )}
                         </Link>
@@ -186,20 +185,18 @@ export function Sidebar() {
                     href="/settings"
                     className="flex items-center gap-3 px-4 py-3 w-full rounded-xl transition-all group"
                     style={{
-                        color: pathname === '/settings' ? 'var(--accent-light)' : 'var(--text-muted)',
-                        background: pathname === '/settings' ? 'var(--accent-muted)' : 'transparent'
+                        color: pathname === '/settings' ? '#ffffff' : 'var(--text-muted)',
+                        background: pathname === '/settings' ? 'rgba(255,255,255,0.07)' : 'transparent'
                     }}
                 >
-                    <Settings size={18} className={`group-hover:rotate-90 transition-transform duration-500 ${pathname === '/settings' ? 'text-accent' : ''}`} />
-                    <span className={`text-sm font-medium ${pathname === '/settings' ? 'text-white' : ''}`}>Configurações</span>
+                    <Settings size={18} className="group-hover:rotate-90 transition-transform duration-500" />
+                    <span className="text-sm font-medium">Configurações</span>
                 </Link>
 
                 <button
                     onClick={handleLogout}
-                    className="flex items-center gap-3 px-4 py-3 w-full rounded-xl transition-all group hover:bg-red-500/10 text-muted-foreground hover:text-red-400"
-                    style={{
-                        background: 'transparent'
-                    }}
+                    className="flex items-center gap-3 px-4 py-3 w-full rounded-xl transition-all group hover:bg-red-500/10 text-white/30 hover:text-red-400"
+                    style={{ background: 'transparent' }}
                 >
                     <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
                     <span className="text-sm font-medium">Sair</span>
@@ -209,28 +206,25 @@ export function Sidebar() {
 
                 {/* Developer Credits - Lucas Paim */}
                 <div
-                    className="mt-6 p-[1px] rounded-2xl relative overflow-hidden group transition-all duration-500 hover:shadow-[0_0_30px_rgba(168,85,247,0.25)]"
+                    className="mt-6 p-[1px] rounded-2xl relative overflow-hidden group transition-all duration-500 hover:shadow-[0_0_30px_rgba(255,255,255,0.08)]"
                 >
-                    {/* Animated Border Gradient */}
-                    <div className="absolute inset-0 bg-[conic-gradient(from_0deg,transparent_0%,var(--accent)_20%,transparent_40%)] animate-[spin_4s_linear_infinite] opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+                    {/* Animated Border — white conic gradient */}
+                    <div className="absolute inset-0 bg-[conic-gradient(from_0deg,transparent_0%,rgba(255,255,255,0.6)_20%,transparent_40%)] animate-[spin_4s_linear_infinite] opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
 
-                    <div className="relative z-10 p-4 rounded-2xl bg-[#0a0a0c]/90 backdrop-blur-xl flex flex-col gap-4 border border-white/5">
+                    <div className="relative z-10 p-4 rounded-2xl bg-[#0a0a0a]/95 backdrop-blur-xl flex flex-col gap-4 border border-white/5">
                         <div className="flex items-center gap-3">
-                            <div
-                                className="w-12 h-12 rounded-xl flex items-center justify-center text-sm font-black relative overflow-hidden transition-transform group-hover:scale-110 duration-500 shadow-2xl"
-                                style={{
-                                    background: 'var(--gradient-primary)',
-                                    color: 'white',
-                                    fontFamily: 'var(--font-display)'
-                                }}
-                            >
-                                <span className="relative z-10">LP</span>
-                                <div className="absolute inset-0 bg-white/20 skew-x-[-20deg] translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
+                            <div className="relative w-12 h-12 rounded-xl overflow-hidden group-hover:scale-105 transition-transform duration-500 shadow-2xl border border-white/10">
+                                <img
+                                    src="https://images.metroimg.com/2026/02/foto-lucas-paim.png"
+                                    alt="Lucas Paim"
+                                    className="w-full h-full object-cover filter grayscale brightness-110 hover:grayscale-0 transition-all duration-700"
+                                />
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent opacity-60" />
                             </div>
                             <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-1.5 mb-0.5">
-                                    <div className="w-1 h-1 rounded-full bg-accent animate-pulse" />
-                                    <p className="text-[9px] font-black uppercase tracking-[0.25em] text-accent-light px-1.5 py-0.5 bg-accent/10 rounded-sm">Desenvolvedor do Sistema:</p>
+                                    <div className="w-1 h-1 rounded-full bg-white/50 animate-pulse" />
+                                    <p className="text-[9px] font-black uppercase tracking-[0.25em] text-white/50 px-1.5 py-0.5 bg-white/5 rounded-sm">Desenvolvedor do Sistema:</p>
                                 </div>
                                 <p
                                     className="text-base font-black truncate text-white tracking-tighter"
@@ -248,7 +242,7 @@ export function Sidebar() {
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 title="GitHub"
-                                className="flex items-center justify-center p-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 text-white/50 hover:text-white transition-all duration-300 shadow-lg"
+                                className="flex items-center justify-center p-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/25 text-white/40 hover:text-white transition-all duration-300 shadow-lg"
                             >
                                 <Github size={16} />
                             </a>
@@ -257,19 +251,27 @@ export function Sidebar() {
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 title="LinkedIn"
-                                className="flex items-center justify-center p-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-blue-500/10 hover:border-blue-500/30 text-white/50 hover:text-blue-400 transition-all duration-300 shadow-lg"
+                                className="flex items-center justify-center p-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-blue-500/10 hover:border-blue-500/30 text-white/40 hover:text-blue-400 transition-all duration-300 shadow-lg"
                             >
                                 <Linkedin size={16} />
+                            </a>
+                            <a
+                                href="https://wa.me/556191761606"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="WhatsApp"
+                                className="flex items-center justify-center p-2.5 rounded-lg bg-green-500/5 border border-white/10 hover:bg-green-500/10 hover:border-green-500/30 text-white/40 hover:text-green-400 transition-all duration-300 shadow-lg"
+                            >
+                                <MessageCircle size={16} />
                             </a>
                             <a
                                 href="https://www.instagram.com/llucas.py/"
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 title="Instagram"
-                                className="col-span-2 flex items-center justify-center gap-2 py-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-accent/10 hover:border-accent/30 text-white/50 hover:text-accent transition-all duration-300 shadow-lg text-[10px] font-black uppercase tracking-widest"
+                                className="flex items-center justify-center p-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/25 text-white/40 hover:text-white transition-all duration-300 shadow-lg"
                             >
                                 <Instagram size={14} />
-                                Instagram
                             </a>
                         </div>
                     </div>

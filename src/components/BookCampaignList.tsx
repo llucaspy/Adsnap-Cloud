@@ -162,7 +162,7 @@ export function BookCampaignList({ campaigns }: { campaigns: Campaign[] }) {
                                             className="w-full py-3 text-xs font-bold rounded-xl uppercase tracking-widest transition-all text-white hover:scale-105 active:scale-95"
                                             style={{
                                                 background: 'var(--gradient-primary)',
-                                                boxShadow: '0 0 20px rgba(168, 85, 247, 0.4)'
+                                                boxShadow: '0 0 20px rgba(255, 255, 255, 0.12)'
                                             }}
                                         >
                                             <Sparkles size={14} className="inline mr-2" />

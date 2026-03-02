@@ -144,7 +144,7 @@ export function AdminView() {
                     </button>
                     <button
                         onClick={() => setShowAddModal(true)}
-                        className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-accent to-purple-600 rounded-2xl font-bold text-white shadow-lg shadow-accent/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                        className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 bg-white rounded-2xl font-bold text-black shadow-lg hover:scale-[1.02] active:scale-[0.98] transition-all"
                     >
                         <UserPlus size={18} />
                         Novo Acesso
@@ -310,7 +310,7 @@ export function AdminView() {
                             <button
                                 type="submit"
                                 disabled={formLoading}
-                                className="w-full h-12 bg-gradient-to-r from-accent to-purple-600 rounded-xl font-bold text-white shadow-xl shadow-accent/20 hover:brightness-110 active:scale-[0.98] transition-all disabled:opacity-50"
+                                className="w-full h-12 bg-white rounded-xl font-bold text-black shadow-xl hover:brightness-95 active:scale-[0.98] transition-all disabled:opacity-50"
                             >
                                 {formLoading ? 'Processando...' : 'Finalizar Cadastro'}
                             </button>

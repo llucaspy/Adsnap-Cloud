@@ -56,7 +56,7 @@ export function MultiTimePicker({ value, onChange, maxTimes = 5 }: MultiTimePick
                             style={{
                                 background: 'var(--gradient-primary)',
                                 color: 'white',
-                                boxShadow: '0 0 20px rgba(168, 85, 247, 0.4)'
+                                boxShadow: '0 0 20px rgba(255,255,255,0.10)'
                             }}
                         >
                             <Clock size={14} />

@@ -174,8 +174,8 @@ export function NexusChat() {
                 onClick={() => setIsOpen(!isOpen)}
                 className={`fixed bottom-8 right-8 z-[60] w-16 h-16 rounded-full flex items-center justify-center transition-all duration-700 hover:scale-110 group ${isOpen ? 'rotate-90' : ''}`}
                 style={{
-                    background: isTyping ? 'var(--accent)' : 'rgba(10, 10, 18, 0.4)',
-                    boxShadow: isTyping ? '0 0 50px var(--accent)' : '0 20px 40px rgba(0,0,0,0.5)',
+                    background: isTyping ? 'rgba(255,255,255,0.12)' : 'rgba(10, 10, 10, 0.5)',
+                    boxShadow: isTyping ? '0 0 50px rgba(255,255,255,0.2)' : '0 20px 40px rgba(0,0,0,0.5)',
                     border: '1px solid rgba(255, 255, 255, 0.1)',
                     backdropFilter: 'blur(20px)'
                 }}
@@ -203,7 +203,7 @@ export function NexusChat() {
                         <div>
                             <h3 className="font-black text-white text-base tracking-tighter" style={{ fontFamily: 'var(--font-display)' }}>Nexus AI</h3>
                             <div className="flex items-center gap-1.5">
-                                <span className={`h-1 w-1 rounded-full ${isTyping || isGlobalPolling ? 'bg-accent animate-pulse' : 'bg-white/20'}`} />
+                                <span className={`h-1 w-1 rounded-full ${isTyping || isGlobalPolling ? 'bg-white/70 animate-pulse' : 'bg-white/20'}`} />
                                 <span className="text-[8px] font-black text-white/40 uppercase tracking-widest">
                                     {isTyping ? 'Processando' : isGlobalPolling ? 'Global Link' : 'Online'}
                                 </span>
@@ -213,7 +213,7 @@ export function NexusChat() {
                     <div className="flex items-center gap-2">
                         <button
                             onClick={() => setShowLogs(!showLogs)}
-                            className={`w-10 h-10 rounded-xl transition-all flex items-center justify-center border ${showLogs ? 'bg-accent/20 border-accent/40 text-accent' : 'bg-white/5 border-white/10 text-white/20 hover:text-white'}`}
+                            className={`w-10 h-10 rounded-xl transition-all flex items-center justify-center border ${showLogs ? 'bg-white/10 border-white/30 text-white' : 'bg-white/5 border-white/10 text-white/20 hover:text-white'}`}
                         >
                             <MessageSquare size={16} />
                         </button>
@@ -231,8 +231,8 @@ export function NexusChat() {
                     {showLogs ? (
                         <div className="space-y-3 animate-in fade-in duration-500">
                             <div className="flex items-center justify-between mb-2">
-                                <span className="text-[10px] font-black text-accent uppercase tracking-widest">Logs do Nexus</span>
-                                <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />
+                                <span className="text-[10px] font-black text-white/50 uppercase tracking-widest">Logs do Nexus</span>
+                                <span className="h-1.5 w-1.5 rounded-full bg-white/50 animate-pulse" />
                             </div>
                             {logs.length === 0 ? (
                                 <div className="text-[10px] text-white/20 font-medium italic py-10 text-center">Nenhum evento registrado...</div>
@@ -240,7 +240,7 @@ export function NexusChat() {
                                 logs.map((log, i) => (
                                     <div key={i} className="font-mono text-[9px] border-l border-white/10 pl-3 py-1">
                                         <div className="flex items-center gap-2 mb-0.5">
-                                            <span className={`text-[8px] font-bold ${log.level === 'SUCCESS' ? 'text-green-400' : log.level === 'ERROR' ? 'text-red-400' : 'text-accent'}`}>
+                                            <span className={`text-[8px] font-bold ${log.level === 'SUCCESS' ? 'text-green-400' : log.level === 'ERROR' ? 'text-red-400' : 'text-white/50'}`}>
                                                 [{log.level}]
                                             </span>
                                             <span className="text-white/20">{new Date(log.createdAt).toLocaleTimeString()}</span>
@@ -256,14 +256,14 @@ export function NexusChat() {
                                 <div className={`max-w-[85%] relative ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
                                     <div
                                         className={`p-3 rounded-xl text-[12px] font-medium leading-relaxed transition-all shadow-lg ${msg.role === 'user'
-                                            ? 'bg-accent text-white rounded-tr-none'
+                                            ? 'bg-white text-black rounded-tr-none'
                                             : 'bg-white/5 text-white/90 rounded-tl-none border border-white/10'
                                             }`}
                                     >
                                         {msg.content}
 
                                         {msg.type === 'action' && (
-                                            <div className="mt-2 pt-2 border-t border-white/5 flex items-center gap-1.5 text-[8px] font-black text-accent uppercase tracking-widest">
+                                            <div className="mt-2 pt-2 border-t border-white/5 flex items-center gap-1.5 text-[8px] font-black text-white/50 uppercase tracking-widest">
                                                 <Zap size={8} className="animate-pulse" />
                                                 Confirmado
                                             </div>
@@ -280,9 +280,9 @@ export function NexusChat() {
                         <div className="flex justify-start">
                             <div className="bg-white/5 p-3 rounded-xl rounded-tl-none border border-white/10 flex items-center gap-2.5">
                                 <div className="flex gap-1">
-                                    <div className="w-1 h-1 bg-accent rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                                    <div className="w-1 h-1 bg-accent rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                                    <div className="w-1 h-1 bg-accent rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                                    <div className="w-1 h-1 bg-white/60 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                                    <div className="w-1 h-1 bg-white/60 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                                    <div className="w-1 h-1 bg-white/60 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                                 </div>
                                 <span className="text-[8px] font-black text-white/20 uppercase tracking-[0.2em]">Sincronizando...</span>
                             </div>
@@ -298,9 +298,9 @@ export function NexusChat() {
                             <button
                                 key={i}
                                 onClick={() => handleSend(action.cmd)}
-                                className="px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[9px] font-bold text-white/40 hover:text-white hover:bg-accent/10 hover:border-accent/30 transition-all flex items-center gap-1.5 group"
+                                className="px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[9px] font-bold text-white/40 hover:text-white hover:bg-white/8 hover:border-white/20 transition-all flex items-center gap-1.5 group"
                             >
-                                <action.icon size={10} className="group-hover:text-accent transition-colors" />
+                                <action.icon size={10} className="group-hover:text-white transition-colors" />
                                 {action.label}
                             </button>
                         ))}
@@ -315,12 +315,12 @@ export function NexusChat() {
                             onChange={(e) => setInput(e.target.value)}
                             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
                             placeholder="Comando..."
-                            className="w-full bg-white/5 border border-white/10 rounded-xl p-3 pr-14 text-xs text-white outline-none focus:bg-white/[0.08] focus:border-accent/40 transition-all font-medium placeholder:text-white/10"
+                            className="w-full bg-white/5 border border-white/10 rounded-xl p-3 pr-14 text-xs text-white outline-none focus:bg-white/[0.08] focus:border-white/30 transition-all font-medium placeholder:text-white/10"
                         />
                         <button
                             onClick={() => handleSend()}
                             disabled={!input.trim()}
-                            className="absolute right-1.5 top-1/2 -translate-y-1/2 w-10 h-10 rounded-lg bg-accent text-white flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-xl disabled:opacity-20 disabled:grayscale"
+                            className="absolute right-1.5 top-1/2 -translate-y-1/2 w-10 h-10 rounded-lg bg-white text-black flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-xl disabled:opacity-20 disabled:grayscale"
                         >
                             <Send size={16} />
                         </button>

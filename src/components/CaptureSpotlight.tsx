@@ -16,7 +16,7 @@ export function CaptureSpotlight({ captures }: { captures: any[] }) {
                         key={`${capture.id}-${i}`}
                         className="flex-shrink-0 w-64 group relative perspective-1000"
                     >
-                        <div className="relative aspect-[3/4] rounded-2xl overflow-hidden transition-all duration-500 transform-gpu group-hover:rotate-y-12 group-hover:scale-105 border border-white/5 group-hover:border-accent/40 shadow-2xl">
+                        <div className="relative aspect-[3/4] rounded-2xl overflow-hidden transition-all duration-500 transform-gpu group-hover:rotate-y-12 group-hover:scale-105 border border-white/5 group-hover:border-white/30 shadow-2xl">
                             <CaptureImage
                                 src={`/api/captures/${capture.id}`}
                                 alt={capture.campaign.client}
@@ -28,7 +28,7 @@ export function CaptureSpotlight({ captures }: { captures: any[] }) {
 
                             {/* Content */}
                             <div className="absolute inset-0 p-6 flex flex-col justify-end translate-z-10">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-accent mb-1">Recent Flow</p>
+                                <p className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-1">Recent Flow</p>
                                 <h4 className="text-white font-bold truncate">{capture.campaign.client}</h4>
                             </div>
                         </div>

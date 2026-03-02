@@ -1,7 +1,7 @@
 'use client'
 
 import React from 'react'
-import { Folder, ImageIcon, ChevronRight } from 'lucide-react'
+import { Folder, ChevronRight, ImageIcon } from 'lucide-react'
 import Link from 'next/link'
 
 interface PIFolderCardProps {
@@ -10,80 +10,67 @@ interface PIFolderCardProps {
     campaignName: string
     captureCount: number
     thumbnailId: string
-    accentColor: string
     date: string
+    accentColor?: string
 }
 
-export function PIFolderCard({ pi, client, campaignName, captureCount, thumbnailId, accentColor, date }: PIFolderCardProps) {
+export function PIFolderCard({ pi, client, campaignName, captureCount, thumbnailId, date }: PIFolderCardProps) {
     return (
         <Link
             href={`/books/${pi}?date=${date}`}
-            className="group relative block bg-white/[0.03] border border-white/10 rounded-[2rem] overflow-hidden transition-all duration-500 hover:border-accent/40 hover:shadow-[0_20px_50px_rgba(168,85,247,0.15)] hover:translate-y-[-4px]"
+            className="group relative flex flex-col bg-white/[0.03] border border-white/8 rounded-2xl overflow-hidden transition-all duration-300 hover:border-white/20 hover:bg-white/[0.05] hover:shadow-[0_8px_30px_rgba(0,0,0,0.5)] hover:-translate-y-1"
         >
-            {/* Hover Glow Effect */}
-            <div
-                className="absolute inset-0 opacity-0 group-hover:opacity-10 transition-opacity pointer-events-none"
-                style={{ background: `linear-gradient(to br, ${accentColor}, var(--secondary))` }}
-            />
-
-            <div className="aspect-[16/10] relative overflow-hidden bg-bg-tertiary">
-                {/* Stack Effect Backgrounds */}
-                <div className="absolute inset-0 translate-x-2 translate-y-2 bg-white/5 rounded-[2rem] scale-[0.98]" />
-                <div className="absolute inset-0 translate-x-1 translate-y-1 bg-white/5 rounded-[2rem] scale-[0.99]" />
-
+            {/* Thumbnail */}
+            <div className="relative aspect-video overflow-hidden bg-white/[0.02]">
                 <img
                     src={`/api/captures/${thumbnailId}`}
-                    alt={campaignName}
-                    className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110 opacity-60 group-hover:opacity-100"
+                    alt={client}
+                    className="w-full h-full object-cover opacity-50 group-hover:opacity-80 transition-opacity duration-500 group-hover:scale-105 transform transition-transform"
+                    onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none'
+                    }}
                 />
 
-                {/* Folder Icon Overlay */}
-                <div className="absolute top-4 right-4 z-10">
-                    <div className="w-10 h-10 rounded-xl bg-black/40 backdrop-blur-md border border-white/10 flex items-center justify-center text-white/80 group-hover:text-white group-hover:scale-110 transition-all">
-                        <Folder size={20} />
-                    </div>
+                {/* Fallback icon if no image */}
+                <div className="absolute inset-0 flex items-center justify-center opacity-20 group-hover:opacity-0 transition-opacity">
+                    <ImageIcon size={24} className="text-white/40" />
                 </div>
 
-                {/* Badge */}
-                <div className="absolute top-4 left-4 z-10">
-                    <div className="px-3 py-1 rounded-lg bg-black/40 backdrop-blur-md border border-white/10 flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
-                        <span className="text-[8px] font-black text-white/80 uppercase tracking-widest">{captureCount} Prints</span>
-                    </div>
+                {/* Count badge */}
+                <div className="absolute top-2.5 left-2.5">
+                    <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-black/60 backdrop-blur-sm border border-white/10 text-[9px] font-black text-white/70 uppercase tracking-widest">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        {captureCount}
+                    </span>
                 </div>
 
-                <div className="absolute inset-0 bg-gradient-to-t from-bg-primary via-transparent to-transparent opacity-80" />
+                {/* Folder icon */}
+                <div className="absolute top-2.5 right-2.5 w-7 h-7 rounded-lg bg-black/50 backdrop-blur-sm border border-white/10 flex items-center justify-center opacity-60 group-hover:opacity-100 transition-opacity">
+                    <Folder size={14} className="text-white/80" />
+                </div>
+
+                {/* Bottom gradient */}
+                <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/80 to-transparent" />
             </div>
 
-            <div className="p-6 space-y-3 relative">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <div
-                            className="w-2 h-2 rounded-full shadow-[0_0_8px_currentColor]"
-                            style={{ color: accentColor }}
-                        />
-                        <span className="text-[10px] font-black uppercase tracking-widest text-white/60">
-                            PI {pi}
-                        </span>
-                    </div>
-                    <ChevronRight size={16} className="text-white/20 group-hover:text-white group-hover:translate-x-1 transition-all" />
-                </div>
-
-                <div className="space-y-1">
-                    <h3 className="font-black text-white/90 text-sm tracking-tight line-clamp-1 group-hover:text-accent transition-colors">
+            {/* Info */}
+            <div className="px-3.5 py-3 flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                    <p className="text-[9px] font-black text-white/30 uppercase tracking-widest mb-1">
+                        PI {pi}
+                    </p>
+                    <h3 className="text-sm font-black text-white/85 leading-tight group-hover:text-white transition-colors truncate">
                         {client}
                     </h3>
-                    <p className="text-[10px] text-white/20 font-black uppercase tracking-widest truncate">
+                    <p className="text-[10px] text-white/25 truncate mt-0.5">
                         {campaignName}
                     </p>
                 </div>
 
-                {/* Visual Decorative bits */}
-                <div className="pt-2 flex items-center gap-2">
-                    <div className="h-px flex-1 bg-gradient-to-r from-white/10 to-transparent" />
-                    <div className="w-1 h-1 rounded-full bg-white/10" />
-                    <div className="w-20 rounded-full h-px bg-white/5" />
-                </div>
+                <ChevronRight
+                    size={14}
+                    className="text-white/15 group-hover:text-white/60 group-hover:translate-x-0.5 transition-all shrink-0 mt-1"
+                />
             </div>
         </Link>
     )

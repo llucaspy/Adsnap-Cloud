@@ -41,7 +41,7 @@ export function QuarantineView() {
     if (items.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center p-20 text-center border-2 border-dashed border-white/5 rounded-3xl">
-                <CheckCircle2 className="w-12 h-12 text-accent mb-4 opacity-20" />
+                <CheckCircle2 className="w-12 h-12 text-white/20 mb-4" />
                 <h3 className="text-xl font-bold text-white/40">Nexus está limpo</h3>
                 <p className="text-white/20 text-sm">Nenhuma captura em quarentena detectada.</p>
             </div>
@@ -91,7 +91,7 @@ export function QuarantineView() {
                             <div className="mt-auto flex items-center gap-2">
                                 <button
                                     onClick={() => handleRetry(item.id)}
-                                    className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-accent hover:bg-accent-light text-bg-primary rounded-xl font-bold text-xs transition-all"
+                                    className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-white hover:bg-gray-100 text-black rounded-xl font-bold text-xs transition-all"
                                 >
                                     <RotateCcw className="w-4 h-4" />
                                     Tentar Novamente

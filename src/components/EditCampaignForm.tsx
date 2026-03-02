@@ -177,7 +177,7 @@ export function EditCampaignForm({ campaign, existingPis }: { campaign: Campaign
                                     style={{
                                         background: isActive ? 'var(--accent-muted)' : 'var(--bg-tertiary)',
                                         border: isActive ? '2px solid var(--accent)' : '2px solid transparent',
-                                        boxShadow: isActive ? '0 0 20px rgba(168, 85, 247, 0.2)' : 'none'
+                                        boxShadow: isActive ? '0 0 20px rgba(255, 255, 255, 0.1)' : 'none'
                                     }}
                                 >
                                     <div

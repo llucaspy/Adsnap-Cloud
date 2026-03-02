@@ -130,7 +130,7 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
                             style={{
                                 width: step >= s ? '40px' : '20px',
                                 background: step >= s ? 'var(--gradient-primary)' : 'var(--bg-tertiary)',
-                                boxShadow: step >= s ? '0 0 12px rgba(168, 85, 247, 0.5)' : 'none'
+                                boxShadow: step >= s ? '0 0 12px rgba(255, 255, 255, 0.2)' : 'none'
                             }}
                         />
                     ))}
@@ -363,7 +363,7 @@ function StepSegmentation({ formData, updateFields, next, back }: StepProps) {
                                     style={{
                                         background: isActive ? 'var(--accent-muted)' : 'var(--bg-tertiary)',
                                         border: isActive ? '2px solid var(--accent)' : '2px solid transparent',
-                                        boxShadow: isActive ? '0 0 20px rgba(168, 85, 247, 0.2)' : 'none'
+                                        boxShadow: isActive ? '0 0 20px rgba(255, 255, 255, 0.1)' : 'none'
                                     }}
                                 >
                                     <div
@@ -863,7 +863,7 @@ function InputField({ label, icon: Icon, value, onChange, placeholder, onBlur }:
                     }}
                     onFocus={e => {
                         e.currentTarget.style.borderColor = 'var(--accent)'
-                        e.currentTarget.style.boxShadow = '0 0 20px rgba(168, 85, 247, 0.2)'
+                        e.currentTarget.style.boxShadow = '0 0 20px rgba(255, 255, 255, 0.1)'
                     }}
                     onBlur={e => {
                         e.currentTarget.style.borderColor = 'transparent'
@@ -884,7 +884,7 @@ function DeviceButton({ active, onClick, icon: Icon, label }: any) {
             style={{
                 background: active ? 'var(--gradient-primary)' : 'transparent',
                 color: active ? 'white' : 'var(--text-muted)',
-                boxShadow: active ? '0 0 20px rgba(168, 85, 247, 0.3)' : 'none'
+                boxShadow: active ? '0 0 20px rgba(255, 255, 255, 0.12)' : 'none'
             }}
         >
             <Icon size={18} /> {label}

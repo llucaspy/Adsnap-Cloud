@@ -24,7 +24,7 @@ export function CaptureTimelineCard({ capture }: CaptureTimelineCardProps) {
     }
 
     return (
-        <div className="group relative bg-white/[0.03] border border-white/10 rounded-[2rem] overflow-hidden transition-all duration-500 hover:border-accent/40 hover:shadow-[0_20px_50px_rgba(168,85,247,0.15)] hover:translate-y-[-4px]">
+        <div className="group relative bg-white/[0.03] border border-white/8 rounded-[2rem] overflow-hidden transition-all duration-500 hover:border-white/25 hover:shadow-[0_20px_50px_rgba(0,0,0,0.7)] hover:translate-y-[-4px]">
             {/* Hover Glow Effect */}
             <div className="absolute inset-0 opacity-0 group-hover:opacity-10 transition-opacity bg-gradient-to-br from-accent via-secondary to-tertiary pointer-events-none" />
 

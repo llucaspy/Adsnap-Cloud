@@ -74,16 +74,16 @@ export function QueueIndicator() {
         <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 animate-slide-up">
             <div
                 className="px-6 py-4 rounded-2xl flex items-center gap-6 shadow-2xl backdrop-blur-xl border border-white/10"
-                style={{ background: 'rgba(10, 10, 15, 0.9)', boxShadow: '0 0 40px rgba(168, 85, 247, 0.2)' }}
+                style={{ background: 'rgba(10, 10, 10, 0.95)', boxShadow: '0 0 40px rgba(0,0,0,0.6)' }}
             >
                 {processing ? (
                     <>
                         <div className="relative">
-                            <Activity className="text-accent animate-pulse" size={24} />
-                            <div className="absolute inset-0 bg-accent blur-md opacity-40 animate-pulse" />
+                            <Activity className="text-white/70 animate-pulse" size={24} />
+                            <div className="absolute inset-0 bg-white/20 blur-md opacity-30 animate-pulse" />
                         </div>
                         <div className="flex flex-col">
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-accent-light">
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-white/50">
                                 Processando Agora
                             </span>
                             <span className="text-sm font-bold text-white max-w-[200px] truncate">
@@ -93,9 +93,9 @@ export function QueueIndicator() {
                     </>
                 ) : showCompleted ? (
                     <>
-                        <CheckCircle2 className="text-secondary animate-bounce" size={24} />
+                        <CheckCircle2 className="text-white/60 animate-bounce" size={24} />
                         <div className="flex flex-col">
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-secondary">
+                            <span className="text-[10px] font-bold uppercase tracking-widest text-white/50">
                                 Captura Concluída
                             </span>
                             <span className="text-sm font-bold text-white">
@@ -112,8 +112,8 @@ export function QueueIndicator() {
                 {queuedCount > 0 && (
                     <div className="flex items-center gap-4">
                         <div className="flex items-center gap-2">
-                            <Layers size={18} className="text-tertiary" />
-                            <span className="text-sm font-bold text-tertiary-light">
+                            <Layers size={18} className="text-white/40" />
+                            <span className="text-sm font-bold text-white/60">
                                 {queuedCount} na fila
                             </span>
                         </div>
@@ -139,7 +139,7 @@ export function QueueIndicator() {
                             key={i}
                             className="w-1 h-3 rounded-full animate-shimmer"
                             style={{
-                                background: 'var(--gradient-primary)',
+                                background: 'linear-gradient(to top, rgba(255,255,255,0.4), rgba(255,255,255,0.1))',
                                 animationDelay: `${i * 0.1}s`
                             }}
                         />
