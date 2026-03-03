@@ -1,6 +1,6 @@
 'use client'
 
-import { LayoutDashboard, Activity, PlusCircle, Library, Archive, Settings, Sparkles, Zap, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database, MessageCircle, Mail } from 'lucide-react'
+import { LayoutDashboard, Activity, PlusCircle, Library, Archive, Settings, Sparkles, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database, MessageCircle, Mail } from 'lucide-react'
 import { Logo } from './Logo'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
@@ -101,15 +101,17 @@ export function Sidebar() {
         >
             {/* Logo Area */}
             <div
-                className="p-6 space-y-6"
+                className="p-6 space-y-5"
                 style={{ borderBottom: '1px solid var(--border)' }}
             >
-                {/* System ID */}
-                <div className="flex items-center gap-2 ml-1">
-                    <div className="w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center shadow-lg">
-                        <Zap size={14} className="text-white" />
-                    </div>
-                    <span className="text-[11px] font-black uppercase tracking-[0.3em] text-white/40">Adsnap</span>
+                {/* Brand Logo */}
+                <div className="flex items-center px-1">
+                    <img
+                        src="/logo.png"
+                        alt="Adsnap"
+                        className="h-8 w-auto object-contain"
+                        style={{ filter: 'brightness(1.1)' }}
+                    />
                 </div>
 
                 {/* Workspace Card */}

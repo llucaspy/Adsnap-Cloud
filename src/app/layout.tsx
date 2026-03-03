@@ -20,6 +20,9 @@ const dmSans = DM_Sans({
 export const metadata: Metadata = {
   title: "Adsnap v2",
   description: "Automação de Captura de Mídia",
+  icons: {
+    icon: '/favicon.ico',
+  },
 };
 
 export default function RootLayout({

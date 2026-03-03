@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { Eye, EyeOff, Zap, ArrowRight, Github, Linkedin, Instagram } from 'lucide-react'
+import { Eye, EyeOff, ArrowRight, Github, Linkedin, Instagram } from 'lucide-react'
 
 // =============================================================================
 // NEXUS TERMINAL - Animated AI boot sequence
@@ -355,37 +355,19 @@ export default function LoginPage() {
                     {/* Logo area */}
                     <div className="text-center mb-10">
                         <motion.div
-                            initial={{ scale: 0.8, opacity: 0 }}
+                            initial={{ scale: 0.9, opacity: 0 }}
                             animate={{ scale: 1, opacity: 1 }}
-                            transition={{ delay: 0.2, duration: 0.5 }}
-                            className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full mb-6"
-                            style={{
-                                border: '1px solid var(--border)',
-                            }}
+                            transition={{ delay: 0.2, duration: 0.6 }}
+                            className="flex flex-col items-center gap-3 mb-6"
                         >
-                            <Zap
-                                className="w-3.5 h-3.5"
-                                style={{ color: 'var(--accent)' }}
+                            <img
+                                src="/logo.png"
+                                alt="Adsnap"
+                                className="h-16 w-auto object-contain"
+                                style={{ filter: 'brightness(1.05)' }}
                             />
-                            <span
-                                className="text-xs font-medium uppercase"
-                                style={{
-                                    letterSpacing: '0.2em',
-                                    color: 'var(--text-muted)',
-                                }}
-                            >
-                                Neural Intelligence
-                            </span>
                         </motion.div>
 
-                        <h1
-                            className="text-4xl font-bold tracking-tight"
-                            style={{ fontFamily: 'var(--font-display)' }}
-                        >
-                            ADS<span className="glow-text" style={{ color: 'var(--accent)' }}>NAP</span>
-                            <span style={{ color: 'var(--text-muted)', margin: '0 4px' }}>.</span>
-                            <span style={{ color: 'var(--text-primary)' }}>V2 PRO</span>
-                        </h1>
                         <p
                             className="mt-3 text-sm"
                             style={{ color: 'var(--text-muted)' }}
