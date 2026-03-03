@@ -358,14 +358,19 @@ export default function LoginPage() {
                             initial={{ scale: 0.9, opacity: 0 }}
                             animate={{ scale: 1, opacity: 1 }}
                             transition={{ delay: 0.2, duration: 0.6 }}
-                            className="flex flex-col items-center gap-3 mb-6"
+                            className="flex flex-col items-center mb-6"
                         >
-                            <img
-                                src="/logo.png"
-                                alt="Adsnap"
-                                className="h-16 w-auto object-contain"
-                                style={{ filter: 'brightness(1.05)' }}
-                            />
+                            {/* Premium Logo Badge */}
+                            <div className="relative group">
+                                <div className="absolute -inset-4 bg-white/5 rounded-full blur-2xl opacity-0 group-hover:opacity-100 transition duration-1000"></div>
+                                <div className="relative bg-white p-6 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] flex items-center justify-center min-w-[220px]">
+                                    <img
+                                        src="/logo.png"
+                                        alt="Adsnap"
+                                        className="h-10 w-auto object-contain"
+                                    />
+                                </div>
+                            </div>
                         </motion.div>
 
                         <p
