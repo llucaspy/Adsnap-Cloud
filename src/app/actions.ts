@@ -702,3 +702,168 @@ export async function getAdminMetrics() {
         throw error
     }
 }
+
+// --- EMAIL DISPATCH ACTIONS ---
+
+export async function getEmailDispatches() {
+    const dispatches = await (prisma as any).emailDispatch.findMany({
+        orderBy: { createdAt: 'desc' },
+        include: {
+            campaign: {
+                select: {
+                    id: true,
+                    client: true,
+                    agency: true,
+                    campaignName: true,
+                    format: true,
+                    pi: true,
+                    device: true,
+                    flightStart: true,
+                    flightEnd: true,
+                    status: true,
+                }
+            }
+        }
+    })
+
+    return dispatches.map((d: any) => ({
+        ...d,
+        createdAt: d.createdAt.toISOString(),
+        updatedAt: d.updatedAt.toISOString(),
+        lastSentAt: d.lastSentAt?.toISOString() || null,
+        campaign: {
+            ...d.campaign,
+            flightStart: d.campaign.flightStart?.toISOString() || null,
+            flightEnd: d.campaign.flightEnd?.toISOString() || null,
+        }
+    }))
+}
+
+export async function getCampaignsForDispatch() {
+    const campaigns = await prisma.campaign.findMany({
+        where: {
+            isArchived: false,
+            flightEnd: { not: null },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: {
+            id: true,
+            client: true,
+            agency: true,
+            campaignName: true,
+            format: true,
+            pi: true,
+            device: true,
+            flightStart: true,
+            flightEnd: true,
+            status: true,
+            emailDispatches: { select: { id: true } } as any
+        }
+    })
+
+    return campaigns.map(c => ({
+        ...c,
+        flightStart: c.flightStart?.toISOString() || null,
+        flightEnd: c.flightEnd?.toISOString() || null,
+        hasDispatch: (c as any).emailDispatches.length > 0,
+    }))
+}
+
+export async function createEmailDispatch(data: {
+    campaignId: string
+    recipients: string[]
+    dispatchTime: string
+}) {
+    if (!data.campaignId || data.recipients.length === 0) {
+        throw new Error('Campanha e pelo menos um destinatário são obrigatórios')
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    for (const email of data.recipients) {
+        if (!emailRegex.test(email.trim())) {
+            throw new Error(`E-mail inválido: ${email}`)
+        }
+    }
+
+    const dispatch = await (prisma as any).emailDispatch.create({
+        data: {
+            campaignId: data.campaignId,
+            recipients: JSON.stringify(data.recipients.map(e => e.trim())),
+            dispatchTime: data.dispatchTime || '09:00',
+            isActive: true,
+            status: 'PENDING',
+        }
+    })
+
+    nexusLogStore.addLog(`Email Dispatch: Configuração criada para campanha ${data.campaignId}`, 'SYSTEM')
+    revalidatePath('/email-dispatch')
+    return dispatch
+}
+
+export async function updateEmailDispatch(id: string, data: {
+    recipients?: string[]
+    dispatchTime?: string
+    isActive?: boolean
+}) {
+    const updateData: any = {}
+
+    if (data.recipients !== undefined) {
+        updateData.recipients = JSON.stringify(data.recipients.map(e => e.trim()))
+    }
+    if (data.dispatchTime !== undefined) {
+        updateData.dispatchTime = data.dispatchTime
+    }
+    if (data.isActive !== undefined) {
+        updateData.isActive = data.isActive
+    }
+
+    const dispatch = await (prisma as any).emailDispatch.update({
+        where: { id },
+        data: updateData
+    })
+
+    revalidatePath('/email-dispatch')
+    return dispatch
+}
+
+export async function deleteEmailDispatch(id: string) {
+    await (prisma as any).emailDispatch.delete({ where: { id } })
+    nexusLogStore.addLog(`Email Dispatch: Configuração removida`, 'SYSTEM')
+    revalidatePath('/email-dispatch')
+    return { success: true }
+}
+
+export async function sendTestEmail(dispatchId: string) {
+    const dispatch = await (prisma as any).emailDispatch.findUnique({
+        where: { id: dispatchId },
+    })
+
+    if (!dispatch) {
+        return { success: false, error: 'Disparo não encontrado' }
+    }
+
+    const recipients = JSON.parse(dispatch.recipients) as string[]
+    if (recipients.length === 0) {
+        return { success: false, error: 'Nenhum destinatário configurado' }
+    }
+
+    // Send only to the first recipient as a test
+    const { sendCampaignReport } = await import('@/lib/emailService')
+    const result = await sendCampaignReport({
+        campaignId: dispatch.campaignId,
+        recipients: [recipients[0]],
+        dispatchId: dispatch.id,
+    })
+
+    // Reset status back to PENDING after test
+    if (result.success) {
+        await (prisma as any).emailDispatch.update({
+            where: { id: dispatchId },
+            data: { status: 'PENDING' }
+        })
+    }
+
+    revalidatePath('/email-dispatch')
+    return result
+}

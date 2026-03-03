@@ -28,6 +28,7 @@ model Campaign {
   lastCaptureAt  DateTime?
   retryCount     Int       @default(0)
   captures       Capture[]
+  emailDispatches EmailDispatch[]
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 }
@@ -75,4 +76,17 @@ model NexusLog {
   details    String?  // JSON ou stack trace
   campaignId String?
   createdAt  DateTime @default(now())
+}
+
+model EmailDispatch {
+  id            String    @id @default(cuid())
+  campaignId    String
+  campaign      Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  recipients    String    // JSON array: ["email1@x.com", "email2@x.com"]
+  dispatchTime  String    @default("09:00") // HH:mm — horário BRT do disparo
+  isActive      Boolean   @default(true)
+  lastSentAt    DateTime?
+  status        String    @default("PENDING") // PENDING | SENT | FAILED
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }

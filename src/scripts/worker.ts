@@ -97,6 +97,74 @@ async function worker() {
             }
         }
 
+        // 3. Email Dispatch Check — send reports for ended campaigns
+        console.log('[Nexus Worker] Verificando disparos de email pendentes...')
+        try {
+            const pendingDispatches = await (prisma as any).emailDispatch.findMany({
+                where: {
+                    isActive: true,
+                    status: 'PENDING',
+                },
+                include: {
+                    campaign: {
+                        select: {
+                            id: true,
+                            client: true,
+                            flightEnd: true,
+                        }
+                    }
+                }
+            })
+
+            for (const dispatch of pendingDispatches) {
+                const flightEnd = dispatch.campaign.flightEnd
+                if (!flightEnd) continue
+
+                // Check if flightEnd is today or in the past (BRT)
+                const flightEndDate = new Date(flightEnd)
+                const flightEndDay = new Date(Date.UTC(flightEndDate.getFullYear(), flightEndDate.getMonth(), flightEndDate.getDate()))
+
+                if (flightEndDay > today) {
+                    // Campaign hasn't ended yet
+                    continue
+                }
+
+                // Check if dispatch time has passed
+                const [dh, dm] = dispatch.dispatchTime.split(':').map(Number)
+                const dispatchMoment = new Date(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate(), dh, dm)
+
+                if (brtNow < dispatchMoment) {
+                    // Dispatch time hasn't arrived yet today
+                    continue
+                }
+
+                // Check if already sent today
+                if (dispatch.lastSentAt) {
+                    const lastSent = new Date(dispatch.lastSentAt)
+                    const lastSentDay = new Date(lastSent.getFullYear(), lastSent.getMonth(), lastSent.getDate())
+                    const todayDay = new Date(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate())
+                    if (lastSentDay.getTime() >= todayDay.getTime()) {
+                        continue // Already sent today
+                    }
+                }
+
+                // Send the report!
+                console.log(`[Nexus Worker] Disparando email para campanha ${dispatch.campaign.client} (${dispatch.campaignId})...`)
+                await nexusLogStore.addLog(`Nexus Worker: Disparando email de fim de veiculação para ${dispatch.campaign.client}`, 'SYSTEM')
+
+                const recipients = JSON.parse(dispatch.recipients) as string[]
+                const { sendCampaignReport } = await import('../lib/emailService')
+                await sendCampaignReport({
+                    campaignId: dispatch.campaignId,
+                    recipients,
+                    dispatchId: dispatch.id,
+                })
+            }
+        } catch (emailErr) {
+            console.error('[Nexus Worker] Erro no módulo de email dispatch:', emailErr)
+            await nexusLogStore.addLog('Nexus Worker: Erro ao processar disparos de email', 'ERROR')
+        }
+
     } catch (error) {
         console.error('[Nexus Worker] Erro fatal no worker:', error)
         await nexusLogStore.addLog('Nexus Worker: Erro fatal durante a execução', 'ERROR')

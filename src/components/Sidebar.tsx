@@ -1,6 +1,6 @@
 'use client'
 
-import { LayoutDashboard, Activity, PlusCircle, Library, Archive, Settings, Sparkles, Zap, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database, MessageCircle } from 'lucide-react'
+import { LayoutDashboard, Activity, PlusCircle, Library, Archive, Settings, Sparkles, Zap, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database, MessageCircle, Mail } from 'lucide-react'
 import { Logo } from './Logo'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
@@ -80,6 +80,7 @@ export function Sidebar() {
         { icon: PlusCircle, label: 'Novo Setup', href: '/campaigns' },
         { icon: Library, label: 'Books', href: '/books' },
         { icon: Archive, label: 'Arquivado', href: '/archive' },
+        { icon: Mail, label: 'Disparo de E-mails', href: '/email-dispatch' },
     ]
 
     const menuItems = user?.role === 'admin'
