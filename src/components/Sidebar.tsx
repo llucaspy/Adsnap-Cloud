@@ -111,42 +111,27 @@ export function Sidebar() {
                     </span>
                 </div>
 
-                {/* Workspace Portal Section */}
-                <div className="relative pt-6">
-                    {/* Header Label / Badge */}
-                    <div className="absolute top-0 right-4 flex items-center gap-1.5 px-3 py-1 bg-[#ff0000]/10 border border-[#ff0000]/20 rounded-full z-10">
-                        <div className="w-1 h-1 rounded-full bg-[#ff0000] animate-pulse" />
-                        <span className="text-[8px] font-black uppercase tracking-[0.1em] text-[#ff0000]">
-                            Portal Ativo
-                        </span>
+                {/* Workspace Card */}
+                <div className="relative pt-4">
+                    {/* Floating Badge for Workplace Identification */}
+                    <div
+                        className="absolute -top-1 left-4 px-3 py-1 bg-white border border-gray-200 rounded-full text-[8px] font-black uppercase text-gray-800 tracking-[0.2em] z-20 shadow-xl flex items-center gap-2"
+                        style={{ boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                    >
+                        <div className="w-1.5 h-1.5 rounded-full bg-[#ff0000] animate-pulse" />
+                        Client Workplace
                     </div>
 
-                    <div
-                        className="bg-gradient-to-br from-white/[0.05] to-transparent border border-white/10 rounded-2xl p-5 flex flex-col items-center gap-4 transition-all duration-500 hover:border-white/20 hover:shadow-[0_20px_40px_rgba(0,0,0,0.3)] group/workspace"
-                    >
-                        {/* Logo Container with Glow */}
-                        <div className="relative w-full aspect-[2/1] bg-white rounded-xl overflow-hidden flex items-center justify-center p-4 shadow-inner">
-                            <img
-                                src="https://assets.metroimg.com/images/logo-maisacessado.gif"
-                                alt="Metrópoles"
-                                className="h-full w-auto object-contain"
-                            />
-                        </div>
-
-                        <div className="w-full space-y-1">
-                            <div className="flex items-center justify-between">
-                                <span className="text-[10px] font-black tracking-[0.2em] uppercase text-white/40">
-                                    Workplace
-                                </span>
-                                <span className="text-[9px] font-bold text-white/20">
-                                    ID: MET-01
-                                </span>
-                            </div>
-                            <div className="h-px w-full bg-gradient-to-r from-white/10 to-transparent" />
-                            <p className="text-sm font-black text-white tracking-tight group-hover/workspace:translate-x-1 transition-transform">
-                                METRÓPOLES
-                            </p>
-                        </div>
+                    <div className="bg-white border border-gray-200 rounded-2xl shadow-xl p-5 flex flex-col items-center gap-3">
+                        <img
+                            src="https://assets.metroimg.com/images/logo-maisacessado.gif"
+                            alt="Metrópoles"
+                            className="h-10 w-auto object-contain"
+                        />
+                        <div className="h-px w-8 bg-gray-100" />
+                        <span className="text-[10px] font-bold tracking-[0.15em] uppercase text-gray-900">
+                            Metrópoles
+                        </span>
                     </div>
                 </div>
             </div>
