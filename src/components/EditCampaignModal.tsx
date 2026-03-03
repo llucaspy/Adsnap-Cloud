@@ -1,44 +1,142 @@
 'use client'
 
 import React, { useState, useTransition } from 'react'
-import { X, Globe, Monitor, Smartphone, Layers, ChevronDown, Save, Calendar, Building2, User2, Hash, Loader2 } from 'lucide-react'
-import { updateCampaign } from '@/app/actions'
+import { X, Globe, Monitor, Smartphone, Layers, ChevronDown, ChevronUp, Save, Calendar, Building2, User2, Hash, Loader2, Plus, Trash2 } from 'lucide-react'
+import { updateCampaign, addFormatToCampaign, deleteCampaign } from '@/app/actions'
 
 interface EditCampaignModalProps {
-    campaign: any
+    campaigns: any[]
     formats: any[]
     onClose: () => void
     onSaved: () => void
 }
 
-export function EditCampaignModal({ campaign, formats, onClose, onSaved }: EditCampaignModalProps) {
+interface FormatEntry {
+    _id: string           // internal tracking id
+    _isNew: boolean       // true if this is a new format to be created
+    _isDeleted: boolean   // true if marked for deletion
+    id: string            // campaign id (empty for new)
+    url: string
+    device: string
+    format: string
+    flightStart: string
+    flightEnd: string
+}
+
+export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: EditCampaignModalProps) {
     const [isPending, startTransition] = useTransition()
-    const [form, setForm] = useState({
-        agency: campaign.agency || '',
-        client: campaign.client || '',
-        campaignName: campaign.campaignName || '',
-        pi: campaign.pi || '',
-        url: campaign.url || '',
-        device: campaign.device || 'desktop',
-        format: campaign.format || '',
-        segmentation: campaign.segmentation || 'PRIVADO',
-        flightStart: campaign.flightStart ? campaign.flightStart.slice(0, 10) : '',
-        flightEnd: campaign.flightEnd ? campaign.flightEnd.slice(0, 10) : '',
-        isScheduled: campaign.isScheduled || false,
-        scheduledTimes: campaign.scheduledTimes || '[]',
+    const firstCampaign = campaigns[0] || {}
+
+    // Shared fields (same for all formats in the PI)
+    const [shared, setShared] = useState({
+        agency: firstCampaign.agency || '',
+        client: firstCampaign.client || '',
+        campaignName: firstCampaign.campaignName || '',
+        pi: firstCampaign.pi || '',
+        segmentation: firstCampaign.segmentation || 'PRIVADO',
+        isScheduled: firstCampaign.isScheduled || false,
+        scheduledTimes: firstCampaign.scheduledTimes || '[]',
     })
 
-    const update = (fields: Partial<typeof form>) => setForm(prev => ({ ...prev, ...fields }))
+    // Format entries - one per campaign
+    const [entries, setEntries] = useState<FormatEntry[]>(
+        campaigns.map(c => ({
+            _id: c.id,
+            _isNew: false,
+            _isDeleted: false,
+            id: c.id,
+            url: c.url || '',
+            device: c.device || 'desktop',
+            format: c.format || '',
+            flightStart: c.flightStart ? new Date(c.flightStart).toISOString().slice(0, 10) : '',
+            flightEnd: c.flightEnd ? new Date(c.flightEnd).toISOString().slice(0, 10) : '',
+        }))
+    )
 
-    const handleSave = () => {
-        const data = new FormData()
-        Object.entries(form).forEach(([key, value]) => {
-            data.append(key, value.toString())
-        })
+    const [expandedIndex, setExpandedIndex] = useState<number | null>(0)
 
+    const updateShared = (fields: Partial<typeof shared>) => setShared(prev => ({ ...prev, ...fields }))
+
+    const updateEntry = (index: number, fields: Partial<FormatEntry>) => {
+        setEntries(prev => prev.map((e, i) => i === index ? { ...e, ...fields } : e))
+    }
+
+    const addNewFormat = () => {
+        const newEntry: FormatEntry = {
+            _id: `new-${Date.now()}`,
+            _isNew: true,
+            _isDeleted: false,
+            id: '',
+            url: entries[0]?.url || '',
+            device: entries[0]?.device || 'desktop',
+            format: '',
+            flightStart: entries[0]?.flightStart || '',
+            flightEnd: entries[0]?.flightEnd || '',
+        }
+        setEntries(prev => [...prev, newEntry])
+        setExpandedIndex(entries.length)
+    }
+
+    const markForDeletion = (index: number) => {
+        const entry = entries[index]
+        if (entry._isNew) {
+            // Just remove it from the list
+            setEntries(prev => prev.filter((_, i) => i !== index))
+        } else {
+            if (!confirm('Tem certeza que deseja excluir este formato?')) return
+            setEntries(prev => prev.map((e, i) => i === index ? { ...e, _isDeleted: true } : e))
+        }
+    }
+
+    const getFormatLabel = (formatId: string) => {
+        const fmt = formats.find((f: any) => f.id === formatId)
+        return fmt ? `${fmt.label} (${fmt.width}x${fmt.height})` : formatId || 'Novo formato'
+    }
+
+    const handleSaveAll = () => {
         startTransition(async () => {
             try {
-                await updateCampaign(campaign.id, data)
+                // 1. Delete removed formats
+                for (const entry of entries.filter(e => e._isDeleted && !e._isNew)) {
+                    await deleteCampaign(entry.id)
+                }
+
+                // 2. Update existing formats
+                for (const entry of entries.filter(e => !e._isNew && !e._isDeleted)) {
+                    const data = new FormData()
+                    data.append('agency', shared.agency)
+                    data.append('client', shared.client)
+                    data.append('campaignName', shared.campaignName)
+                    data.append('pi', shared.pi)
+                    data.append('segmentation', shared.segmentation)
+                    data.append('url', entry.url)
+                    data.append('device', entry.device)
+                    data.append('format', entry.format)
+                    data.append('flightStart', entry.flightStart)
+                    data.append('flightEnd', entry.flightEnd)
+                    data.append('isScheduled', shared.isScheduled.toString())
+                    data.append('scheduledTimes', shared.scheduledTimes)
+                    await updateCampaign(entry.id, data)
+                }
+
+                // 3. Create new formats
+                for (const entry of entries.filter(e => e._isNew && !e._isDeleted)) {
+                    await addFormatToCampaign({
+                        agency: shared.agency,
+                        client: shared.client,
+                        campaignName: shared.campaignName,
+                        pi: shared.pi,
+                        segmentation: shared.segmentation,
+                        url: entry.url,
+                        device: entry.device,
+                        format: entry.format,
+                        flightStart: entry.flightStart || null,
+                        flightEnd: entry.flightEnd || null,
+                        isScheduled: shared.isScheduled,
+                        scheduledTimes: shared.scheduledTimes,
+                    })
+                }
+
                 onSaved()
             } catch (err) {
                 alert('Erro ao salvar: ' + (err as Error).message)
@@ -46,10 +144,8 @@ export function EditCampaignModal({ campaign, formats, onClose, onSaved }: EditC
         })
     }
 
-    const getFormatLabel = (formatId: string) => {
-        const fmt = formats.find((f: any) => f.id === formatId)
-        return fmt ? `${fmt.label} (${fmt.width}x${fmt.height})` : formatId
-    }
+    const activeEntries = entries.filter(e => !e._isDeleted)
+    const deletedCount = entries.filter(e => e._isDeleted).length
 
     return (
         <div
@@ -70,10 +166,10 @@ export function EditCampaignModal({ campaign, formats, onClose, onSaved }: EditC
                 >
                     <div>
                         <h2 className="text-xl font-black tracking-tight" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>
-                            Editar <span className="text-gradient">Campanha</span>
+                            Editar <span className="text-gradient">PI {shared.pi}</span>
                         </h2>
                         <p className="text-xs text-white/30 mt-0.5">
-                            {getFormatLabel(campaign.format)} • PI {campaign.pi}
+                            {activeEntries.length} formato{activeEntries.length !== 1 ? 's' : ''} • {shared.client}
                         </p>
                     </div>
                     <button
@@ -85,21 +181,21 @@ export function EditCampaignModal({ campaign, formats, onClose, onSaved }: EditC
                 </div>
 
                 <div className="p-8 space-y-6">
-                    {/* Identification Row */}
+                    {/* Shared Fields */}
                     <div className="grid grid-cols-2 gap-4">
                         <FieldBlock label="Agência" icon={Building2}>
                             <input
                                 type="text"
-                                value={form.agency}
-                                onChange={e => update({ agency: e.target.value })}
+                                value={shared.agency}
+                                onChange={e => updateShared({ agency: e.target.value })}
                                 className="modal-input"
                             />
                         </FieldBlock>
                         <FieldBlock label="Cliente" icon={User2}>
                             <input
                                 type="text"
-                                value={form.client}
-                                onChange={e => update({ client: e.target.value })}
+                                value={shared.client}
+                                onChange={e => updateShared({ client: e.target.value })}
                                 className="modal-input"
                             />
                         </FieldBlock>
@@ -109,99 +205,168 @@ export function EditCampaignModal({ campaign, formats, onClose, onSaved }: EditC
                         <FieldBlock label="Nome da Campanha" icon={Hash}>
                             <input
                                 type="text"
-                                value={form.campaignName}
-                                onChange={e => update({ campaignName: e.target.value })}
+                                value={shared.campaignName}
+                                onChange={e => updateShared({ campaignName: e.target.value })}
                                 className="modal-input"
                             />
                         </FieldBlock>
                         <FieldBlock label="PI" icon={Hash}>
                             <input
                                 type="text"
-                                value={form.pi}
-                                onChange={e => update({ pi: e.target.value })}
+                                value={shared.pi}
+                                onChange={e => updateShared({ pi: e.target.value })}
                                 className="modal-input"
                             />
                         </FieldBlock>
                     </div>
 
-                    {/* Divider */}
+                    {/* Formats Section */}
                     <div className="border-t border-white/5 pt-4">
-                        <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white/20">Veiculação</span>
+                        <div className="flex items-center justify-between mb-4">
+                            <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white/20">
+                                Formatos ({activeEntries.length})
+                            </span>
+                            <button
+                                onClick={addNewFormat}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-accent/10 border border-accent/20 text-accent hover:bg-accent hover:text-white transition-all"
+                            >
+                                <Plus size={12} /> Adicionar Formato
+                            </button>
+                        </div>
+
+                        <div className="space-y-2">
+                            {entries.map((entry, index) => {
+                                if (entry._isDeleted) return null
+                                const isExpanded = expandedIndex === index
+
+                                return (
+                                    <div
+                                        key={entry._id}
+                                        className={`rounded-xl border transition-all ${entry._isNew
+                                            ? 'border-accent/30 bg-accent/[0.03]'
+                                            : 'border-white/[0.06] bg-white/[0.02]'
+                                            } ${isExpanded ? 'shadow-lg' : ''}`}
+                                    >
+                                        {/* Format Header (always visible) */}
+                                        <div
+                                            className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-white/[0.03] transition-colors rounded-xl"
+                                            onClick={() => setExpandedIndex(isExpanded ? null : index)}
+                                        >
+                                            <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 bg-accent/10">
+                                                {entry.device === 'mobile'
+                                                    ? <Smartphone size={12} className="text-accent/70" />
+                                                    : <Monitor size={12} className="text-accent/70" />
+                                                }
+                                            </div>
+                                            <span className="text-sm font-medium text-white/70 flex-1 truncate">
+                                                {getFormatLabel(entry.format)}
+                                            </span>
+                                            {entry._isNew && (
+                                                <span className="px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider bg-accent/15 text-accent border border-accent/20">
+                                                    Novo
+                                                </span>
+                                            )}
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); markForDeletion(index) }}
+                                                className="w-7 h-7 rounded-lg flex items-center justify-center text-white/15 hover:text-red-400 hover:bg-red-400/10 transition-all"
+                                                title="Remover formato"
+                                            >
+                                                <Trash2 size={13} />
+                                            </button>
+                                            {isExpanded
+                                                ? <ChevronUp size={14} className="text-white/20 flex-shrink-0" />
+                                                : <ChevronDown size={14} className="text-white/20 flex-shrink-0" />
+                                            }
+                                        </div>
+
+                                        {/* Expanded Fields */}
+                                        {isExpanded && (
+                                            <div className="px-4 pb-4 pt-1 space-y-3 border-t border-white/[0.04]">
+                                                {/* URL */}
+                                                <FieldBlock label="URL Alvo" icon={Globe}>
+                                                    <input
+                                                        type="text"
+                                                        value={entry.url}
+                                                        onChange={e => updateEntry(index, { url: e.target.value })}
+                                                        className="modal-input"
+                                                        placeholder="https://..."
+                                                    />
+                                                </FieldBlock>
+
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    {/* Device */}
+                                                    <FieldBlock label="Dispositivo" icon={Monitor}>
+                                                        <div className="flex gap-2 p-1.5 rounded-xl" style={{ background: 'var(--bg-tertiary, #1a1a24)' }}>
+                                                            <button
+                                                                onClick={() => updateEntry(index, { device: 'desktop' })}
+                                                                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-bold transition-all ${entry.device === 'desktop' ? 'bg-accent text-white shadow-lg' : 'text-white/40 hover:text-white/60'}`}
+                                                            >
+                                                                <Monitor size={14} /> Desktop
+                                                            </button>
+                                                            <button
+                                                                onClick={() => updateEntry(index, { device: 'mobile' })}
+                                                                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-bold transition-all ${entry.device === 'mobile' ? 'bg-accent text-white shadow-lg' : 'text-white/40 hover:text-white/60'}`}
+                                                            >
+                                                                <Smartphone size={14} /> Mobile
+                                                            </button>
+                                                        </div>
+                                                    </FieldBlock>
+
+                                                    {/* Format */}
+                                                    <FieldBlock label="Formato" icon={Layers}>
+                                                        <div className="relative">
+                                                            <select
+                                                                value={entry.format}
+                                                                onChange={e => updateEntry(index, { format: e.target.value })}
+                                                                className="modal-input appearance-none pr-10"
+                                                            >
+                                                                <option value="">Selecione...</option>
+                                                                {formats.map((fmt: any) => (
+                                                                    <option key={fmt.id} value={fmt.id}>
+                                                                        {fmt.label} ({fmt.width}x{fmt.height})
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 pointer-events-none" size={16} />
+                                                        </div>
+                                                    </FieldBlock>
+                                                </div>
+
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <FieldBlock label="Data Início" icon={Calendar}>
+                                                        <input
+                                                            type="date"
+                                                            value={entry.flightStart}
+                                                            onChange={e => updateEntry(index, { flightStart: e.target.value })}
+                                                            className="modal-input"
+                                                        />
+                                                    </FieldBlock>
+                                                    <FieldBlock label="Data Fim" icon={Calendar}>
+                                                        <input
+                                                            type="date"
+                                                            value={entry.flightEnd}
+                                                            onChange={e => updateEntry(index, { flightEnd: e.target.value })}
+                                                            className="modal-input"
+                                                        />
+                                                    </FieldBlock>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )
+                            })}
+                        </div>
                     </div>
 
-                    {/* URL */}
-                    <FieldBlock label="URL Alvo" icon={Globe}>
-                        <input
-                            type="text"
-                            value={form.url}
-                            onChange={e => update({ url: e.target.value })}
-                            className="modal-input"
-                            placeholder="https://..."
-                        />
-                    </FieldBlock>
-
-                    <div className="grid grid-cols-2 gap-4">
-                        {/* Device */}
-                        <FieldBlock label="Dispositivo" icon={Monitor}>
-                            <div className="flex gap-2 p-1.5 rounded-xl" style={{ background: 'var(--bg-tertiary, #1a1a24)' }}>
-                                <button
-                                    onClick={() => update({ device: 'desktop' })}
-                                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-bold transition-all ${form.device === 'desktop' ? 'bg-accent text-white shadow-lg' : 'text-white/40 hover:text-white/60'}`}
-                                >
-                                    <Monitor size={14} /> Desktop
-                                </button>
-                                <button
-                                    onClick={() => update({ device: 'mobile' })}
-                                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-bold transition-all ${form.device === 'mobile' ? 'bg-accent text-white shadow-lg' : 'text-white/40 hover:text-white/60'}`}
-                                >
-                                    <Smartphone size={14} /> Mobile
-                                </button>
-                            </div>
-                        </FieldBlock>
-
-                        {/* Format */}
-                        <FieldBlock label="Formato" icon={Layers}>
-                            <div className="relative">
-                                <select
-                                    value={form.format}
-                                    onChange={e => update({ format: e.target.value })}
-                                    className="modal-input appearance-none pr-10"
-                                >
-                                    <option value="">Selecione...</option>
-                                    {formats.map((fmt: any) => (
-                                        <option key={fmt.id} value={fmt.id}>
-                                            {fmt.label} ({fmt.width}x{fmt.height})
-                                        </option>
-                                    ))}
-                                </select>
-                                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 pointer-events-none" size={16} />
-                            </div>
-                        </FieldBlock>
-                    </div>
-
-                    {/* Divider */}
-                    <div className="border-t border-white/5 pt-4">
-                        <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white/20">Período de Veiculação</span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <FieldBlock label="Data Início" icon={Calendar}>
-                            <input
-                                type="date"
-                                value={form.flightStart}
-                                onChange={e => update({ flightStart: e.target.value })}
-                                className="modal-input"
-                            />
-                        </FieldBlock>
-                        <FieldBlock label="Data Fim" icon={Calendar}>
-                            <input
-                                type="date"
-                                value={form.flightEnd}
-                                onChange={e => update({ flightEnd: e.target.value })}
-                                className="modal-input"
-                            />
-                        </FieldBlock>
-                    </div>
+                    {/* Deleted items notice */}
+                    {deletedCount > 0 && (
+                        <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-500/5 border border-red-500/15">
+                            <Trash2 size={14} className="text-red-400/60" />
+                            <span className="text-xs text-red-400/70 font-medium">
+                                {deletedCount} formato{deletedCount !== 1 ? 's' : ''} será{deletedCount !== 1 ? 'ão' : ''} excluído{deletedCount !== 1 ? 's' : ''} ao salvar
+                            </span>
+                        </div>
+                    )}
 
                     {/* Actions */}
                     <div className="flex gap-3 pt-4">
@@ -213,7 +378,7 @@ export function EditCampaignModal({ campaign, formats, onClose, onSaved }: EditC
                             Cancelar
                         </button>
                         <button
-                            onClick={handleSave}
+                            onClick={handleSaveAll}
                             disabled={isPending}
                             className="flex-1 py-4 rounded-xl font-bold text-sm text-white transition-all flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-[0.98]"
                             style={{ background: 'var(--gradient-primary)' }}
@@ -221,7 +386,7 @@ export function EditCampaignModal({ campaign, formats, onClose, onSaved }: EditC
                             {isPending ? (
                                 <><Loader2 size={18} className="animate-spin" /> Salvando...</>
                             ) : (
-                                <><Save size={18} /> Salvar Alterações</>
+                                <><Save size={18} /> Salvar Tudo</>
                             )}
                         </button>
                     </div>

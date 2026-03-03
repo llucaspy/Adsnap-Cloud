@@ -39,15 +39,29 @@ export function ImageLightbox({ src, alt, isOpen, onClose, date }: ImageLightbox
         >
             {/* Controls */}
             <div className="absolute top-6 right-6 flex items-center gap-4 z-50">
-                <a
-                    href={src}
-                    download={`capture-${alt.replace(/\s+/g, '-').toLowerCase()}.jpg`}
+                <button
                     className="p-3 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-all"
                     title="Baixar imagem"
-                    onClick={(e) => e.stopPropagation()}
+                    onClick={async (e) => {
+                        e.stopPropagation()
+                        try {
+                            const response = await fetch(src)
+                            const blob = await response.blob()
+                            const url = URL.createObjectURL(blob)
+                            const a = document.createElement('a')
+                            a.href = url
+                            a.download = `capture-${alt.replace(/\s+/g, '-').toLowerCase()}.jpg`
+                            document.body.appendChild(a)
+                            a.click()
+                            document.body.removeChild(a)
+                            URL.revokeObjectURL(url)
+                        } catch (err) {
+                            console.error('Erro ao baixar imagem:', err)
+                        }
+                    }}
                 >
                     <Download size={24} />
-                </a>
+                </button>
                 <button
                     onClick={onClose}
                     className="p-3 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-all"

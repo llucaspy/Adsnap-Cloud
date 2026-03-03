@@ -227,6 +227,47 @@ export async function updateCampaign(id: string, formData: FormData) {
     return campaign
 }
 
+export async function addFormatToCampaign(data: {
+    agency: string
+    client: string
+    campaignName: string
+    pi: string
+    segmentation: string
+    url: string
+    device: string
+    format: string
+    flightStart: string | null
+    flightEnd: string | null
+    isScheduled: boolean
+    scheduledTimes: string
+}) {
+    if (!data.agency || !data.client || !data.pi || !data.format || !data.url) {
+        throw new Error('Todos os campos são obrigatórios')
+    }
+
+    const campaign = await prisma.campaign.create({
+        data: {
+            agency: data.agency,
+            client: data.client,
+            campaignName: data.campaignName,
+            pi: data.pi,
+            format: data.format,
+            url: data.url,
+            device: data.device || 'desktop',
+            segmentation: data.segmentation || 'PRIVADO',
+            flightStart: data.flightStart ? new Date(data.flightStart) : null,
+            flightEnd: data.flightEnd ? new Date(data.flightEnd) : null,
+            status: 'PENDING',
+            isScheduled: data.isScheduled || false,
+            scheduledTimes: data.scheduledTimes || '[]',
+        },
+    })
+
+    revalidatePath('/')
+    revalidatePath('/monitoring')
+    return campaign
+}
+
 // Get schedule usage stats for UI display
 export async function getScheduleUsage(): Promise<Record<string, number>> {
     const campaigns = await prisma.campaign.findMany({

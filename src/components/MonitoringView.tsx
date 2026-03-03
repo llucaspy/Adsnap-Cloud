@@ -3,8 +3,8 @@
 import React, { useState, useMemo, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { RunCaptureButton } from '@/components/RunCaptureButton'
-import { Monitor, Smartphone, Archive, Trash2, Activity, Globe, Clock, Zap, CalendarRange, Pencil, ShieldAlert, CheckCircle2, Timer, Search, X, Filter, ArrowRight, Layers, Calendar, Loader2, Save } from 'lucide-react'
-import { formatDistanceToNow, format as formatDate, isAfter, isBefore } from 'date-fns'
+import { Monitor, Smartphone, Activity, Globe, Clock, Zap, Pencil, ShieldAlert, CheckCircle2, Timer, Search, X, Filter } from 'lucide-react'
+import { format as formatDate, isAfter, isBefore } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import Link from 'next/link'
 import { QueueIndicator } from '@/components/QueueIndicator'
@@ -354,10 +354,7 @@ export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns
 }
 
 function PiCard({ group, router, isPending, startTransition, formats }: { group: any, router: any, isPending: boolean, startTransition: any, formats: any[] }) {
-    const [editingCampaign, setEditingCampaign] = useState<any>(null)
-    const [isFlipped, setIsFlipped] = useState(false)
-    const [editForm, setEditForm] = useState<any>(null)
-    const [isSaving, startSaveTransition] = useTransition()
+    const [showEditModal, setShowEditModal] = useState(false)
     const isActive = group.statusId === 'ACTIVE'
     const statusLabels = {
         ACTIVE: { label: 'Em Veiculação', color: 'var(--accent)', icon: Activity },
@@ -393,314 +390,127 @@ function PiCard({ group, router, isPending, startTransition, formats }: { group:
         return foundFormat ? foundFormat.label : formatId
     }
 
-    const startEditing = (campaign: any) => {
-        setEditingCampaign(campaign)
-        setEditForm({
-            agency: campaign.agency || '',
-            client: campaign.client || '',
-            campaignName: campaign.campaignName || '',
-            pi: campaign.pi || '',
-            url: campaign.url || '',
-            device: campaign.device || 'desktop',
-            format: campaign.format || '',
-            segmentation: campaign.segmentation || 'PRIVADO',
-            flightStart: campaign.flightStart ? new Date(campaign.flightStart).toISOString().slice(0, 10) : '',
-            flightEnd: campaign.flightEnd ? new Date(campaign.flightEnd).toISOString().slice(0, 10) : '',
-            isScheduled: campaign.isScheduled || false,
-            scheduledTimes: campaign.scheduledTimes || '[]',
-        })
-        setIsFlipped(true)
-    }
-
-    const cancelEditing = () => {
-        setIsFlipped(false)
-        setTimeout(() => { setEditingCampaign(null); setEditForm(null) }, 400)
-    }
-
-    const handleSave = () => {
-        if (!editingCampaign || !editForm) return
-        const data = new FormData()
-        Object.entries(editForm).forEach(([key, value]) => data.append(key, (value as any).toString()))
-
-        startSaveTransition(async () => {
-            try {
-                const { updateCampaign } = await import('@/app/actions')
-                await updateCampaign(editingCampaign.id, data)
-                setIsFlipped(false)
-                setTimeout(() => { setEditingCampaign(null); setEditForm(null); router.refresh() }, 400)
-            } catch (err) {
-                alert('Erro ao salvar: ' + (err as Error).message)
-            }
-        })
-    }
-
-    const updateField = (fields: any) => setEditForm((prev: any) => ({ ...prev, ...fields }))
-
     const cardStyle = `rounded-2xl border transition-all duration-200 flex flex-col min-h-[360px]`
     const frontBg = isActive
         ? 'bg-[#111118] border-white/10'
         : 'bg-[#0e0e14] border-white/[0.06]'
 
     return (
-        <div style={{ perspective: '1200px' }} className="relative">
-            <div
-                className="relative w-full transition-transform duration-500 ease-in-out"
-                style={{
-                    transformStyle: 'preserve-3d',
-                    transform: isFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
-                }}
-            >
-                {/* ======= FRONT FACE ======= */}
-                <div
-                    className={`${cardStyle} ${frontBg} p-6`}
-                    style={{ backfaceVisibility: 'hidden' }}
-                >
-                    {/* Top: Status + Client */}
-                    <div className="space-y-4">
-                        <div className="flex items-start justify-between">
-                            <div className="space-y-3">
-                                <div className="flex items-center gap-2">
-                                    <div className="h-6 px-3 rounded-lg flex items-center gap-1.5"
-                                        style={{ background: `color-mix(in srgb, ${status.color} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${status.color} 20%, transparent)` }}>
-                                        <status.icon size={10} style={{ color: status.color }} />
-                                        <span className="text-[9px] font-bold uppercase tracking-wide" style={{ color: status.color }}>
-                                            {status.label}
-                                        </span>
-                                    </div>
-                                </div>
-                                <h3 className="text-2xl font-black tracking-tight text-white leading-tight" style={{ fontFamily: 'var(--font-display)' }}>
-                                    {group.client}
-                                </h3>
-                                <div className="flex items-center gap-2">
-                                    <span className="px-2.5 py-0.5 rounded-lg bg-accent/10 border border-accent/20 text-[10px] font-bold text-accent">
-                                        PI {group.pi}
+        <>
+            <div className={`${cardStyle} ${frontBg} p-6`}>
+                {/* Top: Status + Client */}
+                <div className="space-y-4">
+                    <div className="flex items-start justify-between">
+                        <div className="space-y-3">
+                            <div className="flex items-center gap-2">
+                                <div className="h-6 px-3 rounded-lg flex items-center gap-1.5"
+                                    style={{ background: `color-mix(in srgb, ${status.color} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${status.color} 20%, transparent)` }}>
+                                    <status.icon size={10} style={{ color: status.color }} />
+                                    <span className="text-[9px] font-bold uppercase tracking-wide" style={{ color: status.color }}>
+                                        {status.label}
                                     </span>
-                                    <span className="text-[10px] font-medium text-white/25">{group.agency}</span>
                                 </div>
                             </div>
-                            <div className="w-12 h-12 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-white/25">
-                                {group.device === 'mobile' ? <Smartphone size={24} /> : <Monitor size={24} />}
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Formats List */}
-                    <div className="mt-5 space-y-2 flex-1">
-                        <span className="text-[9px] font-bold uppercase tracking-widest text-white/15">
-                            Formatos
-                        </span>
-                        <div className="space-y-1">
-                            {group.campaigns.slice(0, 5).map((c: any) => (
-                                <div
-                                    key={c.id}
-                                    className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.05] hover:bg-white/[0.07] hover:border-accent/20 transition-all cursor-pointer group/fmt"
-                                    onClick={() => startEditing(c)}
-                                >
-                                    <div className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 bg-accent/10">
-                                        {c.device === 'mobile' ? <Smartphone size={10} className="text-accent/70" /> : <Monitor size={10} className="text-accent/70" />}
-                                    </div>
-                                    <span className="text-[10px] font-medium text-white/60 flex-1 truncate">
-                                        {getFormatLabel(c.format)}
-                                    </span>
-                                    <Pencil size={10} className="text-white/0 group-hover/fmt:text-accent/50 transition-colors flex-shrink-0" />
-                                </div>
-                            ))}
-                            {group.campaigns.length > 5 && (
-                                <span className="text-[9px] font-bold text-white/20 pl-3">
-                                    +{group.campaigns.length - 5} outros
+                            <h3 className="text-2xl font-black tracking-tight text-white leading-tight" style={{ fontFamily: 'var(--font-display)' }}>
+                                {group.client}
+                            </h3>
+                            <div className="flex items-center gap-2">
+                                <span className="px-2.5 py-0.5 rounded-lg bg-accent/10 border border-accent/20 text-[10px] font-bold text-accent">
+                                    PI {group.pi}
                                 </span>
-                            )}
+                                <span className="text-[10px] font-medium text-white/25">{group.agency}</span>
+                            </div>
+                        </div>
+                        <div className="w-12 h-12 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-white/25">
+                            {group.device === 'mobile' ? <Smartphone size={24} /> : <Monitor size={24} />}
                         </div>
                     </div>
+                </div>
 
-                    {/* Progress */}
-                    <div className="mt-4 space-y-3">
-                        {(group.earliestStart || group.latestEnd) && (
-                            <div className="space-y-2">
-                                <div className="flex items-center justify-between">
-                                    <span className="text-[9px] font-bold text-white/15 uppercase tracking-wider">Veiculação</span>
-                                    <span className="text-[10px] font-bold text-white/30 tabular-nums">{progressPercent}%</span>
+                {/* Formats List */}
+                <div className="mt-5 space-y-2 flex-1">
+                    <span className="text-[9px] font-bold uppercase tracking-widest text-white/15">
+                        Formatos
+                    </span>
+                    <div className="space-y-1">
+                        {group.campaigns.slice(0, 5).map((c: any) => (
+                            <div
+                                key={c.id}
+                                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.05] hover:bg-white/[0.07] hover:border-accent/20 transition-all cursor-pointer group/fmt"
+                                onClick={() => setShowEditModal(true)}
+                            >
+                                <div className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 bg-accent/10">
+                                    {c.device === 'mobile' ? <Smartphone size={10} className="text-accent/70" /> : <Monitor size={10} className="text-accent/70" />}
                                 </div>
-                                <div className="h-1.5 w-full bg-white/[0.04] rounded-full overflow-hidden">
-                                    <div
-                                        className={`h-full rounded-full transition-all duration-1000 ${isActive ? 'bg-accent' : 'bg-white/15'}`}
-                                        style={{ width: `${progressPercent}%` }}
-                                    />
-                                </div>
-                                <div className="flex justify-between text-[9px] text-white/20 tabular-nums">
-                                    <span>{group.earliestStart ? formatDate(group.earliestStart, 'dd/MM/yy') : '—'}</span>
-                                    <span>{group.latestEnd ? formatDate(group.latestEnd, 'dd/MM/yy') : '—'}</span>
-                                </div>
+                                <span className="text-[10px] font-medium text-white/60 flex-1 truncate">
+                                    {getFormatLabel(c.format)}
+                                </span>
+                                <Pencil size={10} className="text-white/0 group-hover/fmt:text-accent/50 transition-colors flex-shrink-0" />
                             </div>
+                        ))}
+                        {group.campaigns.length > 5 && (
+                            <span className="text-[9px] font-bold text-white/20 pl-3">
+                                +{group.campaigns.length - 5} outros
+                            </span>
                         )}
                     </div>
-
-                    {/* Footer */}
-                    <div className="mt-4 pt-4 flex items-center justify-between border-t border-white/[0.04]">
-                        <span className="text-[9px] font-bold text-white/20 uppercase tracking-wider">
-                            {group.campaigns.length} formato{group.campaigns.length !== 1 ? 's' : ''}
-                        </span>
-                        <button
-                            onClick={handleRunBatch}
-                            disabled={isPending}
-                            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide bg-accent/10 border border-accent/20 text-accent hover:bg-accent hover:text-white transition-all disabled:opacity-40"
-                        >
-                            <Zap size={12} className="fill-current" />
-                            Capturar
-                        </button>
-                    </div>
                 </div>
 
-                {/* ======= BACK FACE (Edit) ======= */}
-                <div
-                    className={`${cardStyle} bg-[#0f0f14] border-accent/20 p-5 absolute inset-0 overflow-y-auto`}
-                    style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
-                >
-                    {editForm && (
-                        <>
-                            {/* Edit Header */}
-                            <div className="flex items-center justify-between mb-4">
-                                <div>
-                                    <h4 className="text-sm font-black text-white" style={{ fontFamily: 'var(--font-display)' }}>
-                                        Editar <span className="text-accent">Formato</span>
-                                    </h4>
-                                    <p className="text-[9px] text-white/25 mt-0.5">
-                                        {editingCampaign ? getFormatLabel(editingCampaign.format) : ''}
-                                    </p>
-                                </div>
-                                <button
-                                    onClick={cancelEditing}
-                                    className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center text-white/30 hover:text-white hover:bg-white/10 transition-all"
-                                >
-                                    <X size={14} />
-                                </button>
+                {/* Progress */}
+                <div className="mt-4 space-y-3">
+                    {(group.earliestStart || group.latestEnd) && (
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                                <span className="text-[9px] font-bold text-white/15 uppercase tracking-wider">Veiculação</span>
+                                <span className="text-[10px] font-bold text-white/30 tabular-nums">{progressPercent}%</span>
                             </div>
-
-                            {/* Edit Fields */}
-                            <div className="space-y-3 flex-1">
-                                <div className="space-y-1">
-                                    <label className="text-[9px] font-bold uppercase tracking-wider text-white/20 flex items-center gap-1">
-                                        <Globe size={10} /> URL Alvo
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={editForm.url}
-                                        onChange={e => updateField({ url: e.target.value })}
-                                        className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-sm text-white outline-none focus:border-accent/40 transition-colors"
-                                        placeholder="https://..."
-                                    />
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-2">
-                                    <div className="space-y-1">
-                                        <label className="text-[9px] font-bold uppercase tracking-wider text-white/20">Dispositivo</label>
-                                        <div className="flex gap-1 p-1 rounded-lg bg-white/[0.03]">
-                                            <button
-                                                onClick={() => updateField({ device: 'desktop' })}
-                                                className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded text-[10px] font-bold transition-all ${editForm.device === 'desktop' ? 'bg-accent text-white' : 'text-white/30'}`}
-                                            >
-                                                <Monitor size={10} /> Desk
-                                            </button>
-                                            <button
-                                                onClick={() => updateField({ device: 'mobile' })}
-                                                className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded text-[10px] font-bold transition-all ${editForm.device === 'mobile' ? 'bg-accent text-white' : 'text-white/30'}`}
-                                            >
-                                                <Smartphone size={10} /> Mob
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-[9px] font-bold uppercase tracking-wider text-white/20 flex items-center gap-1">
-                                            <Layers size={10} /> Formato
-                                        </label>
-                                        <select
-                                            value={editForm.format}
-                                            onChange={e => updateField({ format: e.target.value })}
-                                            className="w-full px-2 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[11px] text-white outline-none focus:border-accent/40 transition-colors appearance-none"
-                                        >
-                                            <option value="">—</option>
-                                            {formats.map((fmt: any) => (
-                                                <option key={fmt.id} value={fmt.id}>
-                                                    {fmt.label} ({fmt.width}x{fmt.height})
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-2">
-                                    <div className="space-y-1">
-                                        <label className="text-[9px] font-bold uppercase tracking-wider text-white/20">Cliente</label>
-                                        <input
-                                            type="text"
-                                            value={editForm.client}
-                                            onChange={e => updateField({ client: e.target.value })}
-                                            className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-sm text-white outline-none focus:border-accent/40 transition-colors"
-                                        />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-[9px] font-bold uppercase tracking-wider text-white/20">PI</label>
-                                        <input
-                                            type="text"
-                                            value={editForm.pi}
-                                            onChange={e => updateField({ pi: e.target.value })}
-                                            className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-sm text-white outline-none focus:border-accent/40 transition-colors"
-                                        />
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-2">
-                                    <div className="space-y-1">
-                                        <label className="text-[9px] font-bold uppercase tracking-wider text-white/20 flex items-center gap-1">
-                                            <Calendar size={10} /> Início
-                                        </label>
-                                        <input
-                                            type="date"
-                                            value={editForm.flightStart}
-                                            onChange={e => updateField({ flightStart: e.target.value })}
-                                            className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[11px] text-white outline-none focus:border-accent/40 transition-colors"
-                                        />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-[9px] font-bold uppercase tracking-wider text-white/20 flex items-center gap-1">
-                                            <Calendar size={10} /> Fim
-                                        </label>
-                                        <input
-                                            type="date"
-                                            value={editForm.flightEnd}
-                                            onChange={e => updateField({ flightEnd: e.target.value })}
-                                            className="w-full px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-[11px] text-white outline-none focus:border-accent/40 transition-colors"
-                                        />
-                                    </div>
-                                </div>
+                            <div className="h-1.5 w-full bg-white/[0.04] rounded-full overflow-hidden">
+                                <div
+                                    className={`h-full rounded-full transition-all duration-1000 ${isActive ? 'bg-accent' : 'bg-white/15'}`}
+                                    style={{ width: `${progressPercent}%` }}
+                                />
                             </div>
-
-                            {/* Edit Actions */}
-                            <div className="flex gap-2 mt-4 pt-3 border-t border-white/[0.04]">
-                                <button
-                                    onClick={cancelEditing}
-                                    disabled={isSaving}
-                                    className="flex-1 py-2.5 rounded-lg border border-white/10 bg-white/[0.03] text-white/40 font-bold text-[10px] uppercase tracking-wider hover:bg-white/[0.08] hover:text-white transition-all disabled:opacity-40"
-                                >
-                                    Cancelar
-                                </button>
-                                <button
-                                    onClick={handleSave}
-                                    disabled={isSaving}
-                                    className="flex-1 py-2.5 rounded-lg bg-accent text-white font-bold text-[10px] uppercase tracking-wider hover:bg-accent/80 transition-all flex items-center justify-center gap-1.5 disabled:opacity-40"
-                                >
-                                    {isSaving ? (
-                                        <><Loader2 size={12} className="animate-spin" /> Salvando</>
-                                    ) : (
-                                        <><Save size={12} /> Salvar</>
-                                    )}
-                                </button>
+                            <div className="flex justify-between text-[9px] text-white/20 tabular-nums">
+                                <span>{group.earliestStart ? formatDate(group.earliestStart, 'dd/MM/yy') : '—'}</span>
+                                <span>{group.latestEnd ? formatDate(group.latestEnd, 'dd/MM/yy') : '—'}</span>
                             </div>
-                        </>
+                        </div>
                     )}
                 </div>
+
+                {/* Footer */}
+                <div className="mt-4 pt-4 flex items-center justify-between border-t border-white/[0.04]">
+                    <button
+                        onClick={() => setShowEditModal(true)}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide bg-white/[0.04] border border-white/[0.08] text-white/40 hover:bg-white/[0.08] hover:text-white transition-all"
+                    >
+                        <Pencil size={12} />
+                        Editar
+                    </button>
+                    <button
+                        onClick={handleRunBatch}
+                        disabled={isPending}
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide bg-accent/10 border border-accent/20 text-accent hover:bg-accent hover:text-white transition-all disabled:opacity-40"
+                    >
+                        <Zap size={12} className="fill-current" />
+                        Capturar
+                    </button>
+                </div>
             </div>
-        </div>
+
+            {/* Edit Modal */}
+            {showEditModal && (
+                <EditCampaignModal
+                    campaigns={group.campaigns}
+                    formats={formats}
+                    onClose={() => setShowEditModal(false)}
+                    onSaved={() => {
+                        setShowEditModal(false)
+                        router.refresh()
+                    }}
+                />
+            )}
+        </>
     )
 }
 
