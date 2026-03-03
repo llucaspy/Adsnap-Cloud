@@ -111,21 +111,42 @@ export function Sidebar() {
                     </span>
                 </div>
 
-                {/* Workspace Card */}
-                <div className="relative pt-3">
-                    <div className="absolute -top-2 left-4 px-2 py-0.5 bg-white/8 border border-white/15 rounded text-[7px] font-black uppercase text-white/60 tracking-[0.2em] z-10 backdrop-blur-sm">
-                        Client Workplace
-                    </div>
-                    <div className="bg-white border border-gray-200 rounded-2xl shadow-xl p-5 flex flex-col items-center gap-3">
-                        <img
-                            src="https://assets.metroimg.com/images/logo-maisacessado.gif"
-                            alt="Metrópoles"
-                            className="h-10 w-auto object-contain"
-                        />
-                        <div className="h-px w-8 bg-gray-100" />
-                        <span className="text-[10px] font-bold tracking-[0.15em] uppercase text-gray-900">
-                            Metrópoles
+                {/* Workspace Portal Section */}
+                <div className="relative pt-6">
+                    {/* Header Label / Badge */}
+                    <div className="absolute top-0 right-4 flex items-center gap-1.5 px-3 py-1 bg-[#ff0000]/10 border border-[#ff0000]/20 rounded-full z-10">
+                        <div className="w-1 h-1 rounded-full bg-[#ff0000] animate-pulse" />
+                        <span className="text-[8px] font-black uppercase tracking-[0.1em] text-[#ff0000]">
+                            Portal Ativo
                         </span>
+                    </div>
+
+                    <div
+                        className="bg-gradient-to-br from-white/[0.05] to-transparent border border-white/10 rounded-2xl p-5 flex flex-col items-center gap-4 transition-all duration-500 hover:border-white/20 hover:shadow-[0_20px_40px_rgba(0,0,0,0.3)] group/workspace"
+                    >
+                        {/* Logo Container with Glow */}
+                        <div className="relative w-full aspect-[2/1] bg-white rounded-xl overflow-hidden flex items-center justify-center p-4 shadow-inner">
+                            <img
+                                src="https://assets.metroimg.com/images/logo-maisacessado.gif"
+                                alt="Metrópoles"
+                                className="h-full w-auto object-contain"
+                            />
+                        </div>
+
+                        <div className="w-full space-y-1">
+                            <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-black tracking-[0.2em] uppercase text-white/40">
+                                    Workplace
+                                </span>
+                                <span className="text-[9px] font-bold text-white/20">
+                                    ID: MET-01
+                                </span>
+                            </div>
+                            <div className="h-px w-full bg-gradient-to-r from-white/10 to-transparent" />
+                            <p className="text-sm font-black text-white tracking-tight group-hover/workspace:translate-x-1 transition-transform">
+                                METRÓPOLES
+                            </p>
+                        </div>
                     </div>
                 </div>
             </div>
