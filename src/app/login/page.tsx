@@ -355,21 +355,23 @@ export default function LoginPage() {
                     {/* Logo area */}
                     <div className="text-center mb-10">
                         <motion.div
-                            initial={{ scale: 0.9, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            transition={{ delay: 0.2, duration: 0.6 }}
-                            className="flex flex-col items-center mb-6"
+                            initial={{ y: -20, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            transition={{ delay: 0.2, duration: 0.8, ease: "easeOut" }}
+                            className="flex flex-col items-center mb-12"
                         >
-                            {/* Premium Logo Badge */}
-                            <div className="relative group">
-                                <div className="absolute -inset-4 bg-white/5 rounded-full blur-2xl opacity-0 group-hover:opacity-100 transition duration-1000"></div>
-                                <div className="relative bg-white p-6 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] flex items-center justify-center min-w-[220px]">
-                                    <img
-                                        src="/logo.png"
-                                        alt="Adsnap"
-                                        className="h-10 w-auto object-contain"
-                                    />
-                                </div>
+                            {/* Premium Typographic Logo */}
+                            <div className="relative group cursor-default">
+                                <div className="absolute -inset-8 bg-white/5 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition duration-1000"></div>
+                                <h1 className="relative flex items-center gap-3">
+                                    <span className="text-4xl font-black uppercase tracking-[0.3em] text-white">
+                                        Adsnap
+                                    </span>
+                                    <span className="text-4xl font-extralight uppercase tracking-[0.3em] text-white/30">
+                                        Cloud
+                                    </span>
+                                </h1>
+                                <div className="mt-4 h-px w-full bg-gradient-to-r from-transparent via-white/20 to-transparent scale-x-50 group-hover:scale-x-100 transition-transform duration-1000" />
                             </div>
                         </motion.div>
 
