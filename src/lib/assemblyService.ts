@@ -118,7 +118,7 @@ async function _executeManualCapture(campaignId: string, settings: any, customDa
 
     let browser;
     try {
-        const isMobile = campaign.device === 'mobile';
+        const isMobile = campaign.device === 'mobile' || (targetW === 320 && (targetH === 100 || targetH === 50));
         browser = await chromium.launch({ headless: true });
 
         const context = await browser.newContext(isMobile ? {

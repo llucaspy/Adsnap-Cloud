@@ -211,7 +211,7 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
     try {
         console.log('[Nexus] Iniciando browser...')
         await nexusLogStore.addLog(`Nexus: Lançando browser Playwright (${targetW}x${targetH})`, 'SYSTEM', undefined, campaignId);
-        const isMobile = campaign.device === 'mobile';
+        const isMobile = campaign.device === 'mobile' || (targetW === 320 && (targetH === 100 || targetH === 50));
 
         browser = await chromium.launch({ headless: true });
 
