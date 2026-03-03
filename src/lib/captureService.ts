@@ -119,7 +119,10 @@ const FIND_BANNER_SCRIPT = `
             const wDiff = Math.abs(width - targetW) / targetW;
             const hDiff = Math.abs(height - targetH) / targetH;
             
-            if (wDiff <= MAX_SIZE_DIFF && hDiff <= MAX_SIZE_DIFF) {
+            // Relaxed tolerance for small banners (e.g. 56px vs 50px is ~12%)
+            const finalMaxDiff = targetH <= 100 ? 0.20 : MAX_SIZE_DIFF;
+            
+            if (wDiff <= finalMaxDiff && hDiff <= finalMaxDiff) {
                 // Calculate distance from center (prefer more central ads)
                 const centerX = rect.x + width / 2;
                 const centerY = rect.y + height / 2;
@@ -237,9 +240,9 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
         }
 
         // WARM-UP: Smart Scroll
-        const isSmallMobileBanner = isMobile && targetH <= 150;
-
-        if (!isSmallMobileBanner) {
+        // Sempre realiza o scroll para mobile para garantir o carregamento de banners lazy-load (ex: Metrópoles)
+        // O usuário confirmou que 320x100 funciona, vamos garantir que 320x50 siga o mesmo fluxo robusto
+        if (isMobile) {
             console.log('[Nexus] Realizando scroll de aquecimento (Lazy Load Check)...');
             await nexusLogStore.addLog('Nexus: Realizando scroll para carregar anúncios (Lazy Load)', 'SYSTEM', undefined, campaignId);
             await page.evaluate(async () => {
@@ -261,8 +264,8 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
             });
             await page.waitForTimeout(8000);
         } else {
-            console.log('[Nexus] Formato Mobile Top detectado (<=150px). Pulando scroll.');
-            await page.waitForTimeout(6000);
+            console.log('[Nexus] Desktop detectado. Wait manual...');
+            await page.waitForTimeout(5000);
         }
 
         // ====================================================

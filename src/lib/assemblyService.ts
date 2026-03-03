@@ -51,7 +51,10 @@ const FIND_BANNER_SCRIPT = `
             const wDiff = Math.abs(width - targetW) / targetW;
             const hDiff = Math.abs(height - targetH) / targetH;
             
-            if (wDiff <= MAX_SIZE_DIFF && hDiff <= MAX_SIZE_DIFF) {
+            // Relaxed tolerance for small banners (e.g. 56px vs 50px is ~12%)
+            const finalMaxDiff = targetH <= 100 ? 0.20 : MAX_SIZE_DIFF;
+            
+            if (wDiff <= finalMaxDiff && hDiff <= finalMaxDiff) {
                 const centerX = rect.x + width / 2;
                 const centerY = rect.y + height / 2;
                 const distanceC = Math.abs(centerX - window.innerWidth / 2);
@@ -137,8 +140,8 @@ async function _executeManualCapture(campaignId: string, settings: any, customDa
         }
 
         // WARM-UP Scroll
-        const isSmallMobileBanner = isMobile && targetH <= 150;
-        if (!isSmallMobileBanner) {
+        // Sempre realiza o scroll para mobile para garantir o carregamento de banners lazy-load
+        if (isMobile) {
             await page.evaluate(async () => {
                 return new Promise<void>((resolve) => {
                     let totalHeight = 0;
@@ -157,7 +160,7 @@ async function _executeManualCapture(campaignId: string, settings: any, customDa
             });
             await page.waitForTimeout(8000);
         } else {
-            await page.waitForTimeout(6000);
+            await page.waitForTimeout(5000);
         }
 
         // Strategy 1: Selector
