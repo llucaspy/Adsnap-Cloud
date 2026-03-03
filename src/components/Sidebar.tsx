@@ -104,14 +104,11 @@ export function Sidebar() {
                 className="p-6 space-y-5"
                 style={{ borderBottom: '1px solid var(--border)' }}
             >
-                {/* Brand Logo */}
+                {/* Brand Title */}
                 <div className="flex items-center px-1">
-                    <img
-                        src="/logo.png"
-                        alt="Adsnap"
-                        className="h-8 w-auto object-contain"
-                        style={{ filter: 'brightness(1.1)' }}
-                    />
+                    <span className="text-[11px] font-black uppercase tracking-[0.4em] text-white/50">
+                        Adsnap <span className="text-white/20">Cloud</span>
+                    </span>
                 </div>
 
                 {/* Workspace Card */}
