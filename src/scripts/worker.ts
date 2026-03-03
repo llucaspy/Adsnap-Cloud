@@ -97,7 +97,7 @@ async function worker() {
             }
         }
 
-        // 3. Email Dispatch Check — send reports for ended campaigns
+        // 3. Email Dispatch Check — send reports for ended campaigns (grouped by PI)
         console.log('[Nexus Worker] Verificando disparos de email pendentes...')
         try {
             const pendingDispatches = await (prisma as any).emailDispatch.findMany({
@@ -105,57 +105,53 @@ async function worker() {
                     isActive: true,
                     status: 'PENDING',
                 },
-                include: {
-                    campaign: {
-                        select: {
-                            id: true,
-                            client: true,
-                            flightEnd: true,
-                        }
-                    }
-                }
             })
 
             for (const dispatch of pendingDispatches) {
-                const flightEnd = dispatch.campaign.flightEnd
-                if (!flightEnd) continue
+                const pi = dispatch.pi
+                if (!pi) continue
 
-                // Check if flightEnd is today or in the past (BRT)
-                const flightEndDate = new Date(flightEnd)
-                const flightEndDay = new Date(Date.UTC(flightEndDate.getFullYear(), flightEndDate.getMonth(), flightEndDate.getDate()))
+                // Get all campaigns with this PI to check flightEnd
+                const piCampaigns = await prisma.campaign.findMany({
+                    where: { pi, isArchived: false },
+                    select: { id: true, client: true, flightEnd: true }
+                })
 
-                if (flightEndDay > today) {
-                    // Campaign hasn't ended yet
-                    continue
-                }
+                if (piCampaigns.length === 0) continue
+
+                // Check if ANY campaign in the group has ended
+                const hasEnded = piCampaigns.some(c => {
+                    if (!c.flightEnd) return false
+                    const flightEndDate = new Date(c.flightEnd)
+                    const flightEndDay = new Date(Date.UTC(flightEndDate.getFullYear(), flightEndDate.getMonth(), flightEndDate.getDate()))
+                    return flightEndDay <= today
+                })
+
+                if (!hasEnded) continue
 
                 // Check if dispatch time has passed
                 const [dh, dm] = dispatch.dispatchTime.split(':').map(Number)
                 const dispatchMoment = new Date(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate(), dh, dm)
 
-                if (brtNow < dispatchMoment) {
-                    // Dispatch time hasn't arrived yet today
-                    continue
-                }
+                if (brtNow < dispatchMoment) continue
 
                 // Check if already sent today
                 if (dispatch.lastSentAt) {
                     const lastSent = new Date(dispatch.lastSentAt)
                     const lastSentDay = new Date(lastSent.getFullYear(), lastSent.getMonth(), lastSent.getDate())
                     const todayDay = new Date(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate())
-                    if (lastSentDay.getTime() >= todayDay.getTime()) {
-                        continue // Already sent today
-                    }
+                    if (lastSentDay.getTime() >= todayDay.getTime()) continue
                 }
 
                 // Send the report!
-                console.log(`[Nexus Worker] Disparando email para campanha ${dispatch.campaign.client} (${dispatch.campaignId})...`)
-                await nexusLogStore.addLog(`Nexus Worker: Disparando email de fim de veiculação para ${dispatch.campaign.client}`, 'SYSTEM')
+                const firstClient = piCampaigns[0].client
+                console.log(`[Nexus Worker] Disparando email para campanha ${firstClient} (PI: ${pi})...`)
+                await nexusLogStore.addLog(`Nexus Worker: Disparando email de fim de veiculação para ${firstClient} (PI: ${pi})`, 'SYSTEM')
 
                 const recipients = JSON.parse(dispatch.recipients) as string[]
                 const { sendCampaignReport } = await import('../lib/emailService')
                 await sendCampaignReport({
-                    campaignId: dispatch.campaignId,
+                    pi,
                     recipients,
                     dispatchId: dispatch.id,
                 })

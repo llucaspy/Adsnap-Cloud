@@ -80,8 +80,9 @@ model NexusLog {
 
 model EmailDispatch {
   id            String    @id @default(cuid())
-  campaignId    String
-  campaign      Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  campaignId    String?
+  campaign      Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  pi            String    @default("")  // PI da campanha — agrupa todos os formatos
   recipients    String    // JSON array: ["email1@x.com", "email2@x.com"]
   dispatchTime  String    @default("09:00") // HH:mm — horário BRT do disparo
   isActive      Boolean   @default(true)

@@ -708,35 +708,67 @@ export async function getAdminMetrics() {
 export async function getEmailDispatches() {
     const dispatches = await (prisma as any).emailDispatch.findMany({
         orderBy: { createdAt: 'desc' },
-        include: {
-            campaign: {
-                select: {
-                    id: true,
-                    client: true,
-                    agency: true,
-                    campaignName: true,
-                    format: true,
-                    pi: true,
-                    device: true,
-                    flightStart: true,
-                    flightEnd: true,
-                    status: true,
-                }
-            }
-        }
     })
 
-    return dispatches.map((d: any) => ({
-        ...d,
-        createdAt: d.createdAt.toISOString(),
-        updatedAt: d.updatedAt.toISOString(),
-        lastSentAt: d.lastSentAt?.toISOString() || null,
-        campaign: {
-            ...d.campaign,
-            flightStart: d.campaign.flightStart?.toISOString() || null,
-            flightEnd: d.campaign.flightEnd?.toISOString() || null,
+    // For each dispatch, fetch all campaigns with the same PI
+    const results = []
+    for (const d of dispatches) {
+        const pi = d.pi || ''
+        let campaigns: any[] = []
+
+        if (pi) {
+            campaigns = await prisma.campaign.findMany({
+                where: { pi, isArchived: false },
+                select: {
+                    id: true, client: true, agency: true, campaignName: true,
+                    format: true, pi: true, device: true,
+                    flightStart: true, flightEnd: true, status: true,
+                },
+                orderBy: { createdAt: 'asc' }
+            })
+        } else if (d.campaignId) {
+            // Legacy fallback
+            const campaign = await prisma.campaign.findUnique({
+                where: { id: d.campaignId },
+                select: {
+                    id: true, client: true, agency: true, campaignName: true,
+                    format: true, pi: true, device: true,
+                    flightStart: true, flightEnd: true, status: true,
+                }
+            })
+            if (campaign) campaigns = [campaign]
         }
-    }))
+
+        // Resolve format labels
+        let settings: any = null
+        try { settings = await prisma.settings.findUnique({ where: { id: 1 } }) } catch { }
+        const bannerFormats = settings ? JSON.parse((settings as any).bannerFormats || '[]') : []
+
+        const formatsResolved = campaigns.map((c: any) => {
+            const match = bannerFormats.find((f: any) => f.id === c.format)
+            return {
+                ...c,
+                formatLabel: match ? (match.label || `${match.width}x${match.height}`) : c.format,
+                flightStart: c.flightStart?.toISOString() || null,
+                flightEnd: c.flightEnd?.toISOString() || null,
+            }
+        })
+
+        const firstCampaign = formatsResolved[0] || null
+
+        results.push({
+            ...d,
+            createdAt: d.createdAt.toISOString(),
+            updatedAt: d.updatedAt.toISOString(),
+            lastSentAt: d.lastSentAt?.toISOString() || null,
+            pi: d.pi || firstCampaign?.pi || '',
+            campaign: firstCampaign,
+            campaigns: formatsResolved,
+            formatCount: formatsResolved.length,
+        })
+    }
+
+    return results
 }
 
 export async function getCampaignsForDispatch() {
@@ -747,34 +779,66 @@ export async function getCampaignsForDispatch() {
         },
         orderBy: { createdAt: 'desc' },
         select: {
-            id: true,
-            client: true,
-            agency: true,
-            campaignName: true,
-            format: true,
-            pi: true,
-            device: true,
-            flightStart: true,
-            flightEnd: true,
-            status: true,
+            id: true, client: true, agency: true, campaignName: true,
+            format: true, pi: true, device: true,
+            flightStart: true, flightEnd: true, status: true,
             emailDispatches: { select: { id: true } } as any
         }
     })
 
-    return campaigns.map(c => ({
-        ...c,
-        flightStart: c.flightStart?.toISOString() || null,
-        flightEnd: c.flightEnd?.toISOString() || null,
-        hasDispatch: (c as any).emailDispatches.length > 0,
-    }))
+    // Resolve format labels
+    let settings: any = null
+    try { settings = await prisma.settings.findUnique({ where: { id: 1 } }) } catch { }
+    const bannerFormats = settings ? JSON.parse((settings as any).bannerFormats || '[]') : []
+
+    // Group campaigns by PI
+    const grouped: Record<string, any[]> = {}
+    for (const c of campaigns) {
+        const key = c.pi || c.id
+        if (!grouped[key]) grouped[key] = []
+        grouped[key].push(c)
+    }
+
+    // Check which PIs already have dispatches
+    const existingDispatches = await (prisma as any).emailDispatch.findMany({
+        select: { pi: true }
+    })
+    const dispatchedPis = new Set(existingDispatches.map((d: any) => d.pi).filter(Boolean))
+
+    // Return grouped campaigns
+    return Object.entries(grouped).map(([pi, cams]) => {
+        const first = cams[0]
+        const formats = cams.map((c: any) => {
+            const match = bannerFormats.find((f: any) => f.id === c.format)
+            return {
+                id: c.id,
+                format: c.format,
+                formatLabel: match ? (match.label || `${match.width}x${match.height}`) : c.format,
+                device: c.device,
+            }
+        })
+
+        return {
+            pi,
+            client: first.client,
+            agency: first.agency,
+            campaignName: first.campaignName,
+            flightStart: first.flightStart?.toISOString() || null,
+            flightEnd: first.flightEnd?.toISOString() || null,
+            status: first.status,
+            formats,
+            formatCount: formats.length,
+            hasDispatch: dispatchedPis.has(pi),
+        }
+    })
 }
 
 export async function createEmailDispatch(data: {
-    campaignId: string
+    pi: string
     recipients: string[]
     dispatchTime: string
 }) {
-    if (!data.campaignId || data.recipients.length === 0) {
+    if (!data.pi || data.recipients.length === 0) {
         throw new Error('Campanha e pelo menos um destinatário são obrigatórios')
     }
 
@@ -788,7 +852,7 @@ export async function createEmailDispatch(data: {
 
     const dispatch = await (prisma as any).emailDispatch.create({
         data: {
-            campaignId: data.campaignId,
+            pi: data.pi,
             recipients: JSON.stringify(data.recipients.map(e => e.trim())),
             dispatchTime: data.dispatchTime || '09:00',
             isActive: true,
@@ -796,7 +860,7 @@ export async function createEmailDispatch(data: {
         }
     })
 
-    nexusLogStore.addLog(`Email Dispatch: Configuração criada para campanha ${data.campaignId}`, 'SYSTEM')
+    nexusLogStore.addLog(`Email Dispatch: Configuração criada para PI ${data.pi}`, 'SYSTEM')
     revalidatePath('/email-dispatch')
     return dispatch
 }
@@ -851,7 +915,7 @@ export async function sendTestEmail(dispatchId: string) {
     // Send only to the first recipient as a test
     const { sendCampaignReport } = await import('@/lib/emailService')
     const result = await sendCampaignReport({
-        campaignId: dispatch.campaignId,
+        pi: dispatch.pi,
         recipients: [recipients[0]],
         dispatchId: dispatch.id,
     })

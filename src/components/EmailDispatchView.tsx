@@ -1,26 +1,47 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { Mail, Plus, Trash2, Send, Clock, Users, CheckCircle, AlertCircle, XCircle, X, ToggleLeft, ToggleRight, CalendarDays, Search } from 'lucide-react'
+import { Mail, Plus, Trash2, Send, Clock, Users, CheckCircle, AlertCircle, XCircle, X, ToggleLeft, ToggleRight, CalendarDays, Search, Layers } from 'lucide-react'
 import { createEmailDispatch, updateEmailDispatch, deleteEmailDispatch, sendTestEmail } from '@/app/actions'
 
-interface Campaign {
+interface FormatInfo {
+    id: string
+    format: string
+    formatLabel: string
+    device: string
+}
+
+interface CampaignGroup {
+    pi: string
+    client: string
+    agency: string
+    campaignName: string
+    flightStart: string | null
+    flightEnd: string | null
+    status: string
+    formats: FormatInfo[]
+    formatCount: number
+    hasDispatch: boolean
+}
+
+interface CampaignData {
     id: string
     client: string
     agency: string
     campaignName: string
     format: string
+    formatLabel: string
     pi: string
     device: string
     flightStart: string | null
     flightEnd: string | null
     status: string
-    hasDispatch: boolean
 }
 
 interface EmailDispatchData {
     id: string
-    campaignId: string
+    campaignId: string | null
+    pi: string
     recipients: string
     dispatchTime: string
     isActive: boolean
@@ -28,23 +49,14 @@ interface EmailDispatchData {
     status: string
     createdAt: string
     updatedAt: string
-    campaign: {
-        id: string
-        client: string
-        agency: string
-        campaignName: string
-        format: string
-        pi: string
-        device: string
-        flightStart: string | null
-        flightEnd: string | null
-        status: string
-    }
+    campaign: CampaignData | null
+    campaigns: CampaignData[]
+    formatCount: number
 }
 
 interface Props {
     initialDispatches: EmailDispatchData[]
-    campaigns: Campaign[]
+    campaigns: CampaignGroup[]
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -83,9 +95,9 @@ export function EmailDispatchView({ initialDispatches, campaigns }: Props) {
 
     const filteredDispatches = dispatches.filter(d => {
         const q = search.toLowerCase()
-        return d.campaign.client.toLowerCase().includes(q) ||
-            d.campaign.campaignName.toLowerCase().includes(q) ||
-            d.campaign.pi.toLowerCase().includes(q)
+        return (d.campaign?.client || '').toLowerCase().includes(q) ||
+            (d.campaign?.campaignName || '').toLowerCase().includes(q) ||
+            (d.pi || '').toLowerCase().includes(q)
     })
 
     const handleToggleActive = (dispatch: EmailDispatchData) => {
@@ -144,8 +156,8 @@ export function EmailDispatchView({ initialDispatches, campaigns }: Props) {
                         </h1>
                     </div>
                     <p className="text-sm text-white/40 max-w-lg">
-                        Configure o envio automático de prints ao fim da veiculação de cada campanha.
-                        Os prints do período inteiro serão compilados e enviados aos destinatários cadastrados.
+                        Configure o envio automático de prints ao fim da veiculação.
+                        Todos os formatos da campanha serão organizados em um único e-mail com no máximo 3 prints por dia.
                     </p>
                 </div>
 
@@ -161,8 +173,8 @@ export function EmailDispatchView({ initialDispatches, campaigns }: Props) {
             {/* Feedback Toast */}
             {feedback && (
                 <div className={`fixed top-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-2xl border text-sm font-semibold animate-slide-up ${feedback.type === 'success'
-                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                        : 'bg-red-500/10 border-red-500/30 text-red-400'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                    : 'bg-red-500/10 border-red-500/30 text-red-400'
                     }`}>
                     {feedback.type === 'success' ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
                     {feedback.message}
@@ -225,15 +237,15 @@ export function EmailDispatchView({ initialDispatches, campaigns }: Props) {
             <div className="space-y-3">
                 {filteredDispatches.map((dispatch) => {
                     const recipients = JSON.parse(dispatch.recipients) as string[]
-                    const flightEndDate = dispatch.campaign.flightEnd ? new Date(dispatch.campaign.flightEnd) : null
+                    const flightEndDate = dispatch.campaign?.flightEnd ? new Date(dispatch.campaign.flightEnd) : null
                     const isExpired = flightEndDate ? flightEndDate < new Date() : false
 
                     return (
                         <div
                             key={dispatch.id}
                             className={`group p-5 rounded-2xl border transition-all duration-300 hover:border-white/15 ${dispatch.isActive
-                                    ? 'bg-white/[0.02] border-white/8'
-                                    : 'bg-white/[0.01] border-white/5 opacity-60'
+                                ? 'bg-white/[0.02] border-white/8'
+                                : 'bg-white/[0.01] border-white/5 opacity-60'
                                 }`}
                         >
                             <div className="flex items-start justify-between gap-4">
@@ -241,7 +253,7 @@ export function EmailDispatchView({ initialDispatches, campaigns }: Props) {
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-3 mb-2">
                                         <h3 className="text-base font-bold text-white truncate">
-                                            {dispatch.campaign.client}
+                                            {dispatch.campaign?.client || 'Campanha'}
                                         </h3>
                                         <StatusBadge status={dispatch.status} />
                                         {!dispatch.isActive && (
@@ -250,14 +262,26 @@ export function EmailDispatchView({ initialDispatches, campaigns }: Props) {
                                     </div>
 
                                     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-white/40">
-                                        <span>{dispatch.campaign.campaignName || dispatch.campaign.format}</span>
-                                        <span>PI: {dispatch.campaign.pi}</span>
+                                        <span>{dispatch.campaign?.campaignName || '—'}</span>
+                                        <span>PI: {dispatch.pi}</span>
                                         <span className="flex items-center gap-1">
                                             <CalendarDays size={11} />
-                                            {formatDate(dispatch.campaign.flightStart)} → {formatDate(dispatch.campaign.flightEnd)}
+                                            {formatDate(dispatch.campaign?.flightStart || null)} → {formatDate(dispatch.campaign?.flightEnd || null)}
                                             {isExpired && <span className="text-red-400 ml-1">(encerrada)</span>}
                                         </span>
                                     </div>
+
+                                    {/* Format Tags */}
+                                    {dispatch.campaigns && dispatch.campaigns.length > 0 && (
+                                        <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
+                                            <Layers size={12} className="text-white/25" />
+                                            {dispatch.campaigns.map((c, i) => (
+                                                <span key={i} className="text-[10px] font-semibold text-white/50 bg-white/[0.06] px-2 py-0.5 rounded-md border border-white/8">
+                                                    {c.formatLabel} ({c.device})
+                                                </span>
+                                            ))}
+                                        </div>
+                                    )}
 
                                     <div className="flex flex-wrap items-center gap-3 mt-3">
                                         <div className="flex items-center gap-1.5 text-xs text-white/50 bg-white/[0.04] px-2.5 py-1.5 rounded-lg">
@@ -269,6 +293,11 @@ export function EmailDispatchView({ initialDispatches, campaigns }: Props) {
                                             <Clock size={12} />
                                             <span className="font-semibold">{dispatch.dispatchTime}</span>
                                             <span className="hidden sm:inline">BRT</span>
+                                        </div>
+                                        <div className="flex items-center gap-1.5 text-xs text-white/50 bg-white/[0.04] px-2.5 py-1.5 rounded-lg">
+                                            <Layers size={12} />
+                                            <span className="font-semibold">{dispatch.formatCount}</span>
+                                            <span className="hidden sm:inline">formato{dispatch.formatCount > 1 ? 's' : ''}</span>
                                         </div>
                                         {dispatch.lastSentAt && (
                                             <div className="text-[11px] text-white/30">
@@ -306,8 +335,8 @@ export function EmailDispatchView({ initialDispatches, campaigns }: Props) {
                                         onClick={() => handleToggleActive(dispatch)}
                                         disabled={isPending}
                                         className={`p-2.5 rounded-lg border transition-all ${dispatch.isActive
-                                                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20'
-                                                : 'bg-white/5 border-white/10 text-white/30 hover:bg-white/10'
+                                            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20'
+                                            : 'bg-white/5 border-white/10 text-white/30 hover:bg-white/10'
                                             }`}
                                         title={dispatch.isActive ? 'Desativar' : 'Ativar'}
                                     >
@@ -349,22 +378,22 @@ export function EmailDispatchView({ initialDispatches, campaigns }: Props) {
 // =============================================================================
 
 function CreateDispatchModal({ campaigns, onClose, onCreated }: {
-    campaigns: Campaign[]
+    campaigns: CampaignGroup[]
     onClose: () => void
     onCreated: (dispatch: any) => void
 }) {
-    const [selectedCampaignId, setSelectedCampaignId] = useState('')
+    const [selectedPi, setSelectedPi] = useState('')
     const [recipientsText, setRecipientsText] = useState('')
     const [dispatchTime, setDispatchTime] = useState('09:00')
     const [isPending, startTransition] = useTransition()
     const [error, setError] = useState('')
 
-    const selectedCampaign = campaigns.find(c => c.id === selectedCampaignId)
+    const selectedCampaign = campaigns.find(c => c.pi === selectedPi)
 
     const handleSubmit = () => {
         setError('')
 
-        if (!selectedCampaignId) {
+        if (!selectedPi) {
             setError('Selecione uma campanha')
             return
         }
@@ -389,7 +418,7 @@ function CreateDispatchModal({ campaigns, onClose, onCreated }: {
         startTransition(async () => {
             try {
                 const result = await createEmailDispatch({
-                    campaignId: selectedCampaignId,
+                    pi: selectedPi,
                     recipients,
                     dispatchTime,
                 })
@@ -400,7 +429,34 @@ function CreateDispatchModal({ campaigns, onClose, onCreated }: {
                     createdAt: result.createdAt instanceof Date ? result.createdAt.toISOString() : result.createdAt,
                     updatedAt: result.updatedAt instanceof Date ? result.updatedAt.toISOString() : result.updatedAt,
                     lastSentAt: null,
-                    campaign: selectedCampaign,
+                    pi: selectedPi,
+                    campaign: selectedCampaign ? {
+                        id: '',
+                        client: selectedCampaign.client,
+                        agency: selectedCampaign.agency,
+                        campaignName: selectedCampaign.campaignName,
+                        format: '',
+                        formatLabel: '',
+                        pi: selectedPi,
+                        device: '',
+                        flightStart: selectedCampaign.flightStart,
+                        flightEnd: selectedCampaign.flightEnd,
+                        status: selectedCampaign.status,
+                    } : null,
+                    campaigns: selectedCampaign?.formats.map(f => ({
+                        id: f.id,
+                        client: selectedCampaign.client,
+                        agency: selectedCampaign.agency,
+                        campaignName: selectedCampaign.campaignName,
+                        format: f.format,
+                        formatLabel: f.formatLabel,
+                        pi: selectedPi,
+                        device: f.device,
+                        flightStart: selectedCampaign.flightStart,
+                        flightEnd: selectedCampaign.flightEnd,
+                        status: selectedCampaign.status,
+                    })) || [],
+                    formatCount: selectedCampaign?.formatCount || 0,
                 }
                 onCreated(fullDispatch)
             } catch (err: any) {
@@ -439,14 +495,14 @@ function CreateDispatchModal({ campaigns, onClose, onCreated }: {
                             </p>
                         ) : (
                             <select
-                                value={selectedCampaignId}
-                                onChange={e => setSelectedCampaignId(e.target.value)}
+                                value={selectedPi}
+                                onChange={e => setSelectedPi(e.target.value)}
                                 className="w-full px-4 py-3 bg-white/[0.03] border border-white/8 rounded-xl text-sm text-white focus:outline-none focus:border-white/20 transition-colors appearance-none"
                             >
                                 <option value="" className="bg-[#111]">Selecione uma campanha...</option>
                                 {campaigns.map(c => (
-                                    <option key={c.id} value={c.id} className="bg-[#111]">
-                                        {c.client} — {c.campaignName || c.format} (PI: {c.pi}) | até {formatDate(c.flightEnd)}
+                                    <option key={c.pi} value={c.pi} className="bg-[#111]">
+                                        {c.client} — {c.campaignName || c.pi} ({c.formatCount} formato{c.formatCount > 1 ? 's' : ''}) | até {formatDate(c.flightEnd)}
                                     </option>
                                 ))}
                             </select>
@@ -455,10 +511,19 @@ function CreateDispatchModal({ campaigns, onClose, onCreated }: {
 
                     {/* Selected Campaign Info */}
                     {selectedCampaign && (
-                        <div className="p-3 bg-white/[0.03] border border-white/8 rounded-xl text-xs text-white/40 space-y-1">
+                        <div className="p-3 bg-white/[0.03] border border-white/8 rounded-xl text-xs text-white/40 space-y-2">
                             <p><span className="text-white/60 font-semibold">Agência:</span> {selectedCampaign.agency}</p>
-                            <p><span className="text-white/60 font-semibold">Formato:</span> {selectedCampaign.format} ({selectedCampaign.device})</p>
                             <p><span className="text-white/60 font-semibold">Veiculação:</span> {formatDate(selectedCampaign.flightStart)} → {formatDate(selectedCampaign.flightEnd)}</p>
+                            <div>
+                                <span className="text-white/60 font-semibold">Formatos ({selectedCampaign.formatCount}):</span>
+                                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                    {selectedCampaign.formats.map((f, i) => (
+                                        <span key={i} className="text-[10px] font-semibold text-white/60 bg-white/[0.08] px-2 py-0.5 rounded-md border border-white/10">
+                                            {f.formatLabel} ({f.device})
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
                         </div>
                     )}
 
@@ -470,7 +535,7 @@ function CreateDispatchModal({ campaigns, onClose, onCreated }: {
                         <textarea
                             value={recipientsText}
                             onChange={e => setRecipientsText(e.target.value)}
-                            placeholder="email1@empresa.com&#10;email2@empresa.com&#10;email3@empresa.com"
+                            placeholder={"email1@empresa.com\nemail2@empresa.com\nemail3@empresa.com"}
                             rows={4}
                             className="w-full px-4 py-3 bg-white/[0.03] border border-white/8 rounded-xl text-sm text-white placeholder:text-white/20 focus:outline-none focus:border-white/20 transition-colors resize-none font-mono"
                         />
@@ -510,7 +575,7 @@ function CreateDispatchModal({ campaigns, onClose, onCreated }: {
                     </button>
                     <button
                         onClick={handleSubmit}
-                        disabled={isPending || !selectedCampaignId}
+                        disabled={isPending || !selectedPi}
                         className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold text-black bg-white hover:bg-white/90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
                     >
                         {isPending ? (
