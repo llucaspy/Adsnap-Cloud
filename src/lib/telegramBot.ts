@@ -481,7 +481,7 @@ async function cbQuarentena(chatId: string, msgId: number) {
 // 📜 LOGS
 // =============================================================================
 async function cbLogs(chatId: string, msgId: number, isNewMsg: boolean = false) {
-    const { data: logs } = await supabase.from('NexusLog').select('level, message, createdAt').order('createdAt', { ascending: false }).limit(10)
+    const { data: logs } = await supabase.from('NexusLog').select('level, message, campaignId, createdAt').order('createdAt', { ascending: false }).limit(10)
 
     const markup = kb([[btn('🔄 Atualizar', 'menu:logs'), btn('◀️ Menu', 'menu:main')]])
 
@@ -492,19 +492,41 @@ async function cbLogs(chatId: string, msgId: number, isNewMsg: boolean = false) 
     }
 
     const fmtMap = await loadFormatMap()
+
+    // Map Campaign IDs to names
+    const campaignIdSet = new Set<string>()
+    for (const log of logs) {
+        if (log.campaignId) campaignIdSet.add(log.campaignId)
+    }
+
+    const campaignNamesMap = new Map<string, string>()
+    if (campaignIdSet.size > 0) {
+        const { data: camps } = await supabase.from('Campaign').select('id, client, format').in('id', [...campaignIdSet])
+        for (const c of (camps || [])) {
+            const label = fl(fmtMap, c.format)
+            campaignNamesMap.set(c.id, `${c.client} — ${label}`)
+        }
+    }
+
     const icons: Record<string, string> = { INFO: 'ℹ️', SUCCESS: '✅', ERROR: '❌', SYSTEM: '⚙️' }
     let text = `📜 <b>ÚLTIMOS LOGS</b>\n\n`
     for (const log of logs.reverse()) {
         const icon = icons[log.level] || '•'
         const time = new Date(log.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
         
-        // Resolve format IDs in message
         let resolvedMsg = log.message
+
+        // 1. Resolve exact campaign ID mentions
+        for (const [cid, name] of campaignNamesMap.entries()) {
+            resolvedMsg = resolvedMsg.replace(new RegExp(cid, 'g'), name)
+        }
+
+        // 2. Resolve format IDs in message
         for (const [id, label] of Object.entries(fmtMap)) {
             resolvedMsg = resolvedMsg.replace(new RegExp(id, 'g'), label)
         }
 
-        text += `${icon} <code>${time}</code> ${esc(resolvedMsg.substring(0, 55))}\n`
+        text += `${icon} <code>${time}</code> ${esc(resolvedMsg.substring(0, 100))}\n`
     }
 
     if (isNewMsg) {
