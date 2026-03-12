@@ -22,7 +22,13 @@ export async function sendTelegramAlert(
         // ChatId: env first, then DB fallback
         let chatId = process.env.chatidtelegram
         if (!chatId) {
-            const settings = await prisma.settings.findUnique({ where: { id: 1 } })
+            const { supabase } = await import('./supabase')
+            const { data: settings } = await supabase
+                .from('Settings')
+                .select('telegramChatId')
+                .eq('id', 1)
+                .single()
+            
             chatId = settings?.telegramChatId || undefined
         }
         if (!chatId) {
