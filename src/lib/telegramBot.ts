@@ -1,4 +1,5 @@
 import prisma from './prisma'
+import { nexusLogStore } from './nexusLogStore'
 
 // =============================================================================
 // TELEGRAM BOT ENGINE — Centro de Comando Adsnap Cloud
@@ -60,33 +61,44 @@ export async function handleUpdate(update: any) {
 
     // Auth check
     if (!isAuthorized(chatId)) {
-        await sendMessage(chatId, '🚫 <b>Acesso negado.</b>\nSeu Chat ID não está autorizado.')
+        console.log(`[TelegramBot] Acesso negado para chatId: ${chatId}`);
+        await nexusLogStore.addLog(`Bot Telegram: Acesso negado (ChatID: ${chatId})`, 'ERROR');
+        await sendMessage(chatId, '🚫 <b>Acesso negado.</b>\nSeu Chat ID não está autorizado.');
         return
     }
 
-    // Parse command
-    const [rawCmd, ...args] = text.split(' ')
-    const cmd = rawCmd.toLowerCase().replace('@', '').split('@')[0] // strip bot username
+    try {
+        console.log(`[TelegramBot] Recebido: ${text} de ${chatId}`);
+        await nexusLogStore.addLog(`Bot Telegram: Comando recebido: ${text}`, 'INFO');
 
-    // Route
-    switch (cmd) {
-        case '/start':
-        case '/ajuda':
-            return handleHelp(chatId)
-        case '/status':
-            return handleStatus(chatId)
-        case '/campanhas':
-            return handleCampanhas(chatId)
-        case '/fila':
-            return handleFila(chatId)
-        case '/quarentena':
-            return handleQuarentena(chatId)
-        case '/storage':
-            return handleStorage(chatId)
-        case '/logs':
-            return handleLogs(chatId)
-        default:
-            await sendMessage(chatId, `❓ Comando desconhecido: <code>${esc(cmd)}</code>\n\nDigite /ajuda para ver os comandos disponíveis.`)
+        // Parse command
+        const [rawCmd, ...args] = text.split(' ')
+        const cmd = rawCmd.toLowerCase().replace('@', '').split('@')[0] // strip bot username
+
+        // Route
+        switch (cmd) {
+            case '/start':
+            case '/ajuda':
+                return await handleHelp(chatId)
+            case '/status':
+                return await handleStatus(chatId)
+            case '/campanhas':
+                return await handleCampanhas(chatId)
+            case '/fila':
+                return await handleFila(chatId)
+            case '/quarentena':
+                return await handleQuarentena(chatId)
+            case '/storage':
+                return await handleStorage(chatId)
+            case '/logs':
+                return await handleLogs(chatId)
+            default:
+                await sendMessage(chatId, `❓ Comando desconhecido: <code>${esc(cmd)}</code>\n\nDigite /ajuda para ver os comandos disponíveis.`)
+        }
+    } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        await nexusLogStore.addLog(`Bot Telegram: Erro ao processar comando`, 'ERROR', errorMsg);
+        await sendMessage(chatId, `❌ Erro interno ao processar comando.`);
     }
 }
 
