@@ -4,20 +4,20 @@ import { handleUpdate } from '@/lib/telegramBot'
 /**
  * Telegram Webhook — receives updates from Telegram Bot API
  * POST /api/telegram/webhook
+ * 
+ * IMPORTANT: On Vercel serverless, the function dies after returning.
+ * We MUST await handleUpdate before returning, otherwise it gets killed.
  */
 export async function POST(request: Request) {
     try {
         const update = await request.json()
         
-        // Process asynchronously — return 200 immediately to avoid Telegram retries
-        // (Telegram retries if it doesn't get 200 within ~60s)
-        handleUpdate(update).catch(err => {
-            console.error('[Telegram Webhook] Handler error:', err)
-        })
+        // MUST await — Vercel kills the function after response
+        await handleUpdate(update)
 
         return NextResponse.json({ ok: true })
     } catch (err) {
-        console.error('[Telegram Webhook] Parse error:', err)
+        console.error('[Telegram Webhook] Error:', err)
         return NextResponse.json({ ok: true }) // Always 200 to prevent retries
     }
 }
