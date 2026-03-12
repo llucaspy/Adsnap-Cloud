@@ -9,6 +9,39 @@ const BOT_TOKEN = () => process.env.NexusTelegram || ''
 const ALLOWED_CHAT_ID = () => process.env.chatidtelegram || ''
 
 // ---------------------------------------------------------------------------
+// Format ID → Label resolver (cached per request lifecycle)
+// ---------------------------------------------------------------------------
+let _formatMapCache: Record<string, string> | null = null
+
+async function loadFormatMap(): Promise<Record<string, string>> {
+    if (_formatMapCache) return _formatMapCache
+
+    try {
+        const { data: settings } = await supabase
+            .from('Settings')
+            .select('bannerFormats')
+            .eq('id', 1)
+            .single()
+
+        if (settings?.bannerFormats) {
+            const formats = JSON.parse(settings.bannerFormats || '[]') as { id: string, label: string }[]
+            _formatMapCache = {}
+            for (const f of formats) {
+                _formatMapCache[f.id] = f.label
+            }
+        }
+    } catch (e) {
+        console.error('[TelegramBot] Erro ao carregar formatos:', e)
+    }
+
+    return _formatMapCache || {}
+}
+
+function getFormatLabel(formatMap: Record<string, string>, formatId: string): string {
+    return formatMap[formatId] || formatId
+}
+
+// ---------------------------------------------------------------------------
 // Core: send message
 // ---------------------------------------------------------------------------
 export async function sendMessage(chatId: string, text: string, options?: {
@@ -199,6 +232,8 @@ async function handleStatus(chatId: string) {
 // ---------------------------------------------------------------------------
 async function handleCampanhas(chatId: string) {
     try {
+        const fmtMap = await loadFormatMap()
+
         const { data: campaigns, error } = await supabase
             .from('Campaign')
             .select('id, pi, client, campaignName, format, status, device, lastCaptureAt, isScheduled, scheduledTimes')
@@ -246,7 +281,7 @@ async function handleCampanhas(chatId: string) {
                 const last = f.lastCaptureAt
                     ? new Date(f.lastCaptureAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
                     : '—'
-                text += `   ${fIcon} ${esc(f.format)} (${f.device}) • ${last}\n`
+                text += `   ${fIcon} ${esc(getFormatLabel(fmtMap, f.format))} (${f.device}) • ${last}\n`
             }
             text += '\n'
             piIdx++
@@ -263,6 +298,7 @@ async function handleCampanhas(chatId: string) {
 // ---------------------------------------------------------------------------
 async function handleFila(chatId: string) {
     try {
+        const fmtMap = await loadFormatMap()
         // Busca campanhas na fila ou processando
         const { data: inQueue, error: qErr } = await supabase
             .from('Campaign')
@@ -307,7 +343,7 @@ async function handleFila(chatId: string) {
                 text += `📌 <b>${esc(client)}</b> — PI: <code>${esc(pi)}</code>\n`
                 for (const f of formats) {
                     const icon = f.status === 'PROCESSING' ? '⚙️ Processando' : '🔄 Na fila'
-                    text += `   ${icon}: ${esc(f.format)} (${f.device})\n`
+                    text += `   ${icon}: ${esc(getFormatLabel(fmtMap, f.format))} (${f.device})\n`
                 }
                 text += '\n'
             }
@@ -335,7 +371,7 @@ async function handleFila(chatId: string) {
                 text += `📌 <b>${esc(client)}</b> — PI: <code>${esc(pi)}</code>\n`
                 text += `   ⏰ Horários: ${times}\n`
                 for (const f of formats) {
-                    text += `   📐 ${esc(f.format)} (${f.device})\n`
+                    text += `   📐 ${esc(getFormatLabel(fmtMap, f.format))} (${f.device})\n`
                 }
                 text += '\n'
             }
