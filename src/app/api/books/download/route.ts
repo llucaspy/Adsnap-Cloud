@@ -49,29 +49,44 @@ export async function GET(req: NextRequest) {
         const zip = new JSZip()
 
         for (const capture of captures) {
-            if (fs.existsSync(capture.screenshotPath)) {
-                const fileContent = fs.readFileSync(capture.screenshotPath)
+            let fileContent: Buffer | null = null;
+            const isUrl = capture.screenshotPath.startsWith('http');
 
-                const campaign = capture.campaign
+            try {
+                if (isUrl) {
+                    const response = await fetch(capture.screenshotPath);
+                    if (response.ok) {
+                        const arrayBuffer = await response.arrayBuffer();
+                        fileContent = Buffer.from(arrayBuffer);
+                    }
+                } else if (fs.existsSync(capture.screenshotPath)) {
+                    fileContent = fs.readFileSync(capture.screenshotPath);
+                }
 
-                // Resolve Format Label
-                const foundFormat = formats.find((f: any) =>
-                    f.id?.trim().toLowerCase() === campaign.format?.trim().toLowerCase()
-                )
-                const formatLabel = foundFormat
-                    ? foundFormat.label
-                    : (campaign.format?.includes('x') ? campaign.format : 'Indefinido')
+                if (fileContent) {
+                    const campaign = capture.campaign;
 
-                // Santitize names for folder structure
-                const safeClient = campaign.client.replace(/[\\/:*?"<>|]/g, '').trim()
-                const safeCampaign = campaign.campaignName.replace(/[\\/:*?"<>|]/g, '').trim()
-                const piFolder = `PI ${campaign.pi} - ${safeClient}${safeCampaign ? ` - ${safeCampaign}` : ''}`
+                    // Resolve Format Label
+                    const foundFormat = formats.find((f: any) =>
+                        f.id?.trim().toLowerCase() === campaign.format?.trim().toLowerCase()
+                    );
+                    const formatLabel = foundFormat
+                        ? foundFormat.label
+                        : (campaign.format?.includes('x') ? campaign.format : 'Indefinido');
 
-                const timeStr = format(capture.createdAt, 'HH-mm-ss')
-                const fileName = `${formatLabel}_${timeStr}.png`
+                    // Santitize names for folder structure
+                    const safeClient = campaign.client.replace(/[\\/:*?"<>|]/g, '').trim();
+                    const safeCampaign = campaign.campaignName.replace(/[\\/:*?"<>|]/g, '').trim();
+                    const piFolder = `PI ${campaign.pi} - ${safeClient}${safeCampaign ? ` - ${safeCampaign}` : ''}`;
 
-                // Add to PI-specific folder (JSZip requires forward slashes)
-                zip.file(`${piFolder}/${fileName}`, fileContent)
+                    const timeStr = format(capture.createdAt, 'HH-mm-ss');
+                    const fileName = `${formatLabel}_${timeStr}.png`;
+
+                    // Add to PI-specific folder (JSZip requires forward slashes)
+                    zip.file(`${piFolder}/${fileName}`, fileContent);
+                }
+            } catch (err) {
+                console.error(`[ZIP] Error processing capture ${capture.id}:`, err);
             }
         }
 

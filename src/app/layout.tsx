@@ -4,6 +4,7 @@ import "./globals.css";
 import { Sidebar } from "@/components/Sidebar";
 import { NexusChat } from "@/components/NexusChat";
 import { ScrollEffects } from "@/components/ScrollEffects";
+import { AlertToast } from "@/components/AlertToast";
 
 const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
@@ -41,6 +42,7 @@ export default function RootLayout({
           </div>
         </main>
         <NexusChat />
+        <AlertToast />
       </body>
     </html>
   );

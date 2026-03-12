@@ -56,6 +56,8 @@ model Settings {
   bannerFormats        String   @default("[]") // JSON: [{id, label, width, height, selector}]
   storageCheckFrequency Int     @default(24) // Frequency in hours
   storageCheckLastRun  DateTime?
+  telegramBotToken     String?  // Token do bot Telegram (@BotFather)
+  telegramChatId       String?  // Chat ID do destinatário
   updatedAt            DateTime @updatedAt
 }
 

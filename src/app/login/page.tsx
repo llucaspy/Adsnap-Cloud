@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { Eye, EyeOff, ArrowRight, Github, Linkedin, Instagram } from 'lucide-react'
+import { Eye, EyeOff, Zap, ArrowRight, Github, Linkedin, Instagram } from 'lucide-react'
 
 // =============================================================================
 // NEXUS TERMINAL - Animated AI boot sequence
@@ -130,7 +130,7 @@ function NexusTerminal() {
                         background: 'var(--bg-glass)',
                         backdropFilter: 'blur(8px)',
                         overflow: 'hidden',
-                        boxShadow: '0 0 20px var(--accent-muted), 0 0 60px rgba(0,0,0,0.3)',
+                        boxShadow: '0 0 20px var(--accent-muted), 0 0 60px rgba(168, 85, 247, 0.05)',
                         height: 420,
                         display: 'flex',
                         flexDirection: 'column' as const,
@@ -150,7 +150,7 @@ function NexusTerminal() {
                         <div style={{ display: 'flex', gap: 6 }}>
                             <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'rgba(239, 68, 68, 0.7)' }} />
                             <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'rgba(245, 158, 11, 0.7)' }} />
-                            <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'rgba(150, 150, 150, 0.6)' }} />
+                            <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'rgba(168, 85, 247, 0.7)' }} />
                         </div>
                         <span
                             style={{
@@ -355,26 +355,37 @@ export default function LoginPage() {
                     {/* Logo area */}
                     <div className="text-center mb-10">
                         <motion.div
-                            initial={{ y: -20, opacity: 0 }}
-                            animate={{ y: 0, opacity: 1 }}
-                            transition={{ delay: 0.2, duration: 0.8, ease: "easeOut" }}
-                            className="flex flex-col items-center mb-12"
+                            initial={{ scale: 0.8, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            transition={{ delay: 0.2, duration: 0.5 }}
+                            className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full mb-6"
+                            style={{
+                                border: '1px solid var(--border)',
+                            }}
                         >
-                            {/* Premium Typographic Logo */}
-                            <div className="relative group cursor-default">
-                                <div className="absolute -inset-8 bg-white/5 rounded-full blur-3xl opacity-0 group-hover:opacity-100 transition duration-1000"></div>
-                                <h1 className="relative flex items-center gap-3">
-                                    <span className="text-4xl font-black uppercase tracking-[0.3em] text-white">
-                                        Adsnap
-                                    </span>
-                                    <span className="text-4xl font-extralight uppercase tracking-[0.3em] text-white/30">
-                                        Cloud
-                                    </span>
-                                </h1>
-                                <div className="mt-4 h-px w-full bg-gradient-to-r from-transparent via-white/20 to-transparent scale-x-50 group-hover:scale-x-100 transition-transform duration-1000" />
-                            </div>
+                            <Zap
+                                className="w-3.5 h-3.5"
+                                style={{ color: 'var(--accent)' }}
+                            />
+                            <span
+                                className="text-xs font-medium uppercase"
+                                style={{
+                                    letterSpacing: '0.2em',
+                                    color: 'var(--text-muted)',
+                                }}
+                            >
+                                Neural Intelligence
+                            </span>
                         </motion.div>
 
+                        <h1
+                            className="text-4xl font-bold tracking-tight"
+                            style={{ fontFamily: 'var(--font-display)' }}
+                        >
+                            ADS<span className="glow-text" style={{ color: 'var(--accent)' }}>NAP</span>
+                            <span style={{ color: 'var(--text-muted)', margin: '0 4px' }}>.</span>
+                            <span style={{ color: 'var(--text-primary)' }}>V2 PRO</span>
+                        </h1>
                         <p
                             className="mt-3 text-sm"
                             style={{ color: 'var(--text-muted)' }}

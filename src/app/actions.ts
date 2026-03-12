@@ -549,12 +549,23 @@ export async function updateSettings(data: any) {
             feedPollingRate: Number(data.feedPollingRate),
             maintenanceMode: Boolean(data.maintenanceMode),
             bannerFormats: data.bannerFormats,
+            telegramChatId: data.telegramChatId || null,
         } as any
     })
 
     nexusLogStore.addLog('Nexus: Configurações globais atualizadas.', 'SYSTEM')
     revalidatePath('/')
     return settings
+}
+
+export async function testTelegramNotification() {
+    const { sendTelegramAlert } = await import('@/lib/telegram')
+    const success = await sendTelegramAlert(
+        'Teste de Notificação',
+        'Se você está recebendo esta mensagem, a integração Telegram está funcionando corretamente!',
+        'Adsnap Cloud — Nexus Engine'
+    )
+    return { success }
 }
 
 export async function deleteCapture(id: string) {

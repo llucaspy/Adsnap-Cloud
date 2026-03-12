@@ -1,8 +1,8 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { Settings as SettingsIcon, Save, RotateCcw, Zap, Globe, Gauge, ShieldAlert, Cpu, Layers } from 'lucide-react'
-import { getSettings, updateSettings } from '@/app/actions'
+import { Settings as SettingsIcon, Save, RotateCcw, Zap, Globe, Gauge, ShieldAlert, Cpu, Layers, Send, MessageCircle } from 'lucide-react'
+import { getSettings, updateSettings, testTelegramNotification } from '@/app/actions'
 
 export function SettingsView() {
     const [settings, setSettings] = useState<any>(null)
@@ -160,6 +160,37 @@ export function SettingsView() {
                     </div>
                 </div>
 
+                {/* Telegram Bot Group */}
+                <div className="glass-panel p-8 space-y-6">
+                    <div className="flex items-center gap-3 mb-2">
+                        <MessageCircle className="w-5 h-5 text-white/50" />
+                        <h2 className="text-xl font-bold text-white">Telegram Bot</h2>
+                        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 border border-green-500/30">Gratuito</span>
+                    </div>
+                    <p className="text-sm text-white/50">
+                        Receba alertas no Telegram quando houver erros de armazenamento, quarentena ou falhas críticas.
+                    </p>
+
+                    <div className="space-y-4">
+                        <div className="space-y-2">
+                            <label className="text-xs font-black uppercase tracking-widest text-white/40">Chat ID do Telegram</label>
+                            <input
+                                type="text"
+                                placeholder="Ex: 123456789"
+                                value={settings.telegramChatId || ''}
+                                onChange={e => setSettings({ ...settings, telegramChatId: e.target.value })}
+                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-white/30 transition-all font-mono"
+                            />
+                            <p className="text-[10px] text-white/20 italic">
+                                Para obter seu Chat ID: envie uma mensagem para o bot e acesse<br />
+                                <code className="bg-black/30 px-1 rounded text-white/40">https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>
+                            </p>
+                        </div>
+
+                        <TelegramTestButton chatId={settings.telegramChatId} />
+                    </div>
+                </div>
+
                 {/* Banner Format Manager */}
                 <div className="glass-panel p-8 space-y-6">
                     <div className="flex items-center gap-3 mb-2">
@@ -210,6 +241,51 @@ function Toggle({ enabled, onChange }: { enabled: boolean, onChange: (v: boolean
         >
             <div className={`w-4 h-4 rounded-full bg-white transition-all transform ${enabled ? 'translate-x-6' : 'translate-x-0'}`} />
         </button>
+    )
+}
+
+function TelegramTestButton({ chatId }: { chatId?: string }) {
+    const [testing, setTesting] = useState(false)
+    const [result, setResult] = useState<'success' | 'error' | null>(null)
+
+    const handleTest = async () => {
+        setTesting(true)
+        setResult(null)
+        try {
+            const res = await testTelegramNotification()
+            setResult(res.success ? 'success' : 'error')
+        } catch {
+            setResult('error')
+        } finally {
+            setTesting(false)
+            setTimeout(() => setResult(null), 4000)
+        }
+    }
+
+    return (
+        <div className="flex items-center gap-3">
+            <button
+                type="button"
+                onClick={handleTest}
+                disabled={testing || !chatId}
+                className="flex items-center gap-2 px-4 py-2.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 border border-blue-500/30 rounded-xl text-sm font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+                {testing ? (
+                    <><RotateCcw className="w-4 h-4 animate-spin" /> Enviando...</>
+                ) : (
+                    <><Send className="w-4 h-4" /> Testar Notificação</>
+                )}
+            </button>
+            {result === 'success' && (
+                <span className="text-xs text-green-400 font-bold animate-pulse">✓ Mensagem enviada!</span>
+            )}
+            {result === 'error' && (
+                <span className="text-xs text-red-400 font-bold">✗ Falha no envio. Verifique Token e Chat ID.</span>
+            )}
+            {!chatId && (
+                <span className="text-xs text-white/30">Insira o Chat ID primeiro</span>
+            )}
+        </div>
     )
 }
 

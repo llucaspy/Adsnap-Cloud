@@ -2,6 +2,8 @@ import { chromium, devices, Page, Locator } from 'playwright'
 import prisma from './prisma'
 import { supabase } from './supabase'
 import { nexusLogStore } from './nexusLogStore'
+import { alertStore } from './alertStore'
+import { sendTelegramAlert } from './telegram'
 
 // ============================================================================
 // NEXUS V5 - CAPTURE SERVICE (SIMPLIFIED)
@@ -51,6 +53,10 @@ export async function processCampaign(campaignId: string) {
         console.log(`[Nexus] Quarentena aplicada para ${campaignId}. Motivo: ${lastError}`);
         await nexusLogStore.addLog(`Nexus: Quarentena aplicada. Todas as tentativas falharam.`, 'ERROR', `Último erro: ${lastError}`, campaignId);
 
+        // Visual alert + Telegram
+        alertStore.addAlert('error', 'Campanha em Quarentena', `Todas as ${MAX_RETRIES} tentativas falharam. Erro: ${lastError}`, campaignId);
+        sendTelegramAlert('Campanha em Quarentena', `Todas as ${MAX_RETRIES} tentativas falharam para a campanha.`, `Erro: ${lastError}`, campaignId).catch(() => {});
+
         // Save failure to database as a record even in quarantine
         await prisma.capture.create({
             data: {
@@ -72,6 +78,11 @@ export async function processCampaign(campaignId: string) {
         const stack = e instanceof Error ? e.stack : undefined;
         console.error('[Nexus Critical Error]', e);
         await nexusLogStore.addLog(`Nexus: Erro crítico no processCampaign`, 'ERROR', `${errorMsg}\n\nStack: ${stack}`, campaignId);
+
+        // Visual alert + Telegram
+        alertStore.addAlert('error', 'Erro Crítico no Nexus', errorMsg, campaignId);
+        sendTelegramAlert('Erro Crítico no Nexus', 'Erro fatal durante processamento da campanha.', errorMsg, campaignId).catch(() => {});
+
         return { success: false, error: errorMsg };
     }
 }
@@ -450,6 +461,11 @@ async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: strin
             console.error('[Nexus Storage Error]', uploadError);
             const msg = `Falha no upload para o Storage: ${uploadError.message}`;
             await nexusLogStore.addLog(`Nexus: Erro no Storage`, 'ERROR', msg, campaignId);
+
+            // Visual alert + Telegram
+            alertStore.addAlert('error', 'Falha no Upload Supabase', msg, campaignId);
+            sendTelegramAlert('Falha no Upload Supabase', 'O upload da captura para o Supabase Storage falhou.', uploadError.message, campaignId).catch(() => {});
+
             throw new Error(msg);
         }
 
