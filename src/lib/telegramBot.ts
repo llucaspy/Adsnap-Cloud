@@ -270,11 +270,16 @@ async function handleCallback(query: any) {
         // --- Delete ---
         if (data.startsWith('del:')) return await cbDelete(chatId, msgId, data.slice(4))
         if (data.startsWith('del_yes:')) return await cbDeleteYes(chatId, msgId, data.slice(8))
+        if (data.startsWith('del_pi:')) return await cbDeletePI(chatId, msgId, data.slice(7))
+        if (data.startsWith('del_pi_yes:')) return await cbDeletePIYes(chatId, msgId, data.slice(11))
 
         // --- Rename ---
         if (data.startsWith('rename:')) return await cbRename(chatId, msgId, data.slice(7))
         if (data.startsWith('rn:')) return await cbRenameSet(chatId, msgId, data.slice(3))
         if (data.startsWith('rn_clr:')) return await cbRenameClear(chatId, msgId, data.slice(7))
+
+        // --- Schedule ---
+        if (data.startsWith('sched:')) return await cbShowSchedule(chatId, msgId, data.slice(6))
 
         // --- Books ---
         if (data.startsWith('book:')) return await cbBookDetail(chatId, msgId, data.slice(5))
@@ -485,12 +490,20 @@ async function cbLogs(chatId: string, msgId: number, isNewMsg: boolean = false) 
         return await editMsg(chatId, msgId, emptyText, markup)
     }
 
+    const fmtMap = await loadFormatMap()
     const icons: Record<string, string> = { INFO: 'ℹ️', SUCCESS: '✅', ERROR: '❌', SYSTEM: '⚙️' }
     let text = `📜 <b>ÚLTIMOS LOGS</b>\n\n`
     for (const log of logs.reverse()) {
         const icon = icons[log.level] || '•'
         const time = new Date(log.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-        text += `${icon} <code>${time}</code> ${esc(log.message.substring(0, 55))}\n`
+        
+        // Resolve format IDs in message
+        let resolvedMsg = log.message
+        for (const [id, label] of Object.entries(fmtMap)) {
+            resolvedMsg = resolvedMsg.replace(new RegExp(id, 'g'), label)
+        }
+
+        text += `${icon} <code>${time}</code> ${esc(resolvedMsg.substring(0, 55))}\n`
     }
 
     if (isNewMsg) {
@@ -504,16 +517,41 @@ async function cbLogs(chatId: string, msgId: number, isNewMsg: boolean = false) 
 // 💾 STORAGE
 // =============================================================================
 async function cbStorage(chatId: string, msgId: number) {
-    const text = `
-💾 <b>ARMAZENAMENTO</b>
+    try {
+        // Fetch stats from Supabase Storage
+        const { data: files, error } = await supabase.storage.from('screenshots').list('', { limit: 10000 })
 
-📦 Supabase Storage
-🗄️ Banco de Dados
+        if (error) throw error
 
-Acesse o painel do Supabase para detalhes.
-    `.trim()
+        let totalSize = 0
+        const count = files?.length || 0
+        if (files) {
+            for (const f of files) {
+                totalSize += f.metadata?.size || 0
+            }
+        }
 
-    await editMsg(chatId, msgId, text, kb([[btn('◀️ Menu', 'menu:main')]]))
+        const sizeMB = (totalSize / (1024 * 1024)).toFixed(2)
+        const sizeGB = (totalSize / (1024 * 1024 * 1024)).toFixed(3)
+
+        const text = `
+💾 <b>ESTATÍSTICAS DO STORAGE</b>
+
+📦 <b>Bucket:</b> <code>screenshots</code>
+📊 <b>Total de arquivos:</b> ${count}
+📉 <b>Espaço ocupado:</b> ${sizeMB} MB (${sizeGB} GB)
+
+🗄️ <b>Banco de Dados:</b> Supabase PostgreSQL
+<i>Contagem de capturas: Ativa</i>
+
+Acesse o painel do Supabase para gestão de arquivos antigos.
+        `.trim()
+
+        await editMsg(chatId, msgId, text, kb([[btn('🔄 Atualizar', 'menu:storage'), btn('◀️ Menu', 'menu:main')]]))
+    } catch (e) {
+        console.error('[TelegramBot] Storage error:', e)
+        await editMsg(chatId, msgId, '❌ Erro ao buscar estatísticas de storage.', kb([[btn('◀️ Menu', 'menu:main')]]))
+    }
 }
 
 // =============================================================================
@@ -588,6 +626,7 @@ async function cbShowPI(chatId: string, msgId: number, pi: string) {
     if (campaigns.length > 1) {
         rows.push([btn(`🚀 Capturar TODOS (${campaigns.length})`, `cap_all:${pi}`)])
     }
+    rows.push([btn(`🗑️ Deletar PI Inteira`, `del_pi:${pi}`)])
     rows.push([btn('◀️ Voltar', 'menu:gerenciar')])
 
     await editMsg(chatId, msgId, text, kb(rows))
@@ -620,6 +659,7 @@ Status: ${c.status}
     await editMsg(chatId, msgId, text, kb([
         [btn('📸 Capturar', `cap:${c.id}`)],
         [btn('✏️ Editar Nome', `rename:${c.id}`)],
+        [btn('⏰ Ver Agendamento', `sched:${c.id}`)],
         [btn('🗑️ Deletar', `del:${c.id}`)],
         [btn(`◀️ Voltar`, `pi:${c.pi}`)],
     ]))
@@ -781,6 +821,67 @@ async function cbDeleteYes(chatId: string, msgId: number, id: string) {
     }
     try { await nexusLogStore.addLog(`Bot Telegram: Campanha deletada: ${id}`, 'SYSTEM'); } catch (e) {}
     await editMsg(chatId, msgId, '✅ <b>Campanha deletada!</b>', kb([[btn('◀️ Menu', 'menu:main')]]))
+}
+
+async function cbDeletePI(chatId: string, msgId: number, pi: string) {
+    const { data: campaigns } = await supabase.from('Campaign').select('id, client').eq('pi', pi).eq('isArchived', false)
+    const count = campaigns?.length || 0
+    const client = campaigns?.[0]?.client || pi
+
+    await editMsg(chatId, msgId,
+        `🗑️ <b>Deletar PI INTEIRA?</b>\n\n⚠️ <b>Aviso:</b> Isso irá remover todos os <b>${count}</b> formatos e suas capturas.\n\n${esc(client)} — PI: <code>${esc(pi)}</code>\n\n<b>Confirmar exclusão em massa?</b>`,
+        kb([
+            [btn(`🗑️ SIM, DELETAR TUDO`, `del_pi_yes:${pi}`)],
+            [btn('❌ Cancelar', `pi:${pi}`)],
+        ])
+    )
+}
+
+async function cbDeletePIYes(chatId: string, msgId: number, pi: string) {
+    const { data: campaigns } = await supabase.from('Campaign').select('id').eq('pi', pi)
+    
+    if (campaigns && campaigns.length > 0) {
+        const ids = campaigns.map(c => c.id)
+        // Delete captures first
+        await supabase.from('Capture').delete().in('campaignId', ids)
+        // Delete campaigns
+        await supabase.from('Campaign').delete().in('id', ids)
+    }
+
+    try { await nexusLogStore.addLog(`Bot Telegram: PI Deletada em lote: ${pi}`, 'SYSTEM'); } catch (e) {}
+
+    await editMsg(chatId, msgId, `✅ <b>PI <code>${pi}</code> deletada com sucesso!</b>`, kb([[btn('◀️ Menu', 'menu:main')]]))
+}
+
+// =============================================================================
+// 📅 SCHEDULE
+// =============================================================================
+async function cbShowSchedule(chatId: string, msgId: number, id: string) {
+    const fmtMap = await loadFormatMap()
+    const { data: c } = await supabase.from('Campaign').select('client, format, isScheduled, scheduledTimes, pi').eq('id', id).single()
+
+    if (!c) return
+
+    let times = 'Sem horários agendados.'
+    try {
+        const parsed = JSON.parse(c.scheduledTimes || '[]') as string[]
+        if (parsed.length > 0) {
+            times = parsed.join(', ')
+        }
+    } catch { /* ignore */ }
+
+    const text = `
+📅 <b>AGENDAMENTO</b>
+
+🏢 <b>Cliente:</b> ${esc(c.client)}
+📐 <b>Formato:</b> ${esc(fl(fmtMap, c.format))}
+🔔 <b>Ativo:</b> ${c.isScheduled ? '✅ Sim' : '❌ Não'}
+
+⏰ <b>Horários:</b>
+<code>${times}</code>
+    `.trim()
+
+    await editMsg(chatId, msgId, text, kb([[btn('◀️ Voltar', `actions:${id}`)]]))
 }
 
 // =============================================================================
