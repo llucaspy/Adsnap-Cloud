@@ -111,7 +111,9 @@ async function ackCallback(callbackQueryId: string, text?: string) {
     try { await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callback_query_id: callbackQueryId, text: text || '' }) }) } catch (e) { /* ignore */ }
 }
 
+// ---------------------------------------------------------------------------
 // Helpers
+// ---------------------------------------------------------------------------
 function isAuthorized(chatId: string | number): boolean {
     const allowed = ALLOWED_CHAT_ID()
     if (!allowed) return false
@@ -124,6 +126,19 @@ function esc(s: string): string {
 
 function btn(text: string, data: string) { return { text, callback_data: data } }
 function kb(rows: { text: string, callback_data: string }[][]) { return { inline_keyboard: rows } }
+
+// Persistent Menu (Reply Keyboard)
+function getPersistentMenu() {
+    return {
+        keyboard: [
+            [{ text: '📊 Status' }, { text: '⚙️ Gerenciar' }],
+            [{ text: '📚 Books' }, { text: '🔄 Fila' }],
+            [{ text: '📜 Logs' }, { text: 'ℹ️ Ajuda' }]
+        ],
+        resize_keyboard: true,
+        one_time_keyboard: false
+    }
+}
 
 // =============================================================================
 // MAIN ROUTER
@@ -149,8 +164,16 @@ export async function handleUpdate(update: any) {
     try {
         console.log(`[TelegramBot] Recebido: ${text} de ${chatId}`)
 
-        // Any text → show main menu (100% interactive)
-        // Also accept /start or /menu as triggers
+        // Map persistent buttons text to commands
+        const cmdText = text.toLowerCase()
+        if (text === '📊 Status') return await cbStatus(chatId, 0, true)
+        if (text === '⚙️ Gerenciar') return await cbGerenciar(chatId, 0, true)
+        if (text === '📚 Books') return await cbBooks(chatId, 0, true)
+        if (text === '🔄 Fila') return await cbFila(chatId, 0, true)
+        if (text === '📜 Logs') return await cbLogs(chatId, 0, true)
+        if (text === 'ℹ️ Ajuda' || cmdText === '/ajuda' || cmdText === '/start') return await showMainMenu(chatId)
+
+        // Default: show main menu (and send persistent buttons)
         return await showMainMenu(chatId)
     } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err)
@@ -167,18 +190,21 @@ async function showMainMenu(chatId: string) {
 🤖 <b>ADSNAP CLOUD</b>
 <i>Centro de Comando</i>
 
-Selecione uma opção:
+Selecione uma opção no menu abaixo ou use os botões fixos:
     `.trim()
 
     await sendMessage(chatId, text, {
-        reply_markup: kb([
-            [btn('📊 Status do Sistema', 'menu:status')],
-            [btn('📋 Campanhas Ativas', 'menu:campanhas'), btn('🔄 Fila', 'menu:fila')],
-            [btn('⚙️ Gerenciar Campanhas', 'menu:gerenciar')],
-            [btn('📚 Books / Comprovantes', 'menu:books')],
-            [btn('⚠️ Quarentena', 'menu:quarentena'), btn('📜 Logs', 'menu:logs')],
-            [btn('💾 Storage', 'menu:storage')],
-        ]),
+        reply_markup: {
+            ...kb([
+                [btn('📊 Status do Sistema', 'menu:status')],
+                [btn('📋 Campanhas Ativas', 'menu:campanhas'), btn('🔄 Fila', 'menu:fila')],
+                [btn('⚙️ Gerenciar Campanhas', 'menu:gerenciar')],
+                [btn('📚 Books / Comprovantes', 'menu:books')],
+                [btn('⚠️ Quarentena', 'menu:quarentena'), btn('📜 Logs', 'menu:logs')],
+                [btn('💾 Storage', 'menu:storage')],
+            ]),
+            ...getPersistentMenu() // Add both for first message
+        },
     })
 }
 
@@ -265,29 +291,30 @@ async function handleCallback(query: any) {
 // =============================================================================
 // 📊 STATUS
 // =============================================================================
-async function cbStatus(chatId: string, msgId: number) {
-    const { data: campaigns, error } = await supabase
-        .from('Campaign')
-        .select('pi, status')
-        .eq('isArchived', false)
-        .not('status', 'in', '("EXPIRED","FINISHED")')
+async function cbStatus(chatId: string, msgId: number, isNewMsg: boolean = false) {
+    try {
+        const { data: campaigns, error } = await supabase
+            .from('Campaign')
+            .select('pi, status')
+            .eq('isArchived', false)
+            .not('status', 'in', '("EXPIRED","FINISHED")')
 
-    if (error) throw error
-    const all = campaigns || []
+        if (error) throw error
+        const all = campaigns || []
 
-    const piSet = new Set(all.map(c => c.pi))
-    const pisSucesso = [...piSet].filter(pi => all.filter(c => c.pi === pi).every(c => c.status === 'SUCCESS')).length
-    const pisComErro = new Set(all.filter(c => c.status === 'FAILED' || c.status === 'QUARANTINE').map(c => c.pi)).size
-    const successF = all.filter(c => c.status === 'SUCCESS').length
-    const failedF = all.filter(c => c.status === 'FAILED').length
-    const quarantineF = all.filter(c => c.status === 'QUARANTINE').length
-    const queuedF = all.filter(c => c.status === 'QUEUED').length
-    const processingF = all.filter(c => c.status === 'PROCESSING').length
+        const piSet = new Set(all.map(c => c.pi))
+        const pisSucesso = [...piSet].filter(pi => all.filter(c => c.pi === pi).every(c => c.status === 'SUCCESS')).length
+        const pisComErro = new Set(all.filter(c => c.status === 'FAILED' || c.status === 'QUARANTINE').map(c => c.pi)).size
+        const successF = all.filter(c => c.status === 'SUCCESS').length
+        const failedF = all.filter(c => c.status === 'FAILED').length
+        const quarantineF = all.filter(c => c.status === 'QUARANTINE').length
+        const queuedF = all.filter(c => c.status === 'QUEUED').length
+        const processingF = all.filter(c => c.status === 'PROCESSING').length
 
-    const todayStr = new Date().toISOString().split('T')[0]
-    const { count: todayCount } = await supabase.from('Capture').select('*', { count: 'exact', head: true }).gte('createdAt', todayStr)
+        const todayStr = new Date().toISOString().split('T')[0]
+        const { count: todayCount } = await supabase.from('Capture').select('*', { count: 'exact', head: true }).gte('createdAt', todayStr)
 
-    const text = `
+        const text = `
 📊 <b>STATUS DO SISTEMA</b>
 
 📁 <b>Campanhas (PIs)</b>
@@ -308,7 +335,18 @@ async function cbStatus(chatId: string, msgId: number) {
 📸 <b>Capturas hoje:</b> ${todayCount || 0}
     `.trim()
 
-    await editMsg(chatId, msgId, text, kb([[btn('🔄 Atualizar', 'menu:status'), btn('◀️ Menu', 'menu:main')]]))
+        const markup = kb([[btn('🔄 Atualizar', 'menu:status'), btn('◀️ Menu', 'menu:main')]])
+        if (isNewMsg) {
+            await sendMessage(chatId, text, { reply_markup: markup })
+        } else {
+            await editMsg(chatId, msgId, text, markup)
+        }
+    } catch (e) {
+        console.error('[TelegramBot] Status error:', e)
+        const errTxt = `❌ Erro ao buscar status: ${esc(String(e))}`
+        if (isNewMsg) await sendMessage(chatId, errTxt)
+        else await editMsg(chatId, msgId, errTxt, kb([[btn('◀️ Menu', 'menu:main')]]))
+    }
 }
 
 // =============================================================================
@@ -362,43 +400,54 @@ async function cbCampanhas(chatId: string, msgId: number) {
 // =============================================================================
 // 🔄 FILA
 // =============================================================================
-async function cbFila(chatId: string, msgId: number) {
-    const fmtMap = await loadFormatMap()
+async function cbFila(chatId: string, msgId: number, isNewMsg: boolean = false) {
+    try {
+        const fmtMap = await loadFormatMap()
 
-    const { data: inQueue } = await supabase.from('Campaign').select('id, pi, client, format, status, device').in('status', ['QUEUED', 'PROCESSING']).order('updatedAt', { ascending: true })
-    const { data: scheduled } = await supabase.from('Campaign').select('id, pi, client, format, device, scheduledTimes').eq('isScheduled', true).eq('isArchived', false).not('status', 'in', '("EXPIRED","FINISHED","QUEUED","PROCESSING")')
+        const { data: inQueue } = await supabase.from('Campaign').select('id, pi, client, format, status, device').in('status', ['QUEUED', 'PROCESSING']).order('updatedAt', { ascending: true })
+        const { data: scheduled } = await supabase.from('Campaign').select('id, pi, client, format, device, scheduledTimes').eq('isScheduled', true).eq('isArchived', false).not('status', 'in', '("EXPIRED","FINISHED","QUEUED","PROCESSING")')
 
-    const queue = inQueue || []
-    const sched = scheduled || []
+        const queue = inQueue || []
+        const sched = scheduled || []
 
-    if (queue.length === 0 && sched.length === 0) {
-        await editMsg(chatId, msgId, '✅ <b>Fila vazia!</b>', kb([[btn('🔄 Atualizar', 'menu:fila'), btn('◀️ Menu', 'menu:main')]]))
-        return
-    }
+        const markup = kb([[btn('🔄 Atualizar', 'menu:fila'), btn('◀️ Menu', 'menu:main')]])
 
-    let text = ''
-    if (queue.length > 0) {
-        const groups = groupByPI(queue)
-        text += `🔄 <b>NA FILA</b> (${queue.length} formatos)\n\n`
-        for (const [pi, fmts] of groups) {
-            text += `📌 <b>${esc(fmts[0].client)}</b> — PI: <code>${esc(pi)}</code>\n`
-            for (const f of fmts) text += `   ${f.status === 'PROCESSING' ? '⚙️' : '🔄'} ${esc(fl(fmtMap, f.format))} (${f.device})\n`
-            text += '\n'
+        if (queue.length === 0 && sched.length === 0) {
+            const emptyText = '✅ <b>Fila vazia!</b>'
+            if (isNewMsg) return await sendMessage(chatId, emptyText, { reply_markup: markup })
+            return await editMsg(chatId, msgId, emptyText, markup)
         }
-    }
-    if (sched.length > 0) {
-        const groups = groupByPI(sched)
-        text += `📅 <b>AGENDADAS</b> (${sched.length})\n\n`
-        for (const [pi, fmts] of groups) {
-            let times = '—'
-            try { const p = JSON.parse(fmts[0].scheduledTimes || '[]') as string[]; times = p.length > 0 ? p.join(', ') : '—' } catch { times = '—' }
-            text += `📌 <b>${esc(fmts[0].client)}</b> — PI: <code>${esc(pi)}</code>\n   ⏰ ${times}\n`
-            for (const f of fmts) text += `   📐 ${esc(fl(fmtMap, f.format))} (${f.device})\n`
-            text += '\n'
-        }
-    }
 
-    await editMsg(chatId, msgId, text.trim(), kb([[btn('🔄 Atualizar', 'menu:fila'), btn('◀️ Menu', 'menu:main')]]))
+        let text = ''
+        if (queue.length > 0) {
+            const groups = groupByPI(queue)
+            text += `🔄 <b>NA FILA</b> (${queue.length} formatos)\n\n`
+            for (const [pi, fmts] of groups) {
+                text += `📌 <b>${esc(fmts[0].client)}</b> — PI: <code>${esc(pi)}</code>\n`
+                for (const f of fmts) text += `   ${f.status === 'PROCESSING' ? '⚙️' : '🔄'} ${esc(fl(fmtMap, f.format))} (${f.device})\n`
+                text += '\n'
+            }
+        }
+        if (sched.length > 0) {
+            const groups = groupByPI(sched)
+            text += `📅 <b>AGENDADAS</b> (${sched.length})\n\n`
+            for (const [pi, fmts] of groups) {
+                let times = '—'
+                try { const p = JSON.parse(fmts[0].scheduledTimes || '[]') as string[]; times = p.length > 0 ? p.join(', ') : '—' } catch { times = '—' }
+                text += `📌 <b>${esc(fmts[0].client)}</b> — PI: <code>${esc(pi)}</code>\n   ⏰ ${times}\n`
+                for (const f of fmts) text += `   📐 ${esc(fl(fmtMap, f.format))} (${f.device})\n`
+                text += '\n'
+            }
+        }
+
+        if (isNewMsg) {
+            await sendMessage(chatId, text.trim(), { reply_markup: markup })
+        } else {
+            await editMsg(chatId, msgId, text.trim(), markup)
+        }
+    } catch (e) {
+        console.error('[TelegramBot] Fila error:', e)
+    }
 }
 
 // =============================================================================
@@ -425,12 +474,15 @@ async function cbQuarentena(chatId: string, msgId: number) {
 // =============================================================================
 // 📜 LOGS
 // =============================================================================
-async function cbLogs(chatId: string, msgId: number) {
+async function cbLogs(chatId: string, msgId: number, isNewMsg: boolean = false) {
     const { data: logs } = await supabase.from('NexusLog').select('level, message, createdAt').order('createdAt', { ascending: false }).limit(10)
 
+    const markup = kb([[btn('🔄 Atualizar', 'menu:logs'), btn('◀️ Menu', 'menu:main')]])
+
     if (!logs || logs.length === 0) {
-        await editMsg(chatId, msgId, '📭 Nenhum log.', kb([[btn('◀️ Menu', 'menu:main')]]))
-        return
+        const emptyText = '📭 Nenhum log.'
+        if (isNewMsg) return await sendMessage(chatId, emptyText, { reply_markup: markup })
+        return await editMsg(chatId, msgId, emptyText, markup)
     }
 
     const icons: Record<string, string> = { INFO: 'ℹ️', SUCCESS: '✅', ERROR: '❌', SYSTEM: '⚙️' }
@@ -441,7 +493,11 @@ async function cbLogs(chatId: string, msgId: number) {
         text += `${icon} <code>${time}</code> ${esc(log.message.substring(0, 55))}\n`
     }
 
-    await editMsg(chatId, msgId, text, kb([[btn('🔄 Atualizar', 'menu:logs'), btn('◀️ Menu', 'menu:main')]]))
+    if (isNewMsg) {
+        await sendMessage(chatId, text, { reply_markup: markup })
+    } else {
+        await editMsg(chatId, msgId, text, markup)
+    }
 }
 
 // =============================================================================
@@ -463,7 +519,7 @@ Acesse o painel do Supabase para detalhes.
 // =============================================================================
 // ⚙️ GERENCIAR — Lista PIs com botões
 // =============================================================================
-async function cbGerenciar(chatId: string, msgId: number) {
+async function cbGerenciar(chatId: string, msgId: number, isNewMsg: boolean = false) {
     const { data: campaigns } = await supabase
         .from('Campaign')
         .select('pi, client')
@@ -476,17 +532,25 @@ async function cbGerenciar(chatId: string, msgId: number) {
         if (!piMap.has(c.pi)) piMap.set(c.pi, c.client)
     }
 
-    if (piMap.size === 0) {
-        await editMsg(chatId, msgId, '📭 Nenhuma campanha para gerenciar.', kb([[btn('◀️ Menu', 'menu:main')]]))
-        return
-    }
-
     const rows = [...piMap.entries()].slice(0, 15).map(([pi, client]) =>
         [btn(`📁 ${client} — ${pi}`, `pi:${pi}`)]
     )
     rows.push([btn('◀️ Menu', 'menu:main')])
 
-    await editMsg(chatId, msgId, '⚙️ <b>GERENCIAR</b>\n\nSelecione um PI:', kb(rows))
+    const markup = kb(rows)
+    const text = '⚙️ <b>GERENCIAR</b>\n\nSelecione um PI:'
+
+    if (piMap.size === 0) {
+        const emptyText = '📭 Nenhuma campanha para gerenciar.'
+        if (isNewMsg) return await sendMessage(chatId, emptyText, { reply_markup: markup })
+        return await editMsg(chatId, msgId, emptyText, markup)
+    }
+
+    if (isNewMsg) {
+        await sendMessage(chatId, text, { reply_markup: markup })
+    } else {
+        await editMsg(chatId, msgId, text, markup)
+    }
 }
 
 // =============================================================================
@@ -771,7 +835,7 @@ async function cbRenameClear(chatId: string, msgId: number, id: string) {
 // =============================================================================
 // 📚 BOOKS — Lista PIs com capturas
 // =============================================================================
-async function cbBooks(chatId: string, msgId: number) {
+async function cbBooks(chatId: string, msgId: number, isNewMsg: boolean = false) {
     // Get unique PIs that have captures
     const { data: campaigns } = await supabase
         .from('Campaign')
@@ -785,8 +849,10 @@ async function cbBooks(chatId: string, msgId: number) {
     }
 
     if (piMap.size === 0) {
-        await editMsg(chatId, msgId, '📭 Nenhum book disponível.', kb([[btn('◀️ Menu', 'menu:main')]]))
-        return
+        const emptyText = '📭 Nenhum book disponível.'
+        const markup = kb([[btn('◀️ Menu', 'menu:main')]])
+        if (isNewMsg) return await sendMessage(chatId, emptyText, { reply_markup: markup })
+        return await editMsg(chatId, msgId, emptyText, markup)
     }
 
     // Count captures per PI
@@ -794,8 +860,6 @@ async function cbBooks(chatId: string, msgId: number) {
     const entries = [...piMap.entries()].slice(0, 12)
 
     for (const [pi, client] of entries) {
-        const { count } = await supabase.from('Capture').select('*', { count: 'exact', head: true }).eq('status', 'SUCCESS').eq('campaignId', (await supabase.from('Campaign').select('id').eq('pi', pi)).data?.[0]?.id || '')
-
         const short = client.length > 15 ? client.substring(0, 13) + '…' : client
         rows.push([btn(`📚 ${short} — ${pi}`, `book:${pi}`)])
     }
@@ -803,7 +867,14 @@ async function cbBooks(chatId: string, msgId: number) {
     rows.push([btn('🌐 Abrir Books no Browser', 'menu:books_url')])
     rows.push([btn('◀️ Menu', 'menu:main')])
 
-    await editMsg(chatId, msgId, `📚 <b>BOOKS</b>\n\nSelecione um PI para ver os comprovantes:`, kb(rows))
+    const markup = kb(rows)
+    const text = `📚 <b>BOOKS</b>\n\nSelecione um PI para ver os comprovantes:`
+
+    if (isNewMsg) {
+        await sendMessage(chatId, text, { reply_markup: markup })
+    } else {
+        await editMsg(chatId, msgId, text, markup)
+    }
 }
 
 // Book: show last captures for a PI
