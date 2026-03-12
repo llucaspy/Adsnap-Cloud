@@ -62,14 +62,14 @@ export async function handleUpdate(update: any) {
     // Auth check
     if (!isAuthorized(chatId)) {
         console.log(`[TelegramBot] Acesso negado para chatId: ${chatId}`);
-        await nexusLogStore.addLog(`Bot Telegram: Acesso negado (ChatID: ${chatId})`, 'ERROR');
+        try { await nexusLogStore.addLog(`Bot Telegram: Acesso negado (ChatID: ${chatId})`, 'ERROR'); } catch (e) { console.error('[TelegramBot] Log error:', e); }
         await sendMessage(chatId, '🚫 <b>Acesso negado.</b>\nSeu Chat ID não está autorizado.');
         return
     }
 
     try {
         console.log(`[TelegramBot] Recebido: ${text} de ${chatId}`);
-        await nexusLogStore.addLog(`Bot Telegram: Comando recebido: ${text}`, 'INFO');
+        try { await nexusLogStore.addLog(`Bot Telegram: Comando recebido: ${text}`, 'INFO'); } catch (e) { console.error('[TelegramBot] Log error:', e); }
 
         // Parse command
         const [rawCmd, ...args] = text.split(' ')
@@ -97,8 +97,9 @@ export async function handleUpdate(update: any) {
         }
     } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        await nexusLogStore.addLog(`Bot Telegram: Erro ao processar comando`, 'ERROR', errorMsg);
-        await sendMessage(chatId, `❌ Erro interno ao processar comando.`);
+        console.error(`[TelegramBot] Erro ao processar ${text}:`, err);
+        try { await nexusLogStore.addLog(`Bot Telegram: Erro ao processar comando`, 'ERROR', errorMsg); } catch (e) { /* ignore */ }
+        await sendMessage(chatId, `❌ Erro interno ao processar comando: <code>${esc(errorMsg)}</code>`);
     }
 }
 

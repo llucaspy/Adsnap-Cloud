@@ -10,86 +10,87 @@ datasource db {
 }
 
 model Campaign {
-  id             String    @id @default(cuid())
-  agency         String
-  client         String
-  campaignName   String    @default("")  // Nome da campanha
-  pi             String
-  format         String
-  url            String
-  device         String    @default("desktop")
-  status         String    @default("PENDING") // PENDING | QUEUED | PROCESSING | SUCCESS | FAILED | QUARANTINE
-  segmentation   String    @default("PRIVADO")  // PRIVADO | GOV_FEDERAL | GOV_ESTADUAL | INTERNO
-  flightStart    DateTime?  // Início da veiculação
-  flightEnd      DateTime?  // Fim da veiculação
-  isArchived     Boolean   @default(false)
-  isScheduled    Boolean   @default(false)
-  scheduledTimes String    @default("[]")  // JSON array: ["10:00", "14:00"]
-  lastCaptureAt  DateTime?
-  retryCount     Int       @default(0)
-  captures       Capture[]
+  id              String          @id @default(cuid())
+  agency          String
+  client          String
+  campaignName    String          @default("")
+  pi              String
+  format          String
+  url             String
+  device          String          @default("desktop")
+  status          String          @default("PENDING")
+  segmentation    String          @default("PRIVADO")
+  flightStart     DateTime?
+  flightEnd       DateTime?
+  isArchived      Boolean         @default(false)
+  isScheduled     Boolean         @default(false)
+  scheduledTimes  String          @default("[]")
+  lastCaptureAt   DateTime?
+  retryCount      Int             @default(0)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  captures        Capture[]
   emailDispatches EmailDispatch[]
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
 }
 
 model Capture {
   id             String   @id @default(cuid())
   campaignId     String
-  campaign       Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   screenshotPath String
-  status         String   @default("SUCCESS") // SUCCESS | FAILED | QUARANTINE
-  auditNotes     String?  // Razão da falha (ex: "Banner cortado", "Banner não encontrado")
+  status         String   @default("SUCCESS")
+  auditNotes     String?
   createdAt      DateTime @default(now())
+  campaign       Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 }
 
 model Settings {
-  id                Int      @id @default(1)
-  nexusMaxRetries   Int      @default(3)
-  nexusTimeout      Int      @default(60000)
-  nexusDelay        Int      @default(3000)
-  autoCleanupDays   Int      @default(30)
-  webhookUrl        String?
-  performanceMode   Boolean  @default(false)
-  feedPollingRate   Int      @default(5000)
-  maintenanceMode      Boolean  @default(false)
-  bannerFormats        String   @default("[]") // JSON: [{id, label, width, height, selector}]
-  storageCheckFrequency Int     @default(24) // Frequency in hours
-  storageCheckLastRun  DateTime?
-  telegramBotToken     String?  // Token do bot Telegram (@BotFather)
-  telegramChatId       String?  // Chat ID do destinatário
-  updatedAt            DateTime @updatedAt
+  id                    Int       @id @default(1)
+  nexusMaxRetries       Int       @default(3)
+  nexusTimeout          Int       @default(60000)
+  nexusDelay            Int       @default(3000)
+  autoCleanupDays       Int       @default(30)
+  webhookUrl            String?
+  performanceMode       Boolean   @default(false)
+  feedPollingRate       Int       @default(5000)
+  maintenanceMode       Boolean   @default(false)
+  bannerFormats         String    @default("[]")
+  updatedAt             DateTime  @updatedAt
+  storageCheckFrequency Int       @default(24)
+  storageCheckLastRun   DateTime?
+  telegramBotToken      String?
+  telegramChatId        String?
 }
 
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
-  password  String   // bcrypt hash
+  password  String
   name      String
-  role      String   @default("user") // "admin" | "user"
+  role      String   @default("user")
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
 model NexusLog {
   id         String   @id @default(cuid())
-  level      String   // INFO | SUCCESS | ERROR | SYSTEM
+  level      String
   message    String
-  details    String?  // JSON ou stack trace
+  details    String?
   campaignId String?
   createdAt  DateTime @default(now())
 }
 
 model EmailDispatch {
-  id            String    @id @default(cuid())
-  campaignId    String?
-  campaign      Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  pi            String    @default("")  // PI da campanha — agrupa todos os formatos
-  recipients    String    // JSON array: ["email1@x.com", "email2@x.com"]
-  dispatchTime  String    @default("09:00") // HH:mm — horário BRT do disparo
-  isActive      Boolean   @default(true)
-  lastSentAt    DateTime?
-  status        String    @default("PENDING") // PENDING | SENT | FAILED
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id           String    @id @default(cuid())
+  campaignId   String?
+  recipients   String
+  dispatchTime String    @default("09:00")
+  isActive     Boolean   @default(true)
+  lastSentAt   DateTime?
+  status       String    @default("PENDING")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  pi           String    @default("")
+  campaign     Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 }
