@@ -127,28 +127,40 @@ async function handleHelp(chatId: string) {
 }
 
 // ---------------------------------------------------------------------------
-// /status
+// /status — Agrupa por PI
 // ---------------------------------------------------------------------------
 async function handleStatus(chatId: string) {
     try {
-        // Fetch all counts using Supabase SDK (more resilient than Prisma pool)
-        const [
-            { count: activeCount },
-            { count: queuedCount },
-            { count: processingCount },
-            { count: successCount },
-            { count: failedCount },
-            { count: quarantineCount }
-        ] = await Promise.all([
-            supabase.from('Campaign').select('*', { count: 'exact', head: true }).eq('isArchived', false).not('status', 'in', '("EXPIRED","FINISHED")'),
-            supabase.from('Campaign').select('*', { count: 'exact', head: true }).eq('status', 'QUEUED'),
-            supabase.from('Campaign').select('*', { count: 'exact', head: true }).eq('status', 'PROCESSING'),
-            supabase.from('Campaign').select('*', { count: 'exact', head: true }).eq('status', 'SUCCESS').eq('isArchived', false),
-            supabase.from('Campaign').select('*', { count: 'exact', head: true }).eq('status', 'FAILED').eq('isArchived', false),
-            supabase.from('Campaign').select('*', { count: 'exact', head: true }).eq('status', 'QUARANTINE').eq('isArchived', false),
-        ])
+        // Busca todas as campanhas ativas
+        const { data: campaigns, error } = await supabase
+            .from('Campaign')
+            .select('pi, status, format, lastCaptureAt')
+            .eq('isArchived', false)
+            .not('status', 'in', '("EXPIRED","FINISHED")')
 
-        // Today captures
+        if (error) throw error
+        const all = campaigns || []
+
+        // Agrupar PIs únicos
+        const piSet = new Set(all.map(c => c.pi))
+        const totalPIs = piSet.size
+
+        // Contar formatos por status
+        const successFormats = all.filter(c => c.status === 'SUCCESS').length
+        const failedFormats = all.filter(c => c.status === 'FAILED').length
+        const quarantineFormats = all.filter(c => c.status === 'QUARANTINE').length
+        const queuedFormats = all.filter(c => c.status === 'QUEUED').length
+        const processingFormats = all.filter(c => c.status === 'PROCESSING').length
+
+        // PIs com pelo menos 1 erro
+        const pisComErro = new Set(all.filter(c => c.status === 'FAILED' || c.status === 'QUARANTINE').map(c => c.pi)).size
+        // PIs 100% sucesso
+        const pisSucesso = [...piSet].filter(pi => {
+            const formats = all.filter(c => c.pi === pi)
+            return formats.every(c => c.status === 'SUCCESS')
+        }).length
+
+        // Capturas hoje
         const todayStr = new Date().toISOString().split('T')[0]
         const { count: todayCount } = await supabase
             .from('Capture')
@@ -158,37 +170,41 @@ async function handleStatus(chatId: string) {
         const text = `
 📊 <b>STATUS DO SISTEMA</b>
 
-📁 <b>Campanhas</b>
-├ Total ativas: <b>${activeCount || 0}</b>
-├ Sucesso: ✅ ${successCount || 0}
-├ Falhas: ❌ ${failedCount || 0}
-└ Quarentena: ⚠️ ${quarantineCount || 0}
+📁 <b>Campanhas (PIs)</b>
+├ Total PIs ativos: <b>${totalPIs}</b>
+├ PIs 100% capturados: ✅ ${pisSucesso}
+└ PIs com erro: ❌ ${pisComErro}
+
+📐 <b>Formatos</b>
+├ Total: <b>${all.length}</b>
+├ Sucesso: ✅ ${successFormats}
+├ Falhas: ❌ ${failedFormats}
+└ Quarentena: ⚠️ ${quarantineFormats}
 
 🔄 <b>Fila</b>
-├ Na fila: ${queuedCount || 0}
-└ Processando: ${processingCount || 0}
+├ Na fila: ${queuedFormats} formatos
+└ Processando: ${processingFormats} formatos
 
 📸 <b>Capturas hoje:</b> ${todayCount || 0}
         `.trim()
 
         await sendMessage(chatId, text)
     } catch (err) {
-        await sendMessage(chatId, `❌ Erro no SDK: ${esc(String(err))}`)
+        await sendMessage(chatId, `❌ Erro: ${esc(String(err))}`)
     }
 }
 
 // ---------------------------------------------------------------------------
-// /campanhas
+// /campanhas — Agrupa por PI com detalhes de formato
 // ---------------------------------------------------------------------------
 async function handleCampanhas(chatId: string) {
     try {
         const { data: campaigns, error } = await supabase
             .from('Campaign')
-            .select('id, client, format, status, device, lastCaptureAt')
+            .select('id, pi, client, campaignName, format, status, device, lastCaptureAt, isScheduled, scheduledTimes')
             .eq('isArchived', false)
             .not('status', 'in', '("EXPIRED","FINISHED")')
-            .order('updatedAt', { ascending: false })
-            .limit(15)
+            .order('client', { ascending: true })
 
         if (error) throw error
         if (!campaigns || campaigns.length === 0) {
@@ -196,18 +212,44 @@ async function handleCampanhas(chatId: string) {
             return
         }
 
+        // Agrupar por PI
+        const piGroups = new Map<string, typeof campaigns>()
+        for (const c of campaigns) {
+            const key = c.pi || 'SEM_PI'
+            if (!piGroups.has(key)) piGroups.set(key, [])
+            piGroups.get(key)!.push(c)
+        }
+
         const statusIcon: Record<string, string> = {
             PENDING: '⏳', QUEUED: '🔄', PROCESSING: '⚙️',
             SUCCESS: '✅', FAILED: '❌', QUARANTINE: '⚠️',
         }
 
-        let text = `📋 <b>CAMPANHAS ATIVAS</b> (${campaigns.length})\n\n`
-        for (const c of campaigns) {
-            const icon = statusIcon[c.status] || '❓'
-            const last = c.lastCaptureAt ? new Date(c.lastCaptureAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—'
-            text += `${icon} <b>${esc(c.client)}</b>\n`
-            text += `   ${esc(c.format)} • ${c.device} • Última: ${last}\n`
-            text += `   <code>${c.id}</code>\n\n`
+        let text = `📋 <b>CAMPANHAS ATIVAS</b>\n${piGroups.size} PIs • ${campaigns.length} formatos\n\n`
+
+        let piIdx = 0
+        for (const [pi, formats] of piGroups) {
+            if (piIdx >= 10) {
+                text += `\n<i>...e mais ${piGroups.size - 10} PIs</i>`
+                break
+            }
+            const client = formats[0].client
+            const allSuccess = formats.every(f => f.status === 'SUCCESS')
+            const hasError = formats.some(f => f.status === 'FAILED' || f.status === 'QUARANTINE')
+            const piIcon = allSuccess ? '✅' : hasError ? '❌' : '🔄'
+
+            text += `${piIcon} <b>${esc(client)}</b>\n`
+            text += `   PI: <code>${esc(pi)}</code>\n`
+
+            for (const f of formats) {
+                const fIcon = statusIcon[f.status] || '❓'
+                const last = f.lastCaptureAt
+                    ? new Date(f.lastCaptureAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
+                    : '—'
+                text += `   ${fIcon} ${esc(f.format)} (${f.device}) • ${last}\n`
+            }
+            text += '\n'
+            piIdx++
         }
 
         await sendMessage(chatId, text)
@@ -217,30 +259,89 @@ async function handleCampanhas(chatId: string) {
 }
 
 // ---------------------------------------------------------------------------
-// /fila
+// /fila — Mostra PI + campanhas na fila com horários agendados
 // ---------------------------------------------------------------------------
 async function handleFila(chatId: string) {
     try {
-        const { data: queued, error } = await supabase
+        // Busca campanhas na fila ou processando
+        const { data: inQueue, error: qErr } = await supabase
             .from('Campaign')
-            .select('id, client, format, status')
+            .select('id, pi, client, format, status, device')
             .in('status', ['QUEUED', 'PROCESSING'])
             .order('updatedAt', { ascending: true })
-            .limit(20)
 
-        if (error) throw error
-        if (!queued || queued.length === 0) {
-            await sendMessage(chatId, '✅ <b>Fila vazia!</b>')
+        // Busca campanhas agendadas (futuras)
+        const { data: scheduled, error: sErr } = await supabase
+            .from('Campaign')
+            .select('id, pi, client, format, status, device, isScheduled, scheduledTimes')
+            .eq('isScheduled', true)
+            .eq('isArchived', false)
+            .not('status', 'in', '("EXPIRED","FINISHED","QUEUED","PROCESSING")')
+
+        if (qErr) throw qErr
+        if (sErr) throw sErr
+
+        const queue = inQueue || []
+        const sched = scheduled || []
+
+        if (queue.length === 0 && sched.length === 0) {
+            await sendMessage(chatId, '✅ <b>Fila vazia!</b>\nNenhuma captura na fila ou agendada.')
             return
         }
 
-        let text = `🔄 <b>FILA DE CAPTURAS</b> (${queued.length})\n\n`
-        for (const c of queued) {
-            const icon = c.status === 'PROCESSING' ? '⚙️' : '🔄'
-            text += `${icon} <b>${esc(c.client)}</b> • ${esc(c.format)}\n`
-            text += `   <code>${c.id}</code>\n\n`
+        let text = ''
+
+        // --- Na fila agora ---
+        if (queue.length > 0) {
+            // Agrupar por PI
+            const queuePIs = new Map<string, typeof queue>()
+            for (const c of queue) {
+                const key = c.pi || 'SEM_PI'
+                if (!queuePIs.has(key)) queuePIs.set(key, [])
+                queuePIs.get(key)!.push(c)
+            }
+
+            text += `🔄 <b>NA FILA AGORA</b> (${queue.length} formatos)\n\n`
+            for (const [pi, formats] of queuePIs) {
+                const client = formats[0].client
+                text += `📌 <b>${esc(client)}</b> — PI: <code>${esc(pi)}</code>\n`
+                for (const f of formats) {
+                    const icon = f.status === 'PROCESSING' ? '⚙️ Processando' : '🔄 Na fila'
+                    text += `   ${icon}: ${esc(f.format)} (${f.device})\n`
+                }
+                text += '\n'
+            }
         }
-        await sendMessage(chatId, text)
+
+        // --- Agendadas ---
+        if (sched.length > 0) {
+            const schedPIs = new Map<string, typeof sched>()
+            for (const c of sched) {
+                const key = c.pi || 'SEM_PI'
+                if (!schedPIs.has(key)) schedPIs.set(key, [])
+                schedPIs.get(key)!.push(c)
+            }
+
+            text += `📅 <b>AGENDADAS</b> (${sched.length} formatos)\n\n`
+            for (const [pi, formats] of schedPIs) {
+                const client = formats[0].client
+                // Pegar horários do primeiro formato (geralmente compartilhado por PI)
+                let times = '—'
+                try {
+                    const parsed = JSON.parse(formats[0].scheduledTimes || '[]') as string[]
+                    times = parsed.length > 0 ? parsed.join(', ') : '—'
+                } catch { times = '—' }
+
+                text += `📌 <b>${esc(client)}</b> — PI: <code>${esc(pi)}</code>\n`
+                text += `   ⏰ Horários: ${times}\n`
+                for (const f of formats) {
+                    text += `   📐 ${esc(f.format)} (${f.device})\n`
+                }
+                text += '\n'
+            }
+        }
+
+        await sendMessage(chatId, text.trim())
     } catch (err) {
         await sendMessage(chatId, `❌ Erro na fila: ${esc(String(err))}`)
     }
