@@ -2,7 +2,7 @@ import { supabase } from './supabase'
 import { nexusLogStore } from './nexusLogStore'
 
 // =============================================================================
-// TELEGRAM BOT ENGINE — Centro de Comando (SDK Version)
+// TELEGRAM BOT ENGINE — Centro de Comando (SDK Version + Inline Keyboards)
 // =============================================================================
 
 const BOT_TOKEN = () => process.env.NexusTelegram || ''
@@ -37,19 +37,18 @@ async function loadFormatMap(): Promise<Record<string, string>> {
     return _formatMapCache || {}
 }
 
-function getFormatLabel(formatMap: Record<string, string>, formatId: string): string {
+function fmtLabel(formatMap: Record<string, string>, formatId: string): string {
     return formatMap[formatId] || formatId
 }
 
 // ---------------------------------------------------------------------------
-// Core: send message
+// Telegram API Helpers
 // ---------------------------------------------------------------------------
 export async function sendMessage(chatId: string, text: string, options?: {
     parse_mode?: 'MarkdownV2' | 'HTML'
     reply_markup?: any
 }) {
     const url = `https://api.telegram.org/bot${BOT_TOKEN()}/sendMessage`
-    
     try {
         const res = await fetch(url, {
             method: 'POST',
@@ -62,16 +61,51 @@ export async function sendMessage(chatId: string, text: string, options?: {
                 reply_markup: options?.reply_markup,
             }),
         })
-        const data = await res.json()
-        return data
+        return await res.json()
     } catch (err) {
         console.error('[TelegramBot] Send error:', err)
         return null
     }
 }
 
+async function editMessage(chatId: string, messageId: number, text: string, reply_markup?: any) {
+    const url = `https://api.telegram.org/bot${BOT_TOKEN()}/editMessageText`
+    try {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chat_id: chatId,
+                message_id: messageId,
+                text,
+                parse_mode: 'HTML',
+                disable_web_page_preview: true,
+                reply_markup,
+            }),
+        })
+        return await res.json()
+    } catch (err) {
+        console.error('[TelegramBot] Edit error:', err)
+        return null
+    }
+}
+
+async function answerCallback(callbackQueryId: string, text?: string) {
+    const url = `https://api.telegram.org/bot${BOT_TOKEN()}/answerCallbackQuery`
+    try {
+        await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                callback_query_id: callbackQueryId,
+                text: text || '',
+            }),
+        })
+    } catch (e) { /* ignore */ }
+}
+
 // ---------------------------------------------------------------------------
-// Auth: verify sender
+// Auth
 // ---------------------------------------------------------------------------
 function isAuthorized(chatId: string | number): boolean {
     const allowed = ALLOWED_CHAT_ID()
@@ -79,31 +113,47 @@ function isAuthorized(chatId: string | number): boolean {
     return String(chatId) === String(allowed)
 }
 
-// ---------------------------------------------------------------------------
-// Command Router
-// ---------------------------------------------------------------------------
+function esc(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+// Inline keyboard builder helpers
+function btn(text: string, callbackData: string) {
+    return { text, callback_data: callbackData }
+}
+function keyboard(rows: { text: string, callback_data: string }[][]) {
+    return { inline_keyboard: rows }
+}
+
+// =============================================================================
+// MAIN ROUTER — handles both messages and callback queries
+// =============================================================================
 export async function handleUpdate(update: any) {
+    // --- Callback Query (button press) ---
+    if (update?.callback_query) {
+        return await handleCallbackQuery(update.callback_query)
+    }
+
+    // --- Text Message ---
     const message = update?.message
     if (!message?.text) return
 
     const chatId = String(message.chat.id)
     const text = message.text.trim()
 
-    // Auth check
     if (!isAuthorized(chatId)) {
-        console.log(`[TelegramBot] Acesso negado para chatId: ${chatId}`);
+        console.log(`[TelegramBot] Acesso negado para chatId: ${chatId}`)
         try { await nexusLogStore.addLog(`Bot Telegram: Acesso negado (ChatID: ${chatId})`, 'ERROR'); } catch (e) {}
         await sendMessage(chatId, '🚫 <b>Acesso negado.</b>\nSeu Chat ID não está autorizado.')
         return
     }
 
     try {
-        console.log(`[TelegramBot] Recebido: ${text} de ${chatId}`);
-        // Log is less important than responding, call it async without await if needed but let's try
+        console.log(`[TelegramBot] Recebido: ${text} de ${chatId}`)
         try { await nexusLogStore.addLog(`Bot Telegram: Comando recebido: ${text}`, 'INFO'); } catch (e) {}
 
-        const [rawCmd, ...args] = text.split(' ')
-        const cmd = rawCmd.toLowerCase().replace('@', '').split('@')[0]
+        const [rawCmd] = text.split(' ')
+        const cmd = rawCmd.toLowerCase().split('@')[0]
 
         switch (cmd) {
             case '/start':
@@ -121,26 +171,476 @@ export async function handleUpdate(update: any) {
                 return await handleStorage(chatId)
             case '/logs':
                 return await handleLogs(chatId)
+            case '/gerenciar':
+                return await handleGerenciar(chatId)
             default:
+                // Check if user is renaming — expecting text after a rename prompt
+                // We handle this via callback-only, so just show unknown command
                 await sendMessage(chatId, `❓ Comando desconhecido: <code>${esc(cmd)}</code>\n\nDigite /ajuda para ver os comandos disponíveis.`)
         }
     } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        console.error(`[TelegramBot] Erro ao processar ${text}:`, err);
-        await sendMessage(chatId, `❌ Erro ao processar comando: <code>${esc(errorMsg)}</code>`);
+        const errorMsg = err instanceof Error ? err.message : String(err)
+        console.error(`[TelegramBot] Erro ao processar ${text}:`, err)
+        await sendMessage(chatId, `❌ Erro: <code>${esc(errorMsg)}</code>`)
     }
 }
 
-// ---------------------------------------------------------------------------
-// Helper: escape HTML
-// ---------------------------------------------------------------------------
-function esc(s: string): string {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+// =============================================================================
+// CALLBACK QUERY HANDLER — all button presses route here
+// =============================================================================
+async function handleCallbackQuery(query: any) {
+    const chatId = String(query.message.chat.id)
+    const messageId = query.message.message_id
+    const data = query.data as string
+
+    if (!isAuthorized(chatId)) {
+        await answerCallback(query.id, '🚫 Acesso negado')
+        return
+    }
+
+    await answerCallback(query.id)
+
+    try {
+        console.log(`[TelegramBot] Callback: ${data} de ${chatId}`)
+
+        // Route by prefix
+        if (data === 'menu:main') {
+            return await cbMenuMain(chatId, messageId)
+        }
+        if (data.startsWith('pi:')) {
+            return await cbShowPI(chatId, messageId, data.slice(3))
+        }
+        if (data.startsWith('actions:')) {
+            return await cbShowActions(chatId, messageId, data.slice(8))
+        }
+        if (data.startsWith('cap:')) {
+            return await cbCapture(chatId, messageId, data.slice(4))
+        }
+        if (data.startsWith('cap_confirm:')) {
+            return await cbCaptureConfirm(chatId, messageId, data.slice(12))
+        }
+        if (data.startsWith('cap_all:')) {
+            return await cbCaptureAllPI(chatId, messageId, data.slice(8))
+        }
+        if (data.startsWith('cap_all_confirm:')) {
+            return await cbCaptureAllConfirm(chatId, messageId, data.slice(16))
+        }
+        if (data.startsWith('del:')) {
+            return await cbDelete(chatId, messageId, data.slice(4))
+        }
+        if (data.startsWith('del_confirm:')) {
+            return await cbDeleteConfirm(chatId, messageId, data.slice(12))
+        }
+        if (data.startsWith('rename:')) {
+            return await cbRename(chatId, messageId, data.slice(7))
+        }
+        // Rename options: predefined names
+        if (data.startsWith('rn_set:')) {
+            return await cbRenameSet(chatId, messageId, data.slice(7))
+        }
+        if (data.startsWith('rn_clear:')) {
+            return await cbRenameClear(chatId, messageId, data.slice(9))
+        }
+
+        await editMessage(chatId, messageId, '❓ Ação desconhecida.')
+    } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err)
+        console.error(`[TelegramBot] Callback error:`, err)
+        await editMessage(chatId, messageId, `❌ Erro: <code>${esc(errorMsg)}</code>`)
+    }
 }
 
-// ---------------------------------------------------------------------------
+// =============================================================================
+// /gerenciar — Entry point: list PIs with buttons
+// =============================================================================
+async function handleGerenciar(chatId: string) {
+    const { data: campaigns, error } = await supabase
+        .from('Campaign')
+        .select('pi, client')
+        .eq('isArchived', false)
+        .not('status', 'in', '("EXPIRED","FINISHED")')
+        .order('client', { ascending: true })
+
+    if (error) throw error
+    if (!campaigns || campaigns.length === 0) {
+        await sendMessage(chatId, '📭 Nenhuma campanha ativa para gerenciar.')
+        return
+    }
+
+    // Unique PIs
+    const piMap = new Map<string, string>()
+    for (const c of campaigns) {
+        if (!piMap.has(c.pi)) piMap.set(c.pi, c.client)
+    }
+
+    const rows = [...piMap.entries()].slice(0, 15).map(([pi, client]) =>
+        [btn(`📁 ${client} — ${pi}`, `pi:${pi}`)]
+    )
+
+    await sendMessage(chatId, '⚙️ <b>GERENCIAR CAMPANHAS</b>\n\nSelecione uma campanha (PI):', {
+        reply_markup: keyboard(rows),
+    })
+}
+
+// =============================================================================
+// Callback: Back to main menu
+// =============================================================================
+async function cbMenuMain(chatId: string, messageId: number) {
+    const { data: campaigns } = await supabase
+        .from('Campaign')
+        .select('pi, client')
+        .eq('isArchived', false)
+        .not('status', 'in', '("EXPIRED","FINISHED")')
+        .order('client', { ascending: true })
+
+    const piMap = new Map<string, string>()
+    for (const c of (campaigns || [])) {
+        if (!piMap.has(c.pi)) piMap.set(c.pi, c.client)
+    }
+
+    const rows = [...piMap.entries()].slice(0, 15).map(([pi, client]) =>
+        [btn(`📁 ${client} — ${pi}`, `pi:${pi}`)]
+    )
+
+    await editMessage(chatId, messageId,
+        '⚙️ <b>GERENCIAR CAMPANHAS</b>\n\nSelecione uma campanha (PI):',
+        keyboard(rows)
+    )
+}
+
+// =============================================================================
+// Callback: Show formats for a PI with action buttons
+// =============================================================================
+async function cbShowPI(chatId: string, messageId: number, pi: string) {
+    const fmtMap = await loadFormatMap()
+
+    const { data: campaigns, error } = await supabase
+        .from('Campaign')
+        .select('id, pi, client, campaignName, format, status, device')
+        .eq('pi', pi)
+        .eq('isArchived', false)
+        .not('status', 'in', '("EXPIRED","FINISHED")')
+
+    if (error) throw error
+    if (!campaigns || campaigns.length === 0) {
+        await editMessage(chatId, messageId, '📭 Nenhum formato encontrado para esta PI.',
+            keyboard([[btn('◀️ Voltar', 'menu:main')]])
+        )
+        return
+    }
+
+    const statusIcon: Record<string, string> = {
+        PENDING: '⏳', QUEUED: '🔄', PROCESSING: '⚙️',
+        SUCCESS: '✅', FAILED: '❌', QUARANTINE: '⚠️',
+    }
+
+    const client = campaigns[0].client
+    let text = `📁 <b>${esc(client)}</b>\nPI: <code>${esc(pi)}</code>\n\n`
+    text += `<b>Formatos:</b>\n`
+
+    for (const c of campaigns) {
+        const icon = statusIcon[c.status] || '❓'
+        const label = fmtLabel(fmtMap, c.format)
+        const name = c.campaignName ? ` • ${esc(c.campaignName)}` : ''
+        text += `${icon} ${esc(label)} (${c.device})${name}\n`
+    }
+
+    // Build buttons: one row per format → actions
+    const rows: { text: string, callback_data: string }[][] = []
+
+    for (const c of campaigns) {
+        const label = fmtLabel(fmtMap, c.format)
+        const shortLabel = label.length > 20 ? label.substring(0, 18) + '…' : label
+        rows.push([btn(`⚡ ${shortLabel}`, `actions:${c.id}`)])
+    }
+
+    // Capture all PI
+    if (campaigns.length > 1) {
+        rows.push([btn(`🚀 Capturar TODOS (${campaigns.length} formatos)`, `cap_all:${pi}`)])
+    }
+
+    rows.push([btn('◀️ Voltar', 'menu:main')])
+
+    await editMessage(chatId, messageId, text, keyboard(rows))
+}
+
+// =============================================================================
+// Callback: Show actions for a specific campaign format
+// =============================================================================
+async function cbShowActions(chatId: string, messageId: number, campaignId: string) {
+    const fmtMap = await loadFormatMap()
+
+    const { data: c, error } = await supabase
+        .from('Campaign')
+        .select('id, pi, client, campaignName, format, status, device')
+        .eq('id', campaignId)
+        .single()
+
+    if (error || !c) {
+        await editMessage(chatId, messageId, '❌ Campanha não encontrada.',
+            keyboard([[btn('◀️ Voltar', 'menu:main')]])
+        )
+        return
+    }
+
+    const statusIcon: Record<string, string> = {
+        PENDING: '⏳', QUEUED: '🔄', PROCESSING: '⚙️',
+        SUCCESS: '✅', FAILED: '❌', QUARANTINE: '⚠️',
+    }
+
+    const label = fmtLabel(fmtMap, c.format)
+    const icon = statusIcon[c.status] || '❓'
+    const name = c.campaignName ? `\n📝 Nome: ${esc(c.campaignName)}` : ''
+
+    const text = `
+${icon} <b>${esc(label)}</b> (${c.device})
+📁 ${esc(c.client)} — PI: <code>${esc(c.pi)}</code>${name}
+Status: ${c.status}
+
+<b>O que deseja fazer?</b>
+    `.trim()
+
+    const rows = [
+        [btn('📸 Capturar', `cap:${c.id}`)],
+        [btn('✏️ Editar Nome', `rename:${c.id}`)],
+        [btn('🗑️ Deletar', `del:${c.id}`)],
+        [btn(`◀️ Voltar para PI`, `pi:${c.pi}`)],
+    ]
+
+    await editMessage(chatId, messageId, text, keyboard(rows))
+}
+
+// =============================================================================
+// Capture — single format
+// =============================================================================
+async function cbCapture(chatId: string, messageId: number, campaignId: string) {
+    const { data: c } = await supabase
+        .from('Campaign')
+        .select('id, client, format, pi')
+        .eq('id', campaignId)
+        .single()
+
+    if (!c) {
+        await editMessage(chatId, messageId, '❌ Campanha não encontrada.')
+        return
+    }
+
+    const fmtMap = await loadFormatMap()
+    const label = fmtLabel(fmtMap, c.format)
+
+    await editMessage(chatId, messageId,
+        `📸 <b>Confirmar Captura?</b>\n\n${esc(c.client)} — ${esc(label)}\nPI: <code>${esc(c.pi)}</code>`,
+        keyboard([
+            [btn('✅ Sim, capturar', `cap_confirm:${c.id}`), btn('❌ Cancelar', `actions:${c.id}`)],
+        ])
+    )
+}
+
+async function cbCaptureConfirm(chatId: string, messageId: number, campaignId: string) {
+    // Set status to QUEUED
+    const { error } = await supabase
+        .from('Campaign')
+        .update({ status: 'QUEUED' })
+        .eq('id', campaignId)
+
+    if (error) {
+        await editMessage(chatId, messageId, `❌ Erro: ${esc(error.message)}`,
+            keyboard([[btn('◀️ Voltar', 'menu:main')]])
+        )
+        return
+    }
+
+    try { await nexusLogStore.addLog(`Bot Telegram: Captura disparada para ${campaignId}`, 'SYSTEM'); } catch (e) {}
+
+    await editMessage(chatId, messageId,
+        `✅ <b>Captura disparada!</b>\n\nA campanha foi colocada na fila (QUEUED).\nO próximo ciclo do Worker irá processá-la.`,
+        keyboard([[btn('◀️ Menu Principal', 'menu:main')]])
+    )
+}
+
+// =============================================================================
+// Capture ALL — entire PI
+// =============================================================================
+async function cbCaptureAllPI(chatId: string, messageId: number, pi: string) {
+    const { data: campaigns } = await supabase
+        .from('Campaign')
+        .select('id, client')
+        .eq('pi', pi)
+        .eq('isArchived', false)
+        .not('status', 'in', '("EXPIRED","FINISHED")')
+
+    const count = campaigns?.length || 0
+    const client = campaigns?.[0]?.client || pi
+
+    await editMessage(chatId, messageId,
+        `🚀 <b>Capturar TODOS os formatos?</b>\n\n${esc(client)} — PI: <code>${esc(pi)}</code>\n${count} formatos serão enfileirados.`,
+        keyboard([
+            [btn(`✅ Sim, capturar ${count}`, `cap_all_confirm:${pi}`), btn('❌ Cancelar', `pi:${pi}`)],
+        ])
+    )
+}
+
+async function cbCaptureAllConfirm(chatId: string, messageId: number, pi: string) {
+    const { error } = await supabase
+        .from('Campaign')
+        .update({ status: 'QUEUED' })
+        .eq('pi', pi)
+        .eq('isArchived', false)
+        .not('status', 'in', '("EXPIRED","FINISHED","PROCESSING")')
+
+    if (error) {
+        await editMessage(chatId, messageId, `❌ Erro: ${esc(error.message)}`,
+            keyboard([[btn('◀️ Voltar', 'menu:main')]])
+        )
+        return
+    }
+
+    try { await nexusLogStore.addLog(`Bot Telegram: Captura em lote disparada para PI ${pi}`, 'SYSTEM'); } catch (e) {}
+
+    await editMessage(chatId, messageId,
+        `✅ <b>Captura em lote disparada!</b>\n\nTodos os formatos da PI <code>${esc(pi)}</code> foram enfileirados.`,
+        keyboard([[btn('◀️ Menu Principal', 'menu:main')]])
+    )
+}
+
+// =============================================================================
+// Delete — with confirmation
+// =============================================================================
+async function cbDelete(chatId: string, messageId: number, campaignId: string) {
+    const fmtMap = await loadFormatMap()
+    const { data: c } = await supabase
+        .from('Campaign')
+        .select('id, client, format, pi')
+        .eq('id', campaignId)
+        .single()
+
+    if (!c) {
+        await editMessage(chatId, messageId, '❌ Campanha não encontrada.')
+        return
+    }
+
+    const label = fmtLabel(fmtMap, c.format)
+
+    await editMessage(chatId, messageId,
+        `🗑️ <b>Confirmar EXCLUSÃO?</b>\n\n⚠️ <b>Esta ação não pode ser desfeita!</b>\n\n${esc(c.client)} — ${esc(label)}\nPI: <code>${esc(c.pi)}</code>\n\nTodas as capturas serão removidas.`,
+        keyboard([
+            [btn('🗑️ Sim, DELETAR', `del_confirm:${c.id}`), btn('❌ Cancelar', `actions:${c.id}`)],
+        ])
+    )
+}
+
+async function cbDeleteConfirm(chatId: string, messageId: number, campaignId: string) {
+    // First delete captures, then campaign
+    await supabase.from('Capture').delete().eq('campaignId', campaignId)
+    const { error } = await supabase.from('Campaign').delete().eq('id', campaignId)
+
+    if (error) {
+        await editMessage(chatId, messageId, `❌ Erro ao deletar: ${esc(error.message)}`,
+            keyboard([[btn('◀️ Voltar', 'menu:main')]])
+        )
+        return
+    }
+
+    try { await nexusLogStore.addLog(`Bot Telegram: Campanha deletada: ${campaignId}`, 'SYSTEM'); } catch (e) {}
+
+    await editMessage(chatId, messageId,
+        `✅ <b>Campanha deletada com sucesso!</b>`,
+        keyboard([[btn('◀️ Menu Principal', 'menu:main')]])
+    )
+}
+
+// =============================================================================
+// Rename — via button options (no typing needed)
+// =============================================================================
+async function cbRename(chatId: string, messageId: number, campaignId: string) {
+    const fmtMap = await loadFormatMap()
+    const { data: c } = await supabase
+        .from('Campaign')
+        .select('id, client, campaignName, format, pi')
+        .eq('id', campaignId)
+        .single()
+
+    if (!c) {
+        await editMessage(chatId, messageId, '❌ Campanha não encontrada.')
+        return
+    }
+
+    const label = fmtLabel(fmtMap, c.format)
+    const currentName = c.campaignName || '(sem nome)'
+
+    // Suggest names based on existing data
+    const suggestedNames = [
+        `${c.client} - ${label}`,
+        `${c.client} - ${c.pi}`,
+        label,
+        c.client,
+        `${c.pi} - ${label}`,
+    ]
+
+    // Remove duplicates and limit
+    const uniqueNames = [...new Set(suggestedNames)].slice(0, 5)
+
+    const rows = uniqueNames.map(name => {
+        // Callback data has 64 byte limit — use short format
+        const safeName = name.substring(0, 30)
+        return [btn(`📝 ${safeName}`, `rn_set:${campaignId}|${safeName}`)]
+    })
+
+    rows.push([btn('🧹 Limpar Nome', `rn_clear:${campaignId}`)])
+    rows.push([btn('◀️ Voltar', `actions:${campaignId}`)])
+
+    await editMessage(chatId, messageId,
+        `✏️ <b>Editar Nome</b>\n\n${esc(c.client)} — ${esc(label)}\nNome atual: <b>${esc(currentName)}</b>\n\nSelecione um novo nome:`,
+        keyboard(rows)
+    )
+}
+
+async function cbRenameSet(chatId: string, messageId: number, payload: string) {
+    const [campaignId, ...nameParts] = payload.split('|')
+    const newName = nameParts.join('|') // In case name has | char
+
+    const { error } = await supabase
+        .from('Campaign')
+        .update({ campaignName: newName })
+        .eq('id', campaignId)
+
+    if (error) {
+        await editMessage(chatId, messageId, `❌ Erro: ${esc(error.message)}`,
+            keyboard([[btn('◀️ Voltar', 'menu:main')]])
+        )
+        return
+    }
+
+    try { await nexusLogStore.addLog(`Bot Telegram: Nome atualizado para "${newName}" (${campaignId})`, 'SYSTEM'); } catch (e) {}
+
+    await editMessage(chatId, messageId,
+        `✅ <b>Nome atualizado!</b>\n\nNovo nome: <b>${esc(newName)}</b>`,
+        keyboard([[btn('◀️ Voltar', `actions:${campaignId}`)], [btn('◀️ Menu Principal', 'menu:main')]])
+    )
+}
+
+async function cbRenameClear(chatId: string, messageId: number, campaignId: string) {
+    const { error } = await supabase
+        .from('Campaign')
+        .update({ campaignName: '' })
+        .eq('id', campaignId)
+
+    if (error) {
+        await editMessage(chatId, messageId, `❌ Erro: ${esc(error.message)}`,
+            keyboard([[btn('◀️ Voltar', 'menu:main')]])
+        )
+        return
+    }
+
+    await editMessage(chatId, messageId,
+        `✅ <b>Nome removido!</b>`,
+        keyboard([[btn('◀️ Voltar', `actions:${campaignId}`)], [btn('◀️ Menu Principal', 'menu:main')]])
+    )
+}
+
+// =============================================================================
 // /ajuda
-// ---------------------------------------------------------------------------
+// =============================================================================
 async function handleHelp(chatId: string) {
     const text = `
 🤖 <b>ADSNAP CLOUD — Bot de Comando</b>
@@ -153,18 +653,20 @@ async function handleHelp(chatId: string) {
 /storage — Uso do Supabase Storage
 /logs — Últimos logs do Nexus
 
+⚙️ <b>Gerenciamento</b>
+/gerenciar — Menu de ações (botões)
+
 ℹ️ <b>Outros</b>
 /ajuda — Esta mensagem
     `.trim()
     await sendMessage(chatId, text)
 }
 
-// ---------------------------------------------------------------------------
+// =============================================================================
 // /status — Agrupa por PI
-// ---------------------------------------------------------------------------
+// =============================================================================
 async function handleStatus(chatId: string) {
     try {
-        // Busca todas as campanhas ativas
         const { data: campaigns, error } = await supabase
             .from('Campaign')
             .select('pi, status, format, lastCaptureAt')
@@ -174,26 +676,21 @@ async function handleStatus(chatId: string) {
         if (error) throw error
         const all = campaigns || []
 
-        // Agrupar PIs únicos
         const piSet = new Set(all.map(c => c.pi))
         const totalPIs = piSet.size
 
-        // Contar formatos por status
         const successFormats = all.filter(c => c.status === 'SUCCESS').length
         const failedFormats = all.filter(c => c.status === 'FAILED').length
         const quarantineFormats = all.filter(c => c.status === 'QUARANTINE').length
         const queuedFormats = all.filter(c => c.status === 'QUEUED').length
         const processingFormats = all.filter(c => c.status === 'PROCESSING').length
 
-        // PIs com pelo menos 1 erro
         const pisComErro = new Set(all.filter(c => c.status === 'FAILED' || c.status === 'QUARANTINE').map(c => c.pi)).size
-        // PIs 100% sucesso
         const pisSucesso = [...piSet].filter(pi => {
             const formats = all.filter(c => c.pi === pi)
             return formats.every(c => c.status === 'SUCCESS')
         }).length
 
-        // Capturas hoje
         const todayStr = new Date().toISOString().split('T')[0]
         const { count: todayCount } = await supabase
             .from('Capture')
@@ -227,16 +724,16 @@ async function handleStatus(chatId: string) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// /campanhas — Agrupa por PI com detalhes de formato
-// ---------------------------------------------------------------------------
+// =============================================================================
+// /campanhas — Agrupa por PI
+// =============================================================================
 async function handleCampanhas(chatId: string) {
     try {
         const fmtMap = await loadFormatMap()
 
         const { data: campaigns, error } = await supabase
             .from('Campaign')
-            .select('id, pi, client, campaignName, format, status, device, lastCaptureAt, isScheduled, scheduledTimes')
+            .select('id, pi, client, campaignName, format, status, device, lastCaptureAt')
             .eq('isArchived', false)
             .not('status', 'in', '("EXPIRED","FINISHED")')
             .order('client', { ascending: true })
@@ -247,7 +744,6 @@ async function handleCampanhas(chatId: string) {
             return
         }
 
-        // Agrupar por PI
         const piGroups = new Map<string, typeof campaigns>()
         for (const c of campaigns) {
             const key = c.pi || 'SEM_PI'
@@ -281,7 +777,7 @@ async function handleCampanhas(chatId: string) {
                 const last = f.lastCaptureAt
                     ? new Date(f.lastCaptureAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
                     : '—'
-                text += `   ${fIcon} ${esc(getFormatLabel(fmtMap, f.format))} (${f.device}) • ${last}\n`
+                text += `   ${fIcon} ${esc(fmtLabel(fmtMap, f.format))} (${f.device}) • ${last}\n`
             }
             text += '\n'
             piIdx++
@@ -293,20 +789,19 @@ async function handleCampanhas(chatId: string) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// /fila — Mostra PI + campanhas na fila com horários agendados
-// ---------------------------------------------------------------------------
+// =============================================================================
+// /fila
+// =============================================================================
 async function handleFila(chatId: string) {
     try {
         const fmtMap = await loadFormatMap()
-        // Busca campanhas na fila ou processando
+
         const { data: inQueue, error: qErr } = await supabase
             .from('Campaign')
             .select('id, pi, client, format, status, device')
             .in('status', ['QUEUED', 'PROCESSING'])
             .order('updatedAt', { ascending: true })
 
-        // Busca campanhas agendadas (futuras)
         const { data: scheduled, error: sErr } = await supabase
             .from('Campaign')
             .select('id, pi, client, format, status, device, isScheduled, scheduledTimes')
@@ -327,9 +822,7 @@ async function handleFila(chatId: string) {
 
         let text = ''
 
-        // --- Na fila agora ---
         if (queue.length > 0) {
-            // Agrupar por PI
             const queuePIs = new Map<string, typeof queue>()
             for (const c of queue) {
                 const key = c.pi || 'SEM_PI'
@@ -343,13 +836,12 @@ async function handleFila(chatId: string) {
                 text += `📌 <b>${esc(client)}</b> — PI: <code>${esc(pi)}</code>\n`
                 for (const f of formats) {
                     const icon = f.status === 'PROCESSING' ? '⚙️ Processando' : '🔄 Na fila'
-                    text += `   ${icon}: ${esc(getFormatLabel(fmtMap, f.format))} (${f.device})\n`
+                    text += `   ${icon}: ${esc(fmtLabel(fmtMap, f.format))} (${f.device})\n`
                 }
                 text += '\n'
             }
         }
 
-        // --- Agendadas ---
         if (sched.length > 0) {
             const schedPIs = new Map<string, typeof sched>()
             for (const c of sched) {
@@ -361,7 +853,6 @@ async function handleFila(chatId: string) {
             text += `📅 <b>AGENDADAS</b> (${sched.length} formatos)\n\n`
             for (const [pi, formats] of schedPIs) {
                 const client = formats[0].client
-                // Pegar horários do primeiro formato (geralmente compartilhado por PI)
                 let times = '—'
                 try {
                     const parsed = JSON.parse(formats[0].scheduledTimes || '[]') as string[]
@@ -371,7 +862,7 @@ async function handleFila(chatId: string) {
                 text += `📌 <b>${esc(client)}</b> — PI: <code>${esc(pi)}</code>\n`
                 text += `   ⏰ Horários: ${times}\n`
                 for (const f of formats) {
-                    text += `   📐 ${esc(getFormatLabel(fmtMap, f.format))} (${f.device})\n`
+                    text += `   📐 ${esc(fmtLabel(fmtMap, f.format))} (${f.device})\n`
                 }
                 text += '\n'
             }
@@ -383,11 +874,12 @@ async function handleFila(chatId: string) {
     }
 }
 
-// ---------------------------------------------------------------------------
+// =============================================================================
 // /quarentena
-// ---------------------------------------------------------------------------
+// =============================================================================
 async function handleQuarentena(chatId: string) {
     try {
+        const fmtMap = await loadFormatMap()
         const { data: quarantined, error } = await supabase
             .from('Campaign')
             .select('id, client, format, updatedAt')
@@ -405,7 +897,7 @@ async function handleQuarentena(chatId: string) {
         let text = `⚠️ <b>QUARENTENA</b> (${quarantined.length})\n\n`
         for (const c of quarantined) {
             const dt = new Date(c.updatedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-            text += `🔴 <b>${esc(c.client)}</b> • ${esc(c.format)}\n`
+            text += `🔴 <b>${esc(c.client)}</b> • ${esc(fmtLabel(fmtMap, c.format))}\n`
             text += `   Desde: ${dt}\n`
             text += `   <code>${c.id}</code>\n\n`
         }
@@ -415,15 +907,11 @@ async function handleQuarentena(chatId: string) {
     }
 }
 
-// ---------------------------------------------------------------------------
+// =============================================================================
 // /storage
-// ---------------------------------------------------------------------------
+// =============================================================================
 async function handleStorage(chatId: string) {
     try {
-        // Query storage objects count via SQL if possible, or just skip if too complex for SDK
-        // Since the user has the 'bucket_id' = 'screenshots', we count metadata
-        // Note: SDK doesn't have a direct 'SUM' for column, so we use a RPC or just inform fixed values
-        
         const text = `
 💾 <b>ARMAZENAMENTO</b>
 
@@ -439,9 +927,9 @@ Frequência de check: a cada 24h.
     }
 }
 
-// ---------------------------------------------------------------------------
+// =============================================================================
 // /logs
-// ---------------------------------------------------------------------------
+// =============================================================================
 async function handleLogs(chatId: string) {
     try {
         const { data: logs, error } = await supabase
