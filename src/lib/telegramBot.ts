@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { nexusLogStore } from './nexusLogStore'
+import prisma from './prisma'
 
 // =============================================================================
 // TELEGRAM BOT ENGINE — 100% Interactive Menu (SDK + Inline Keyboards)
@@ -518,39 +519,55 @@ async function cbLogs(chatId: string, msgId: number, isNewMsg: boolean = false) 
 // =============================================================================
 async function cbStorage(chatId: string, msgId: number) {
     try {
-        // Fetch stats from Supabase Storage
-        const { data: files, error } = await supabase.storage.from('screenshots').list('', { limit: 10000 })
+        // 1. Supabase Storage (SQL for accuracy)
+        const storageResult = await (prisma as any).$queryRawUnsafe(
+            `SELECT SUM((metadata->>'size')::bigint) as total_size 
+             FROM storage.objects 
+             WHERE bucket_id = 'screenshots'`
+        ) as any[]
+        const storageBytes = Number(storageResult[0]?.total_size || 0)
+        const storageLimit = 1024 * 1024 * 1024 // 1GB
+        const storagePerc = (storageBytes / storageLimit) * 100
 
-        if (error) throw error
+        // 2. Database Size
+        const dbResult = await (prisma as any).$queryRawUnsafe(
+            `SELECT pg_database_size(current_database()) as total_size`
+        ) as any[]
+        const dbBytes = Number(dbResult[0]?.total_size || 0)
+        const dbLimit = 500 * 1024 * 1024 // 500MB Free Tier
+        const dbPerc = (dbBytes / dbLimit) * 100
 
-        let totalSize = 0
-        const count = files?.length || 0
-        if (files) {
-            for (const f of files) {
-                totalSize += f.metadata?.size || 0
-            }
+        const sMB = (storageBytes / (1024 * 1024)).toFixed(2)
+        const dMB = (dbBytes / (1024 * 1024)).toFixed(2)
+
+        // Warnings
+        const getStatusIcon = (perc: number) => {
+            if (perc >= 80) return '🔴'
+            if (perc >= 50) return '⚠️'
+            return '✅'
         }
 
-        const sizeMB = (totalSize / (1024 * 1024)).toFixed(2)
-        const sizeGB = (totalSize / (1024 * 1024 * 1024)).toFixed(3)
-
         const text = `
-💾 <b>ESTATÍSTICAS DO STORAGE</b>
+💾 <b>INFRAESTRUTURA & LIMITES</b>
 
-📦 <b>Bucket:</b> <code>screenshots</code>
-📊 <b>Total de arquivos:</b> ${count}
-📉 <b>Espaço ocupado:</b> ${sizeMB} MB (${sizeGB} GB)
+📦 <b>Storage (Prints)</b>
+├ Uso: <b>${sMB} MB</b> / 1 GB
+├ Status: ${getStatusIcon(storagePerc)} <b>${storagePerc.toFixed(1)}%</b>
+└ <i>Bucket: screenshots</i>
 
-🗄️ <b>Banco de Dados:</b> Supabase PostgreSQL
-<i>Contagem de capturas: Ativa</i>
+🗄️ <b>Banco de Dados (Postgres)</b>
+├ Uso: <b>${dMB} MB</b> / 500 MB
+└ Status: ${getStatusIcon(dbPerc)} <b>${dbPerc.toFixed(1)}%</b>
 
-Acesse o painel do Supabase para gestão de arquivos antigos.
+${(storagePerc > 50 || dbPerc > 50) ? `⚠️ <b>AVISO:</b> Ocupação acima de 50%! Considere uma limpeza em breve.` : '🟢 Sistema operando dentro dos limites.'}
+
+<i>Valores refletem exatamente o Painel Admin.</i>
         `.trim()
 
         await editMsg(chatId, msgId, text, kb([[btn('🔄 Atualizar', 'menu:storage'), btn('◀️ Menu', 'menu:main')]]))
     } catch (e) {
         console.error('[TelegramBot] Storage error:', e)
-        await editMsg(chatId, msgId, '❌ Erro ao buscar estatísticas de storage.', kb([[btn('◀️ Menu', 'menu:main')]]))
+        await editMsg(chatId, msgId, '❌ Erro ao buscar estatísticas de infraestrutura.', kb([[btn('◀️ Menu', 'menu:main')]]))
     }
 }
 
