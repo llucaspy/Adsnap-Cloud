@@ -9,7 +9,7 @@ const prisma = new PrismaClient()
 const BOT_TOKEN = process.env.NexusTelegram || ''
 const CHAT_ID = process.env.chatidtelegram || ''
 
-async function sendToTelegram(zipBuffer: Buffer, fileName: string, caption: string) {
+async function sendToTelegram(zipData: Uint8Array, fileName: string, caption: string) {
     const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendDocument`
     
     // Using simple fetch with FormData for file upload
@@ -17,8 +17,9 @@ async function sendToTelegram(zipBuffer: Buffer, fileName: string, caption: stri
     formData.append('chat_id', CHAT_ID)
     formData.append('caption', caption)
     
-    // Convert Buffer to Blob for FormData
-    const blob = new Blob([zipBuffer], { type: 'application/zip' })
+    // Convert Uint8Array to Blob for FormData
+    // We cast to any to avoid TypeScript SharedArrayBuffer conflicts in some build environments
+    const blob = new Blob([zipData as any], { type: 'application/zip' })
     formData.append('document', blob, fileName)
 
     try {
@@ -97,8 +98,8 @@ async function monthlyCleanup() {
 
         // 4. Generate ZIP
         console.log('[Cleanup] Gerando arquivo ZIP...')
-        const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' })
-        const zipSizeMB = zipBuffer.length / (1024 * 1024)
+        const zipData = await zip.generateAsync({ type: 'uint8array' })
+        const zipSizeMB = zipData.length / (1024 * 1024)
         
         if (zipSizeMB > 49) {
             console.warn(`[Cleanup] AVISO: ZIP excedeu o limite do Telegram (${zipSizeMB.toFixed(2)}MB).`)
@@ -111,7 +112,7 @@ async function monthlyCleanup() {
 
         // 5. Send to Telegram
         console.log('[Cleanup] Enviando para Telegram...')
-        const sent = await sendToTelegram(zipBuffer, fileName, caption)
+        const sent = await sendToTelegram(zipData, fileName, caption)
 
         if (sent) {
             console.log('[Cleanup] Backup enviado com sucesso! Iniciando deleção...')
