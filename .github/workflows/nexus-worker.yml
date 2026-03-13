@@ -36,3 +36,25 @@ jobs:
       - name: Run Storage Monitor
         run: npm run monitor
 
+  monthly-cleanup:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 3 1 * *' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create .env file
+        run: echo "${{ secrets.ADSNAP_CLOUD_KEYS }}" > .env
+
+      - name: Run Monthly Cleanup
+        run: npm run monthly-cleanup
+

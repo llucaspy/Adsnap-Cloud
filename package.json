@@ -9,6 +9,7 @@
     "lint": "eslint",
     "worker": "tsx src/scripts/worker.ts",
     "monitor": "tsx src/scripts/monitor-storage.ts",
+    "monthly-cleanup": "tsx src/scripts/monthly-cleanup.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

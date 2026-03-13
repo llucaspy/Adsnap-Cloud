@@ -23,24 +23,62 @@ interface TelegramStatusCardProps {
 
 export function TelegramStatusCard({ data }: TelegramStatusCardProps) {
     const [testing, setTesting] = useState(false)
-    const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
+    const [diagType, setDiagType] = useState<'notif' | 'conn' | 'backup' | null>(null)
+    const [testResult, setTestResult] = useState<{ success: boolean; message: string; details?: any } | null>(null)
 
-    const handleTest = async () => {
+    const handleTestNotification = async () => {
         setTesting(true)
+        setDiagType('notif')
         setTestResult(null)
         try {
             const res = await testTelegramNotification()
             if (res.success) {
-                setTestResult({ success: true, message: 'Notificação enviada com sucesso!' })
+                setTestResult({ success: true, message: 'Notificação enviada!' })
             } else {
-                setTestResult({ success: false, message: 'Falha ao enviar. Verifique o Chat ID.' })
+                setTestResult({ success: false, message: 'Falha no envio.' })
             }
         } catch (error) {
-            setTestResult({ success: false, message: 'Erro ao processar o teste.' })
+            setTestResult({ success: false, message: 'Erro de sistema.' })
         } finally {
             setTesting(false)
-            // Clear message after 5s
-            setTimeout(() => setTestResult(null), 5000)
+        }
+    }
+
+    const handleTestConnection = async () => {
+        setTesting(true)
+        setDiagType('conn')
+        setTestResult(null)
+        try {
+            const { testTelegramConnection } = await import('@/app/actions')
+            const res = await testTelegramConnection()
+            setTestResult({
+                success: res.success,
+                message: res.message || (res as any).error || 'Teste concluído',
+                details: (res as any).bot
+            })
+        } catch (error) {
+            setTestResult({ success: false, message: 'Erro na conexão.' })
+        } finally {
+            setTesting(false)
+        }
+    }
+
+    const handleSimulateBackup = async () => {
+        setTesting(true)
+        setDiagType('backup')
+        setTestResult(null)
+        try {
+            const { simulateMonthlyCleanup } = await import('@/app/actions')
+            const res = await simulateMonthlyCleanup()
+            setTestResult({
+                success: res.success,
+                message: res.message || (res as any).error || 'Simulação concluída',
+                details: res.success ? { month: (res as any).month, count: (res as any).count } : undefined
+            })
+        } catch (error) {
+            setTestResult({ success: false, message: 'Erro na simulação.' })
+        } finally {
+            setTesting(false)
         }
     }
 
@@ -67,7 +105,7 @@ export function TelegramStatusCard({ data }: TelegramStatusCardProps) {
 
             {/* Info Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/5">
+                <div className="p-4 rounded-2xl bg-white/3 border border-white/5">
                     <div className="flex items-center gap-2 mb-2 text-white/40">
                         <Zap size={14} />
                         <span className="text-[10px] font-bold uppercase tracking-wider">Identidade</span>
@@ -78,7 +116,7 @@ export function TelegramStatusCard({ data }: TelegramStatusCardProps) {
                     </p>
                 </div>
 
-                <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/5">
+                <div className="p-4 rounded-2xl bg-white/3 border border-white/5">
                     <div className="flex items-center gap-2 mb-2 text-white/40">
                         <ShieldCheck size={14} />
                         <span className="text-[10px] font-bold uppercase tracking-wider">Configuração</span>
@@ -93,7 +131,7 @@ export function TelegramStatusCard({ data }: TelegramStatusCardProps) {
             </div>
 
             {/* Webhook Status */}
-            <div className="p-4 rounded-2xl bg-white/[0.03] border border-white/5 space-y-3">
+            <div className="p-4 rounded-2xl bg-white/3 border border-white/5 space-y-3">
                 <div className="flex items-center justify-between text-white/40">
                     <div className="flex items-center gap-2">
                         <MessageSquare size={14} />
@@ -105,27 +143,62 @@ export function TelegramStatusCard({ data }: TelegramStatusCardProps) {
                         </span>
                     )}
                 </div>
-                <p className="text-xs font-mono text-white/40 break-all bg-black/20 p-2 rounded-lg border border-white/5">
+                <p className="text-[10px] font-mono text-white/40 break-all bg-black/20 p-2 rounded-lg border border-white/5">
                     {webhook?.url || 'Nenhum webhook registrado'}
                 </p>
             </div>
 
-            {/* Actions */}
-            <div className="flex items-center gap-3 pt-2">
+            {/* Diagnostic Actions */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <button
-                    onClick={handleTest}
-                    disabled={testing || !isConnected || !chatIdConfigured}
-                    className="flex-1 py-4 bg-white/[0.05] hover:bg-white/[0.1] disabled:opacity-30 disabled:hover:bg-white/[0.05] border border-white/10 rounded-2xl text-xs font-black uppercase tracking-widest text-white transition-all active:scale-95 flex items-center justify-center gap-2 group"
+                    onClick={handleTestConnection}
+                    disabled={testing}
+                    className="py-3 px-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-[9px] font-black uppercase tracking-widest text-white transition-all active:scale-95 flex items-center justify-center gap-2"
                 >
-                    {testing ? <Loader2 size={16} className="animate-spin text-blue-400" /> : <Send size={16} className="group-hover:translate-y-[-2px] group-hover:translate-x-[2px] transition-transform" />}
-                    Disparar Teste
+                    {testing && diagType === 'conn' ? <Loader2 size={12} className="animate-spin" /> : <ShieldCheck size={12} />}
+                    Testar Conexão
+                </button>
+                <button
+                    onClick={handleTestNotification}
+                    disabled={testing || !isConnected || !chatIdConfigured}
+                    className="py-3 px-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-[9px] font-black uppercase tracking-widest text-white transition-all active:scale-95 flex items-center justify-center gap-2"
+                >
+                    {testing && diagType === 'notif' ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+                    Testar Alerta
+                </button>
+                <button
+                    onClick={handleSimulateBackup}
+                    disabled={testing}
+                    className="py-3 px-4 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-2xl text-[9px] font-black uppercase tracking-widest text-blue-400 transition-all active:scale-95 flex items-center justify-center gap-2"
+                >
+                    {testing && diagType === 'backup' ? <Loader2 size={12} className="animate-spin text-blue-400" /> : <Zap size={12} />}
+                    Simular Backup
                 </button>
             </div>
 
-            {/* Toast Result */}
+            {/* Detailed Result View */}
             {testResult && (
-                <div className={`p-4 rounded-xl text-[10px] font-bold uppercase tracking-widest text-center animate-fade-in ${testResult.success ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}`}>
-                    {testResult.message}
+                <div className={`p-4 rounded-2x border animate-in fade-in slide-in-from-top-4 duration-300 ${testResult.success ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400' : 'bg-rose-500/5 border-rose-500/20 text-rose-400'}`}>
+                    <div className="flex items-start gap-4">
+                        <div className="mt-1">
+                            {testResult.success ? <CheckCircle2 size={16} /> : <XCircle size={16} />}
+                        </div>
+                        <div className="flex-1">
+                            <p className="text-[10px] font-black uppercase tracking-widest mb-1">Resultado do Teste</p>
+                            <p className="text-xs font-bold text-white/80">{testResult.message}</p>
+                            {testResult.details && (
+                                <pre className="mt-3 p-3 bg-black/40 rounded-xl text-[9px] font-mono border border-white/5 overflow-x-auto text-white/50">
+                                    {JSON.stringify(testResult.details, null, 2)}
+                                </pre>
+                            )}
+                        </div>
+                        <button 
+                            onClick={() => setTestResult(null)}
+                            className="text-white/20 hover:text-white/40 transition-colors"
+                        >
+                            <XCircle size={14} />
+                        </button>
+                    </div>
                 </div>
             )}
         </div>

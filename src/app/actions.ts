@@ -982,3 +982,75 @@ export async function sendTestEmail(dispatchId: string) {
     revalidatePath('/email-dispatch')
     return result
 }
+
+// --- TELEGRAM DIAGNOSTIC ACTIONS ---
+
+export async function testTelegramConnection() {
+    const botToken = process.env.NexusTelegram
+    if (!botToken) return { success: false, error: 'Token não configurado no env.' }
+
+    try {
+        const res = await fetch(`https://api.telegram.org/bot${botToken}/getMe`)
+        const data = await res.json()
+        
+        if (data.ok) {
+            return { 
+                success: true, 
+                bot: data.result,
+                message: `Conectado como @${data.result.username}` 
+            }
+        }
+        return { success: false, error: data.description || 'Erro desconhecido na API do Telegram.' }
+    } catch (error) {
+        return { success: false, error: 'Falha na requisição ao Telegram.' }
+    }
+}
+
+export async function simulateMonthlyCleanup() {
+    // We will use dynamic import to avoid bundling script dependencies in the main bundle unnecessary
+    // However, since this is a server action, it's fine.
+    // We'll implement a simplified version of the backup test here or trigger the script.
+    
+    const botToken = process.env.NexusTelegram
+    let chatId = process.env.chatidtelegram
+    
+    if (!chatId) {
+        const settings = await prisma.settings.findUnique({ where: { id: 1 } })
+        chatId = settings?.telegramChatId || ''
+    }
+
+    if (!botToken || !chatId) {
+        return { success: false, error: 'Credenciais incompletas (Token ou ChatID).' }
+    }
+
+    try {
+        const { subMonths, startOfMonth, endOfMonth, format } = await import('date-fns')
+        const previousMonth = subMonths(new Date(), 1)
+        const startDate = startOfMonth(previousMonth)
+        const endDate = endOfMonth(previousMonth)
+        const monthLabel = format(previousMonth, 'MMMM-yyyy')
+
+        const captures = await prisma.capture.findMany({
+            where: {
+                createdAt: { gte: startDate, lte: endDate },
+                status: 'SUCCESS'
+            },
+            include: { campaign: true },
+            take: 10 // Limit for sim
+        })
+
+        if (captures.length === 0) {
+            return { success: false, error: `Nenhuma captura encontrada para ${monthLabel}.` }
+        }
+
+        // Return the plan of what would be zipped
+        return { 
+            success: true, 
+            month: monthLabel,
+            count: captures.length,
+            message: `Simulação concluída: ${captures.length} capturas seriam processadas para ${monthLabel}.`
+        }
+    } catch (error) {
+        return { success: false, error: 'Erro ao simular limpeza.' }
+    }
+}
