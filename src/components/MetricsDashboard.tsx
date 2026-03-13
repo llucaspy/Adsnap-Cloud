@@ -10,9 +10,11 @@ import {
     CheckCircle2,
     RefreshCw,
     TrendingUp,
-    Clock
+    Clock,
+    Send
 } from 'lucide-react'
 import { getAdminMetrics } from '@/app/actions'
+import { TelegramStatusCard } from './TelegramStatusCard'
 
 export function MetricsDashboard() {
     const [metrics, setMetrics] = useState<any>(null)
@@ -129,6 +131,11 @@ export function MetricsDashboard() {
                     </div>
                 </div>
             </div>
+
+            {/* Telegram Bot Status */}
+            {metrics.telegram && (
+                <TelegramStatusCard data={metrics.telegram} />
+            )}
 
             {/* Alert Banner if close to limits */}
             {(metrics.storage.percentage > 80 || metrics.database.percentage > 80 || metrics.resend.percentage > 80) && (

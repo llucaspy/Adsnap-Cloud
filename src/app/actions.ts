@@ -679,8 +679,47 @@ export async function getAdminMetrics() {
             })
         ])
 
-        // 4. Nexus Health
-        const settings = await prisma.settings.findFirst()
+        // 4. Telegram Bot Status
+        let telegramStatus = {
+            isConnected: false,
+            botInfo: null as any,
+            webhook: null as any,
+            chatIdConfigured: false
+        }
+
+        const botToken = process.env.NexusTelegram
+        const envChatId = process.env.chatidtelegram
+
+        let settings = await prisma.settings.findFirst() // Fetch settings once for reuse
+
+        if (botToken) {
+            try {
+                const [meRes, webhookRes] = await Promise.all([
+                    fetch(`https://api.telegram.org/bot${botToken}/getMe`),
+                    fetch(`https://api.telegram.org/bot${botToken}/getWebhookInfo`)
+                ])
+
+                const meData = await meRes.json()
+                const webhookData = await webhookRes.json()
+
+                if (meData.ok) {
+                    telegramStatus.isConnected = true
+                    telegramStatus.botInfo = meData.result
+                }
+
+                if (webhookData.ok) {
+                    telegramStatus.webhook = webhookData.result
+                }
+
+                // Check if chatId is configured in settings if not in env
+                telegramStatus.chatIdConfigured = !!(envChatId || settings?.telegramChatId)
+
+            } catch (err) {
+                console.error('[Actions] Telegram health check failed:', err)
+            }
+        }
+
+        // 5. Nexus Health
         const lastRun = settings?.storageCheckLastRun
 
         return {
@@ -703,6 +742,7 @@ export async function getAdminMetrics() {
                 monthlyLimit: 3000,
                 percentage: (dailyEmails / 100) * 100
             },
+            telegram: telegramStatus,
             health: {
                 lastRun: lastRun,
                 isHealthy: lastRun ? (new Date().getTime() - lastRun.getTime() < 24 * 60 * 60 * 1000) : false
