@@ -1007,19 +1007,22 @@ export async function testTelegramConnection() {
 }
 
 export async function simulateMonthlyCleanup() {
-    // We will use dynamic import to avoid bundling script dependencies in the main bundle unnecessary
-    // However, since this is a server action, it's fine.
-    // We'll implement a simplified version of the backup test here or trigger the script.
-    
     const botToken = process.env.NexusTelegram
     let chatId = process.env.chatidtelegram
     
-    if (!chatId) {
+    // Get credentials
+    if (!botToken || !chatId) {
         const settings = await prisma.settings.findUnique({ where: { id: 1 } })
-        chatId = settings?.telegramChatId || ''
+        if (!chatId) chatId = settings?.telegramChatId || ''
+        // Re-check botToken if it was only in env but might be in db (unlikely based on current code but for safety)
+        if (!botToken && (settings as any)?.telegramBotToken) {
+             // If we had it in DB we'd use it, but actions logic currently expects it in env for connectivity
+        }
     }
 
-    if (!botToken || !chatId) {
+    const finalToken = botToken // Currently expects token in ENV for the BOT API calls
+
+    if (!finalToken || !chatId) {
         return { success: false, error: 'Credenciais incompletas (Token ou ChatID).' }
     }
 
@@ -1036,21 +1039,60 @@ export async function simulateMonthlyCleanup() {
                 status: 'SUCCESS'
             },
             include: { campaign: true },
-            take: 10 // Limit for sim
+            take: 20 // Sample size for test
         })
 
         if (captures.length === 0) {
             return { success: false, error: `Nenhuma captura encontrada para ${monthLabel}.` }
         }
 
-        // Return the plan of what would be zipped
-        return { 
-            success: true, 
-            month: monthLabel,
-            count: captures.length,
-            message: `Simulação concluída: ${captures.length} capturas seriam processadas para ${monthLabel}.`
+        const JSZip = (await import('jszip')).default
+        const zip = new JSZip()
+
+        // Process a few captures to test dispatch
+        for (const capture of captures) {
+            if (!capture.screenshotPath || !capture.screenshotPath.startsWith('http')) continue
+            try {
+                const response = await fetch(capture.screenshotPath)
+                if (!response.ok) continue
+                const buffer = await response.arrayBuffer()
+                const agency = (capture.campaign.agency || 'Sem_Agencia').replace(/\W/g, '_')
+                const client = (capture.campaign.client || 'Sem_Cliente').replace(/\W/g, '_')
+                const pi = (capture.campaign.pi || 'Sem_PI').replace(/\W/g, '_')
+                const fileName = `${capture.campaign.campaignName.replace(/\W/g, '_') || 'Captura'}_${capture.id}.png`
+                zip.file(`${agency}/${client}/${pi}/${fileName}`, buffer)
+            } catch (e) {
+                console.error('Error adding to test zip:', e)
+            }
+        }
+
+        const zipData = await zip.generateAsync({ type: 'uint8array' })
+        const fileName = `TESTE_BACKUP_${monthLabel}.zip`
+        const caption = `🧪 <b>TESTE DE BACKUP REAL</b>\n\nEste teste gerou um ZIP com ${captures.length} capturas de ${monthLabel}.\n\n✅ Se você recebeu este arquivo, a integração do sistema está 100% operacional.\n\n⚠️ <i>Nenhum dado foi deletado durante este teste.</i>`
+
+        // Send to Telegram
+        const url = `https://api.telegram.org/bot${finalToken}/sendDocument`
+        const formData = new FormData()
+        formData.append('chat_id', chatId)
+        formData.append('caption', caption)
+        formData.append('parse_mode', 'HTML')
+        
+        const blob = new Blob([zipData as any], { type: 'application/zip' })
+        formData.append('document', blob, fileName)
+
+        const res = await fetch(url, { method: 'POST', body: formData })
+        const result = await res.json()
+
+        if (result.ok) {
+            return { 
+                success: true, 
+                message: `Sucesso! O backup de teste (${captures.length} imagens) foi enviado para o Telegram.`
+            }
+        } else {
+            return { success: false, error: `Falha no envio: ${result.description}` }
         }
     } catch (error) {
-        return { success: false, error: 'Erro ao simular limpeza.' }
+        console.error('Simulate error:', error)
+        return { success: false, error: 'Erro ao processar simulação de backup.' }
     }
 }
