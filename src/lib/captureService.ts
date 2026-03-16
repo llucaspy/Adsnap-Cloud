@@ -229,8 +229,10 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
         const context = await browser.newContext(isMobile ? {
             ...devices['iPhone 13'],
             viewport: { width: 390, height: 722 },
+            timezoneId: 'America/Sao_Paulo'
         } : {
             viewport: { width: 1920, height: 928 },
+            timezoneId: 'America/Sao_Paulo'
         });
 
         const page = await context.newPage();
@@ -530,8 +532,8 @@ async function compositeStudioImage(screenshot: Buffer, url: string, isMobile: b
         await studioPage.setViewportSize({ width: 1920, height: 1080 });
 
         const base64 = screenshot.toString('base64');
-        const time = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-        const date = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const time = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
+        const date = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Sao_Paulo' });
         const domain = new URL(url).hostname;
 
         // ===================================
