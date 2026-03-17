@@ -43,6 +43,7 @@
     "test-*.ts",
     "test-*.js",
     "migrate-*.js",
-    "*.js"
+    "*.js",
+    ".reference_ui"
   ]
 }
