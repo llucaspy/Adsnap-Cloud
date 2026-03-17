@@ -62,6 +62,8 @@ model Settings {
   storageCheckLastRun   DateTime?
   telegramBotToken      String?
   telegramChatId        String?
+  telegramAlertsEnabled Boolean   @default(true)
+  telegramLastAlertAt   DateTime?
 }
 
 model User {

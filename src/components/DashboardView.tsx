@@ -24,7 +24,6 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
         <div className="space-y-12 animate-slide-up">
             {/* Hero Header */}
             <header className="relative">
-                {/* Background glow */}
                 <div
                     className="absolute -top-20 -left-20 w-96 h-96 rounded-full blur-3xl opacity-30 pointer-events-none"
                     style={{ background: 'var(--gradient-primary)' }}

@@ -202,7 +202,7 @@ Selecione uma opção no menu abaixo ou use os botões fixos:
                 [btn('⚙️ Gerenciar Campanhas', 'menu:gerenciar')],
                 [btn('📚 Books / Comprovantes', 'menu:books')],
                 [btn('⚠️ Quarentena', 'menu:quarentena'), btn('📜 Logs', 'menu:logs')],
-                [btn('💾 Storage', 'menu:storage')],
+                [btn('💾 Storage', 'menu:storage'), btn('🔔 Alertas', 'menu:alerts')],
             ]),
             ...getPersistentMenu() // Add both for first message
         },
@@ -224,7 +224,7 @@ Selecione uma opção:
         [btn('⚙️ Gerenciar Campanhas', 'menu:gerenciar')],
         [btn('📚 Books / Comprovantes', 'menu:books')],
         [btn('⚠️ Quarentena', 'menu:quarentena'), btn('📜 Logs', 'menu:logs')],
-        [btn('💾 Storage', 'menu:storage')],
+        [btn('💾 Storage', 'menu:storage'), btn('🔔 Alertas', 'menu:alerts')],
     ]))
 }
 
@@ -256,6 +256,8 @@ async function handleCallback(query: any) {
         if (data === 'menu:storage') return await cbStorage(chatId, msgId)
         if (data === 'menu:gerenciar') return await cbGerenciar(chatId, msgId)
         if (data === 'menu:books') return await cbBooks(chatId, msgId)
+        if (data === 'menu:alerts') return await cbAlerts(chatId, msgId)
+        if (data.startsWith('alerts:toggle:')) return await cbToggleAlerts(chatId, msgId, data.slice(14))
 
         // --- Gerenciar: PI/Campaign actions ---
         if (data.startsWith('pi:')) return await cbShowPI(chatId, msgId, data.slice(3))
@@ -1085,6 +1087,55 @@ async function cbBookPhoto(chatId: string, msgId: number, campaignId: string) {
         await sendPhoto(chatId, capture.screenshotPath, `📷 <b>${esc(campaign.client)}</b>\n${esc(label)} — PI: ${esc(campaign.pi)}`)
     } else {
         await sendMessage(chatId, '❌ Foto indisponível.')
+    }
+}
+
+// =============================================================================
+// ALERT SETTINGS
+// =============================================================================
+async function cbAlerts(chatId: string, msgId: number) {
+    try {
+        const settings = await prisma.settings.findUnique({ where: { id: 1 } })
+        const enabled = settings?.telegramAlertsEnabled ?? true
+        const lastAlert = settings?.telegramLastAlertAt 
+            ? new Date(settings.telegramLastAlertAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) 
+            : 'Nunca'
+
+        const text = `
+🔔 <b>CONFIGURAÇÕES DE ALERTAS</b>
+
+As notificações diárias de performance (Under, Over e Crítico) automatizadas via Worker estão:
+
+Status: ${enabled ? '✅ <b>ATIVADO</b>' : '🔕 <b>SILENCIADO</b>'}
+Último alerta enviado: <code>${lastAlert}</code>
+
+<i>Quando silenciado, o Worker não enviará o resumo diário de performance para o Telegram.</i>
+        `.trim()
+
+        const markup = kb([
+            [btn(enabled ? '🔕 Silenciar Alertas' : '🔔 Ativar Alertas', `alerts:toggle:${enabled ? 'off' : 'on'}`)],
+            [btn('◀️ Menu', 'menu:main')]
+        ])
+
+        await editMsg(chatId, msgId, text, markup)
+    } catch (e) {
+        console.error('[TelegramBot] Alertas error:', e)
+        await editMsg(chatId, msgId, '❌ Erro ao buscar configurações de alerta.', kb([[btn('◀️ Menu', 'menu:main')]]))
+    }
+}
+
+async function cbToggleAlerts(chatId: string, msgId: number, state: string) {
+    try {
+        const enabled = state === 'on'
+        await prisma.settings.upsert({
+            where: { id: 1 },
+            update: { telegramAlertsEnabled: enabled },
+            create: { id: 1, telegramAlertsEnabled: enabled }
+        })
+
+        await cbAlerts(chatId, msgId)
+    } catch (e) {
+        console.error('[TelegramBot] Toggle error:', e)
     }
 }
 

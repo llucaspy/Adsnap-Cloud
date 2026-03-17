@@ -160,6 +160,74 @@ async function worker() {
             console.error('[Nexus Worker] Erro no módulo de email dispatch:', emailErr)
             await nexusLogStore.addLog('Nexus Worker: Erro ao processar disparos de email', 'ERROR')
         }
+        
+        // 4. Telegram Performance Alerts
+        console.log('[Nexus Worker] Verificando alertas de performance para Telegram...')
+        try {
+            const settings = await prisma.settings.findUnique({ where: { id: 1 } })
+            if (settings?.telegramAlertsEnabled) {
+                const now = new Date()
+                const brtNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }))
+                const currentHour = brtNow.getHours()
+                
+                // Só envia se for depois das 09:00 BRT
+                if (currentHour >= 9) {
+                    const lastAlert = settings.telegramLastAlertAt ? new Date(settings.telegramLastAlertAt) : null
+                    const lastAlertBRT = lastAlert ? new Date(lastAlert.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })) : null
+                    
+                    const isNewDay = !lastAlertBRT || 
+                        lastAlertBRT.getDate() !== brtNow.getDate() || 
+                        lastAlertBRT.getMonth() !== brtNow.getMonth() || 
+                        lastAlertBRT.getFullYear() !== brtNow.getFullYear()
+
+                    if (isNewDay) {
+                        console.log('[Nexus Worker] Hora de enviar alerta diário de performance...')
+                        const { sendTelegramAlert } = await import('../lib/telegram')
+                        const { getAggregatedAdOpsMetrics } = await import('../app/adops/actions')
+                        
+                        const stats = await getAggregatedAdOpsMetrics()
+                        const critical = stats.campaigns.filter(c => c.status === 'critical')
+                        const warning = stats.campaigns.filter(c => c.status === 'warning')
+                        const over = stats.campaigns.filter(c => c.status === 'over')
+
+                        if (critical.length > 0 || warning.length > 0 || over.length > 0) {
+                            let msg = '📊 *RESUMO DIÁRIO DE PERFORMANCE*\n\n'
+                            
+                            if (critical.length > 0) {
+                                msg += `🚨 *CRÍTICO (${critical.length})*\n`
+                                critical.forEach(c => msg += `• ${c.advertiser}: ${c.name} (${Math.round((c.deliveredImpressions/c.goalImpressions)*100)}%)\n`)
+                                msg += '\n'
+                            }
+                            
+                            if (warning.length > 0) {
+                                msg += `⚠️ *UNDER (${warning.length})*\n`
+                                warning.forEach(c => msg += `• ${c.advertiser}: ${c.name} (${Math.round((c.deliveredImpressions/c.goalImpressions)*100)}%)\n`)
+                                msg += '\n'
+                            }
+                            
+                            if (over.length > 0) {
+                                msg += `📈 *OVER (${over.length})*\n`
+                                over.forEach(c => msg += `• ${c.advertiser}: ${c.name} (${Math.round((c.deliveredImpressions/c.goalImpressions)*100)}%)\n`)
+                                msg += '\n'
+                            }
+
+                            msg += `\n🔗 [Ver no AdOps Dashboard](${process.env.NEXT_PUBLIC_APP_URL || 'https://adsnap-cloud.vercel.app'}/adops)`
+                            
+                            await sendTelegramAlert('Performance Alert', msg)
+                        }
+
+                        // Atualiza timestamp mesmo se não houver alertas (para não checar de novo hoje)
+                        await prisma.settings.update({
+                            where: { id: 1 },
+                            data: { telegramLastAlertAt: now }
+                        })
+                        console.log('[Nexus Worker] Alerta de performance processado.')
+                    }
+                }
+            }
+        } catch (alertErr) {
+            console.error('[Nexus Worker] Erro nos alertas de Telegram:', alertErr)
+        }
 
     } catch (error) {
         console.error('[Nexus Worker] Erro fatal no worker:', error)

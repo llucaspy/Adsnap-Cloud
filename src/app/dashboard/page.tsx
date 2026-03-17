@@ -1,7 +1,6 @@
 import { DashboardView } from '@/components/DashboardView'
 import prisma from '@/lib/prisma'
 import fs from 'fs'
-import { startOfDay } from 'date-fns'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,9 +48,7 @@ export default async function DashboardPage() {
     // Filter out captures where the file doesn't exist on disk (if local)
     const recentCaptures = rawRecentCaptures.filter(capture => {
         if (!capture.screenshotPath) return false;
-        // If it's a URL (Supabase), it's valid for the frontend
         if (capture.screenshotPath.startsWith('http')) return true;
-
         try {
             return fs.existsSync(capture.screenshotPath)
         } catch {
@@ -59,5 +56,5 @@ export default async function DashboardPage() {
         }
     })
 
-    return <DashboardView stats={stats} recentCaptures={recentCaptures} />
+    return <DashboardView stats={stats as any} recentCaptures={recentCaptures} />
 }
