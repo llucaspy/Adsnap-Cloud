@@ -28,8 +28,11 @@ model Campaign {
   lastCaptureAt   DateTime?
   retryCount      Int             @default(0)
   createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  captures        Capture[]
+  updatedAt           DateTime        @updatedAt
+  externalAuthUrl     String?
+  externalCampaignId  String?
+  isMonitoringActive  Boolean         @default(false)
+  captures            Capture[]
   emailDispatches EmailDispatch[]
 }
 

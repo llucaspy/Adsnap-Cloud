@@ -2,15 +2,38 @@
 
 import React, { useState, useMemo, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { RunCaptureButton } from '@/components/RunCaptureButton'
-import { Monitor, Smartphone, Activity, Globe, Clock, Zap, Pencil, ShieldAlert, CheckCircle2, Timer, Search, X, Filter } from 'lucide-react'
+import { Monitor, Smartphone, Activity, Globe, Clock, Zap, Pencil, ShieldAlert, CheckCircle2, Timer, Search, X, Filter, Radio } from 'lucide-react'
 import { format as formatDate, isAfter, isBefore } from 'date-fns'
-import { ptBR } from 'date-fns/locale'
 import Link from 'next/link'
 import { QueueIndicator } from '@/components/QueueIndicator'
 import { NetworkIndicator } from '@/components/NetworkIndicator'
-import { archiveCampaign, deleteCampaign } from '@/app/actions'
 import { EditCampaignModal } from '@/components/EditCampaignModal'
+
+interface Campaign {
+    id: string
+    pi: string
+    client: string
+    agency: string
+    url: string
+    device: string
+    format: string
+    flightStart: string | null
+    flightEnd: string | null
+    isMonitoringActive: boolean
+}
+
+interface PIGroup {
+    pi: string
+    client: string
+    agency: string
+    device: string
+    campaigns: Campaign[]
+    earliestStart: Date | null
+    latestEnd: Date | null
+    formats: Set<string>
+    statusId: string
+    formatsList: string
+}
 
 
 
@@ -29,7 +52,7 @@ function getFlightStatus(flightStart: Date | null, flightEnd: Date | null) {
     return { id: 'ACTIVE', label: 'Em veiculação', color: 'var(--accent)', bg: 'var(--accent-muted)', icon: CheckCircle2 }
 }
 
-export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns: any[], formats: any[] }) {
+export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns: Campaign[], formats: any[] }) {
     const router = useRouter()
     const [isPending, startTransition] = useTransition()
     const [search, setSearch] = useState('')
@@ -38,7 +61,9 @@ export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns
 
     const filteredCampaigns = useMemo(() => {
         return initialCampaigns.filter(c => {
-            const status = getFlightStatus(c.flightStart, c.flightEnd).id
+            const start = c.flightStart ? new Date(c.flightStart) : null
+            const end = c.flightEnd ? new Date(c.flightEnd) : null
+            const status = getFlightStatus(start, end).id
 
             const matchesSearch =
                 c.client.toLowerCase().includes(search.toLowerCase()) ||
@@ -94,7 +119,11 @@ export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns
 
         return Object.values(groups).map(g => {
             // Determine combined status
-            const statuses = g.campaigns.map((c: any) => getFlightStatus(c.flightStart, c.flightEnd).id)
+            const statuses = g.campaigns.map((c: Campaign) => {
+                const start = c.flightStart ? new Date(c.flightStart) : null
+                const end = c.flightEnd ? new Date(c.flightEnd) : null
+                return getFlightStatus(start, end).id
+            })
             let finalStatus = 'NEUTRAL'
             if (statuses.includes('ACTIVE')) finalStatus = 'ACTIVE'
             else if (statuses.includes('UPCOMING')) finalStatus = 'UPCOMING'
@@ -104,7 +133,7 @@ export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns
                 ...g,
                 statusId: finalStatus,
                 formatsList: Array.from(g.formats).join(', ')
-            }
+            } as PIGroup
         })
     }, [filteredCampaigns])
 
@@ -119,9 +148,21 @@ export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns
         totalPis: new Set(initialCampaigns.map(c => c.pi)).size,
         totalFormats: initialCampaigns.length,
         visible: piGroups.length,
-        active: new Set(initialCampaigns.filter(c => getFlightStatus(c.flightStart, c.flightEnd).id === 'ACTIVE').map(c => c.pi)).size,
-        upcoming: new Set(initialCampaigns.filter(c => getFlightStatus(c.flightStart, c.flightEnd).id === 'UPCOMING').map(c => c.pi)).size,
-        finished: new Set(initialCampaigns.filter(c => getFlightStatus(c.flightStart, c.flightEnd).id === 'FINISHED').map(c => c.pi)).size
+        active: new Set(initialCampaigns.filter(c => {
+            const start = c.flightStart ? new Date(c.flightStart) : null
+            const end = c.flightEnd ? new Date(c.flightEnd) : null
+            return getFlightStatus(start, end).id === 'ACTIVE'
+        }).map(c => c.pi)).size,
+        upcoming: new Set(initialCampaigns.filter(c => {
+            const start = c.flightStart ? new Date(c.flightStart) : null
+            const end = c.flightEnd ? new Date(c.flightEnd) : null
+            return getFlightStatus(start, end).id === 'UPCOMING'
+        }).map(c => c.pi)).size,
+        finished: new Set(initialCampaigns.filter(c => {
+            const start = c.flightStart ? new Date(c.flightStart) : null
+            const end = c.flightEnd ? new Date(c.flightEnd) : null
+            return getFlightStatus(start, end).id === 'FINISHED'
+        }).map(c => c.pi)).size
     }
 
     return (
@@ -136,7 +177,7 @@ export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns
                     <div className="flex flex-col md:flex-row md:items-end justify-between gap-8">
                         <div className="space-y-6">
                             <div className="flex items-center gap-5">
-                                <div className="w-14 h-14 rounded-2xl bg-white/8 border border-white/15 flex items-center justify-center text-white/60">
+                                 <div className="p-4 bg-white/2 border border-white/5 rounded-2xl flex items-center justify-between group-hover:bg-white/5 transition-all">
                                     <Activity size={28} />
                                 </div>
                                 <div>
@@ -188,10 +229,10 @@ export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns
                             <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-accent transition-colors duration-200" size={20} />
                             <input
                                 type="text"
-                                placeholder="Pesquisar por Cliente, PI ou Agência..."
+                                placeholder="Pesquisar PI, Cliente ou Agência..."
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
-                                className="w-full bg-white/[0.08] border border-white/10 rounded-2xl py-5 pl-14 pr-12 text-sm font-medium focus:outline-none focus:border-accent/40 focus:bg-white/[0.12] transition-all duration-200 shadow-inner"
+                                className="w-full h-14 pl-12 pr-6 rounded-2xl bg-white/8 border border-white/10 text-white placeholder-white/20 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:bg-white/12 transition-all"
                             />
                             {search && (
                                 <button
@@ -203,7 +244,7 @@ export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns
                             )}
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-3 p-2 bg-white/[0.05] border border-white/5 rounded-[1.5rem] w-full xl:w-auto self-stretch">
+                        <div className="flex flex-wrap items-center gap-3 p-2 bg-white/5 border border-white/5 rounded-3xl w-full xl:w-auto self-stretch">
                             <div className="flex items-center gap-1 px-3 border-r border-white/10 mr-2">
                                 <Filter size={14} className="text-white/20" />
                                 <span className="text-[10px] font-black uppercase text-white/20">Status:</span>
@@ -233,7 +274,7 @@ export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns
                             />
                         </div>
 
-                        <div className="flex items-center gap-2 p-2 bg-white/[0.02] border border-white/5 rounded-[1.5rem] w-full xl:w-auto">
+                        <div className="flex items-center gap-2 p-2 bg-white/2 border border-white/5 rounded-3xl w-full xl:w-auto">
                             <FilterButton
                                 active={activeFilter === 'all'}
                                 onClick={() => setActiveFilter('all')}
@@ -260,7 +301,7 @@ export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns
             {/* Campaign Sections */}
             <div className="space-y-24 px-2">
                 {stats.visible === 0 && (
-                    <div className="py-40 text-center rounded-[3rem] border-2 border-dashed border-white/5 bg-white/[0.02] animate-fade-in">
+                     <div className="py-40 text-center rounded-[3rem] border-2 border-dashed border-white/5 bg-white/2 animate-fade-in">
                         <Search size={64} className="mx-auto mb-6 text-white/10" />
                         <h2 className="text-2xl font-black mb-2 text-white/60 uppercase tracking-tighter">Nenhum rastro encontrado</h2>
                         <p className="text-white/20 font-medium">Os filtros neurais não detectaram campanhas com estes parâmetros.</p>
@@ -353,7 +394,7 @@ export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns
     )
 }
 
-function PiCard({ group, router, isPending, startTransition, formats }: { group: any, router: any, isPending: boolean, startTransition: any, formats: any[] }) {
+function PiCard({ group, router, isPending, startTransition, formats }: { group: PIGroup, router: any, isPending: boolean, startTransition: any, formats: any[] }) {
     const [showEditModal, setShowEditModal] = useState(false)
     const isActive = group.statusId === 'ACTIVE'
     const statusLabels = {
@@ -393,7 +434,7 @@ function PiCard({ group, router, isPending, startTransition, formats }: { group:
     const cardStyle = `rounded-2xl border transition-all duration-200 flex flex-col min-h-[360px]`
     const frontBg = isActive
         ? 'bg-[#111118] border-white/10'
-        : 'bg-[#0e0e14] border-white/[0.06]'
+        : 'bg-[#0e0e14] border-white/6'
 
     return (
         <>
@@ -421,7 +462,7 @@ function PiCard({ group, router, isPending, startTransition, formats }: { group:
                                 <span className="text-[10px] font-medium text-white/25">{group.agency}</span>
                             </div>
                         </div>
-                        <div className="w-12 h-12 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-white/25">
+                        <div className="w-12 h-12 rounded-xl bg-white/4 border border-white/8 flex items-center justify-center text-white/25">
                             {group.device === 'mobile' ? <Smartphone size={24} /> : <Monitor size={24} />}
                         </div>
                     </div>
@@ -436,16 +477,26 @@ function PiCard({ group, router, isPending, startTransition, formats }: { group:
                         {group.campaigns.slice(0, 5).map((c: any) => (
                             <div
                                 key={c.id}
-                                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.05] hover:bg-white/[0.07] hover:border-accent/20 transition-all cursor-pointer group/fmt"
+                                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/3 border border-white/5 hover:bg-white/7 hover:border-accent/20 transition-all cursor-pointer group/fmt"
                                 onClick={() => setShowEditModal(true)}
                             >
-                                <div className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 bg-accent/10">
+                                <div className="w-5 h-5 rounded flex items-center justify-center shrink-0 bg-accent/10">
                                     {c.device === 'mobile' ? <Smartphone size={10} className="text-accent/70" /> : <Monitor size={10} className="text-accent/70" />}
                                 </div>
-                                <span className="text-[10px] font-medium text-white/60 flex-1 truncate">
+                                 <span className="text-[10px] font-medium text-white/60 flex-1 truncate">
                                     {getFormatLabel(c.format)}
                                 </span>
-                                <Pencil size={10} className="text-white/0 group-hover/fmt:text-accent/50 transition-colors flex-shrink-0" />
+                                {c.isMonitoringActive && (
+                                    <Link 
+                                        href={`/monitoring/live/${c.id}`}
+                                        className="px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-[8px] font-black text-emerald-500 uppercase tracking-wider flex items-center gap-1 hover:bg-emerald-500 hover:text-white transition-all shadow-[0_0_10px_rgba(16,185,129,0.1)]"
+                                        onClick={(e) => e.stopPropagation()}
+                                    >
+                                        <Radio size={8} className="animate-pulse" />
+                                        LIVE
+                                    </Link>
+                                )}
+                                <Pencil size={10} className="text-white/0 group-hover/fmt:text-accent/50 transition-colors shrink-0" />
                             </div>
                         ))}
                         {group.campaigns.length > 5 && (
@@ -464,7 +515,7 @@ function PiCard({ group, router, isPending, startTransition, formats }: { group:
                                 <span className="text-[9px] font-bold text-white/15 uppercase tracking-wider">Veiculação</span>
                                 <span className="text-[10px] font-bold text-white/30 tabular-nums">{progressPercent}%</span>
                             </div>
-                            <div className="h-1.5 w-full bg-white/[0.04] rounded-full overflow-hidden">
+                            <div className="h-1.5 w-full bg-white/4 rounded-full overflow-hidden">
                                 <div
                                     className={`h-full rounded-full transition-all duration-1000 ${isActive ? 'bg-accent' : 'bg-white/15'}`}
                                     style={{ width: `${progressPercent}%` }}
@@ -479,10 +530,10 @@ function PiCard({ group, router, isPending, startTransition, formats }: { group:
                 </div>
 
                 {/* Footer */}
-                <div className="mt-4 pt-4 flex items-center justify-between border-t border-white/[0.04]">
+                <div className="mt-4 pt-4 flex items-center justify-between border-t border-white/4">
                     <button
                         onClick={() => setShowEditModal(true)}
-                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide bg-white/[0.04] border border-white/[0.08] text-white/40 hover:bg-white/[0.08] hover:text-white transition-all"
+                        className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wide bg-white/4 border border-white/8 text-white/40 hover:bg-white/8 hover:text-white transition-all"
                     >
                         <Pencil size={12} />
                         Editar
@@ -518,7 +569,7 @@ function FilterButton({ active, onClick, icon: Icon, label, dotColor }: { active
     return (
         <button
             onClick={onClick}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-[0.1em] transition-all min-w-[80px] justify-center ${active
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all min-w-[80px] justify-center ${active
                 ? 'bg-white text-black shadow-[0_10px_20px_rgba(0,0,0,0.4)] scale-105'
                 : 'text-white/30 hover:text-white/60 hover:bg-white/5'
                 }`}
@@ -534,8 +585,8 @@ function StatBox({ label, value, color, pulse = false, onClick, active = false }
     return (
         <div
             onClick={onClick}
-            className={`flex flex-col group cursor-pointer transition-all duration-200 p-4 rounded-2xl border border-white/[0.03] ${onClick ? 'hover:scale-105 active:scale-95 hover:border-white/10 hover:bg-white/[0.05]' : ''
-                } ${active ? 'bg-white/[0.08] border-white/25 shadow-[0_0_20px_rgba(255,255,255,0.05)]' : 'bg-white/[0.02]'}`}
+            className={`flex flex-col group cursor-pointer transition-all duration-200 p-4 rounded-2xl border border-white/3 ${onClick ? 'hover:scale-105 active:scale-95 hover:border-white/10 hover:bg-white/5' : ''
+                } ${active ? 'bg-white/8 border-white/25 shadow-[0_0_20px_rgba(255,255,255,0.05)]' : 'bg-white/2'}`}
         >
             <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30 mb-2 group-hover:text-white/50 transition-colors duration-200" style={{ fontFamily: 'var(--font-body)' }}>
                 {label}
@@ -557,15 +608,15 @@ function StatBox({ label, value, color, pulse = false, onClick, active = false }
 
 function SectionHeader({ label, count, color, active = false }: { label: string, count: number, color: string, active?: boolean }) {
     return (
-        <div className="flex items-center gap-6 mb-12 sticky top-[2rem] z-20 bg-bg-primary py-6 -mx-2 px-4 rounded-3xl border border-white/[0.03] transition-all duration-200">
+        <div className="flex items-center gap-6 mb-12 sticky top-8 z-20 bg-bg-primary py-6 -mx-2 px-4 rounded-3xl border border-white/3 transition-all duration-200">
             <div className="flex items-center gap-4">
                 <div className={`w-1.5 h-10 rounded-full transition-all duration-300 ${active ? 'scale-y-110 shadow-[0_0_20px_var(--accent)]' : ''}`} style={{ background: color }} />
                 <h2 className="text-2xl font-black uppercase tracking-tighter text-white" style={{ fontFamily: 'var(--font-display)' }}>
                     {label}
                 </h2>
             </div>
-            <div className="h-px flex-1 bg-gradient-to-r from-white/[0.1] to-transparent" />
-            <div className="flex items-center gap-3 px-4 py-2 rounded-2xl bg-white/[0.04] border border-white/5 shadow-inner transition-colors duration-200">
+            <div className="h-px flex-1 bg-linear-to-r from-white/10 to-transparent" />
+            <div className="flex items-center gap-3 px-4 py-2 rounded-2xl bg-white/4 border border-white/5 shadow-inner transition-colors duration-200">
                 <span className="text-xs font-black text-white/40 uppercase tracking-widest" style={{ fontFamily: 'var(--font-body)' }}>{count}</span>
                 <span className="text-[10px] font-bold text-white/20 uppercase tracking-[0.2em]">{count === 1 ? 'Item' : 'Itens'}</span>
             </div>

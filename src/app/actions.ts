@@ -219,6 +219,9 @@ export async function updateCampaign(id: string, formData: FormData) {
             flightEnd,
             isScheduled,
             scheduledTimes,
+            externalAuthUrl: formData.get('externalAuthUrl') as string | null,
+            externalCampaignId: formData.get('externalCampaignId') as string | null,
+            isMonitoringActive: formData.get('isMonitoringActive') === 'true',
         },
     })
 
@@ -260,6 +263,9 @@ export async function addFormatToCampaign(data: {
             status: 'PENDING',
             isScheduled: data.isScheduled || false,
             scheduledTimes: data.scheduledTimes || '[]',
+            externalAuthUrl: (data as any).externalAuthUrl || null,
+            externalCampaignId: (data as any).externalCampaignId || null,
+            isMonitoringActive: (data as any).isMonitoringActive || false,
         },
     })
 
@@ -437,7 +443,10 @@ export async function bulkCreateCampaigns(campaigns: any[]) {
                     flightEnd: data.flightEnd ? new Date(data.flightEnd) : null,
                     status: 'PENDING',
                     isScheduled: false,
-                    scheduledTimes: '[]'
+                    scheduledTimes: '[]',
+                    externalAuthUrl: data.externalAuthUrl || null,
+                    externalCampaignId: data.externalCampaignId || null,
+                    isMonitoringActive: data.isMonitoringActive || false,
                 }
             })
             results.push({ success: true, id: campaign.id })

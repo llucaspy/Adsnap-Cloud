@@ -5,8 +5,8 @@ import { X, Globe, Monitor, Smartphone, Layers, ChevronDown, ChevronUp, Save, Ca
 import { updateCampaign, addFormatToCampaign, deleteCampaign } from '@/app/actions'
 
 interface EditCampaignModalProps {
-    campaigns: any[]
-    formats: any[]
+    campaigns: any[] // These are joined with PI, complex to type here without shared types
+    formats: Array<{id: string, label: string, width: number, height: number}>
     onClose: () => void
     onSaved: () => void
 }
@@ -21,6 +21,9 @@ interface FormatEntry {
     format: string
     flightStart: string
     flightEnd: string
+    externalAuthUrl: string
+    externalCampaignId: string
+    isMonitoringActive: boolean
 }
 
 export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: EditCampaignModalProps) {
@@ -50,6 +53,9 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
             format: c.format || '',
             flightStart: c.flightStart ? new Date(c.flightStart).toISOString().slice(0, 10) : '',
             flightEnd: c.flightEnd ? new Date(c.flightEnd).toISOString().slice(0, 10) : '',
+            externalAuthUrl: c.externalAuthUrl || '',
+            externalCampaignId: c.externalCampaignId || '',
+            isMonitoringActive: c.isMonitoringActive || false,
         }))
     )
 
@@ -72,6 +78,9 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
             format: '',
             flightStart: entries[0]?.flightStart || '',
             flightEnd: entries[0]?.flightEnd || '',
+            externalAuthUrl: entries[0]?.externalAuthUrl || '',
+            externalCampaignId: entries[0]?.externalCampaignId || '',
+            isMonitoringActive: entries[0]?.isMonitoringActive || false,
         }
         setEntries(prev => [...prev, newEntry])
         setExpandedIndex(entries.length)
@@ -89,7 +98,7 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
     }
 
     const getFormatLabel = (formatId: string) => {
-        const fmt = formats.find((f: any) => f.id === formatId)
+        const fmt = formats.find(f => f.id === formatId)
         return fmt ? `${fmt.label} (${fmt.width}x${fmt.height})` : formatId || 'Novo formato'
     }
 
@@ -114,6 +123,9 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                     data.append('format', entry.format)
                     data.append('flightStart', entry.flightStart)
                     data.append('flightEnd', entry.flightEnd)
+                    data.append('externalAuthUrl', entry.externalAuthUrl)
+                    data.append('externalCampaignId', entry.externalCampaignId)
+                    data.append('isMonitoringActive', entry.isMonitoringActive.toString())
                     data.append('isScheduled', shared.isScheduled.toString())
                     data.append('scheduledTimes', shared.scheduledTimes)
                     await updateCampaign(entry.id, data)
@@ -134,7 +146,10 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                         flightEnd: entry.flightEnd || null,
                         isScheduled: shared.isScheduled,
                         scheduledTimes: shared.scheduledTimes,
-                    })
+                        externalAuthUrl: entry.externalAuthUrl,
+                        externalCampaignId: entry.externalCampaignId,
+                        isMonitoringActive: entry.isMonitoringActive,
+                    } as any)
                 }
 
                 onSaved()
@@ -149,7 +164,7 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
 
     return (
         <div
-            className="fixed inset-0 z-[9999] flex items-center justify-center p-4 animate-fade-in"
+            className="fixed inset-0 z-9999 flex items-center justify-center p-4 animate-fade-in"
             onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
         >
             {/* Backdrop */}
@@ -243,16 +258,16 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                                     <div
                                         key={entry._id}
                                         className={`rounded-xl border transition-all ${entry._isNew
-                                            ? 'border-accent/30 bg-accent/[0.03]'
-                                            : 'border-white/[0.06] bg-white/[0.02]'
+                                            ? 'border-accent/30 bg-accent/3'
+                                            : 'border-white/6 bg-white/2'
                                             } ${isExpanded ? 'shadow-lg' : ''}`}
                                     >
                                         {/* Format Header (always visible) */}
-                                        <div
-                                            className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-white/[0.03] transition-colors rounded-xl"
+                                         <div
+                                            className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-white/3 transition-colors rounded-xl"
                                             onClick={() => setExpandedIndex(isExpanded ? null : index)}
                                         >
-                                            <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 bg-accent/10">
+                                            <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 bg-accent/10">
                                                 {entry.device === 'mobile'
                                                     ? <Smartphone size={12} className="text-accent/70" />
                                                     : <Monitor size={12} className="text-accent/70" />
@@ -273,9 +288,9 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                                             >
                                                 <Trash2 size={13} />
                                             </button>
-                                            {isExpanded
-                                                ? <ChevronUp size={14} className="text-white/20 flex-shrink-0" />
-                                                : <ChevronDown size={14} className="text-white/20 flex-shrink-0" />
+                                             {isExpanded
+                                                ? <ChevronUp size={14} className="text-white/20 shrink-0" />
+                                                : <ChevronDown size={14} className="text-white/20 shrink-0" />
                                             }
                                         </div>
 
@@ -321,7 +336,7 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                                                                 className="modal-input appearance-none pr-10"
                                                             >
                                                                 <option value="">Selecione...</option>
-                                                                {formats.map((fmt: any) => (
+                                                                 {formats.map(fmt => (
                                                                     <option key={fmt.id} value={fmt.id}>
                                                                         {fmt.label} ({fmt.width}x{fmt.height})
                                                                     </option>
@@ -349,6 +364,44 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                                                             className="modal-input"
                                                         />
                                                     </FieldBlock>
+                                                </div>
+
+                                                <div className="border-t border-white/5 pt-4 space-y-4">
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-[10px] font-black uppercase tracking-wider text-accent">Monitoramento Live (00px)</span>
+                                                        <label className="relative inline-flex items-center cursor-pointer">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={entry.isMonitoringActive}
+                                                                onChange={e => updateEntry(index, { isMonitoringActive: e.target.checked })}
+                                                                className="sr-only peer"
+                                                            />
+                                                            <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white/40 after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent"></div>
+                                                        </label>
+                                                    </div>
+
+                                                    {entry.isMonitoringActive && (
+                                                        <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
+                                                            <FieldBlock label="Link Auth 00px" icon={Globe}>
+                                                                <input
+                                                                    type="text"
+                                                                    value={entry.externalAuthUrl}
+                                                                    onChange={e => updateEntry(index, { externalAuthUrl: e.target.value })}
+                                                                    className="modal-input"
+                                                                    placeholder="https://graphql.00px.com.br/auth/..."
+                                                                />
+                                                            </FieldBlock>
+                                                            <FieldBlock label="ID Campanha 00px" icon={Hash}>
+                                                                <input
+                                                                    type="text"
+                                                                    value={entry.externalCampaignId}
+                                                                    onChange={e => updateEntry(index, { externalCampaignId: e.target.value })}
+                                                                    className="modal-input"
+                                                                    placeholder="Ex: 6988"
+                                                                />
+                                                            </FieldBlock>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         )}
@@ -418,7 +471,7 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
     )
 }
 
-function FieldBlock({ label, icon: Icon, children }: { label: string, icon: any, children: React.ReactNode }) {
+function FieldBlock({ label, icon: Icon, children }: { label: string, icon: React.ElementType, children: React.ReactNode }) {
     return (
         <div className="space-y-2">
             <label className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-white/30">

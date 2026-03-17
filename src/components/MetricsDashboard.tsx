@@ -181,9 +181,9 @@ function MetricCard({ title, value, limit, percentage, icon, color, description 
                         <span className="text-white/40">USO ATUAL</span>
                         <span className={`text-${color}-400`}>{percentage.toFixed(1)}%</span>
                     </div>
-                    <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+                    <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden p-[2px] border border-white/5 bg-linear-to-r from-accent/20 to-transparent">
                         <div
-                            className={`h-full bg-gradient-to-r ${color === 'blue' ? 'from-blue-500 to-cyan-400' : color === 'emerald' ? 'from-emerald-500 to-teal-400' : 'from-purple-500 to-accent'} transition-all duration-1000`}
+                            className={`h-full bg-linear-to-r ${color === 'blue' ? 'from-blue-500 to-cyan-400' : color === 'emerald' ? 'from-emerald-500 to-teal-400' : 'from-purple-500 to-accent'} transition-all duration-1000`}
                             style={{ width: `${Math.min(percentage, 100)}%` }}
                         />
                     </div>
