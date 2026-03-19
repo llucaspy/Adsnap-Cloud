@@ -119,7 +119,8 @@ export async function getAggregatedAdOpsMetrics() {
             Array.from(groupedMap.entries()).map(async ([pi, group]) => {
                 const monitoringCampaign = group.find(c => c.isMonitoringActive) || group[0]
                 const main = group[0]
-                const manualDashboardUrl = group.find(c => c.manualDashboardUrl)?.manualDashboardUrl || null
+                // Type-cast to any to bypass Prisma sync issue on Vercel for manualDashboardUrl
+                const manualDashboardUrl = (group as any[]).find(c => c.manualDashboardUrl)?.manualDashboardUrl || null
 
                 // Fetch real metrics
                 const result: LiveMetricsResult = await getLiveMetrics(monitoringCampaign.id)
