@@ -119,7 +119,6 @@ export async function getAggregatedAdOpsMetrics() {
             Array.from(groupedMap.entries()).map(async ([pi, group]) => {
                 const monitoringCampaign = group.find(c => c.isMonitoringActive) || group[0]
                 const main = group[0]
-                // Type-cast to any to bypass Prisma sync issue on Vercel for manualDashboardUrl
                 const manualDashboardUrl = (group as any[]).find(c => c.manualDashboardUrl)?.manualDashboardUrl || null
 
                 // Fetch real metrics
@@ -153,7 +152,6 @@ export async function getAggregatedAdOpsMetrics() {
                             if (!purchase.cpm) continue
 
                             const q = purchase.cpm.quantity || 0
-                            // Use impressions (consistent with 00px dashboard), fallback to valids
                             const td = purchase.cpm.total_data
                             const d = td?.impressions ?? td?.valids ?? 0
                             const v = (td?.viewability ?? 0) * 100
@@ -179,7 +177,6 @@ export async function getAggregatedAdOpsMetrics() {
                         avgViewability = safeDivide(avgViewability, metricsCount)
                     }
                 } else {
-                    // API unavailable — log and flag, but DON'T inject fake data
                     if (result.error) {
                         await nexusLogStore.addLog(
                             `PI ${pi}: API indisponível — ${result.error}`,
@@ -188,9 +185,8 @@ export async function getAggregatedAdOpsMetrics() {
                     }
                 }
 
-                // If no goal from API, we can't calculate meaningful KPIs
                 if (totalGoal === 0) {
-                    totalGoal = group.length * 1_000_000 // minimal fallback to prevent div/0
+                    totalGoal = group.length * 1_000_000 
                 }
 
                 // -------------------------------------------------------
@@ -215,7 +211,7 @@ export async function getAggregatedAdOpsMetrics() {
                 const safeDelivered = Math.max(0, Number(totalDelivered))
 
                 // -------------------------------------------------------
-                // Step 3: KPI Calculations (with safe division)
+                // Step 3: KPI Calculations
                 // -------------------------------------------------------
                 const timeProgress = Math.min(100, safeDivide(elapsedDays, totalDays) * 100)
                 const deliveryProgress = safeDivide(safeDelivered, safeGoal) * 100
@@ -225,7 +221,6 @@ export async function getAggregatedAdOpsMetrics() {
                 const currentDaily = safeDivide(safeDelivered, elapsedDays)
                 const remaining = Math.max(0, safeGoal - safeDelivered)
                 const requiredDaily = safeDivide(remaining, daysLeft)
-                const pressure = safeDivide(requiredDaily, Math.max(1, currentDaily), 1)
 
                 const projectedFinalValue = currentDaily * totalDays
                 const projectionPercent = safeDivide(projectedFinalValue, safeGoal) * 100
@@ -235,31 +230,16 @@ export async function getAggregatedAdOpsMetrics() {
                 // -------------------------------------------------------
                 let status: 'on-track' | 'warning' | 'critical' | 'over' = 'on-track'
 
-                if (projectionPercent < 85 || pressure > 1.3) {
-                    status = 'critical'
-                } else if (projectionPercent < 95 || pressure > 1.15) {
-                    status = 'warning'
-                } else if (pacingPercent >= 105) {
-                    status = 'over'
-                }
-
+                // We calculate pressure early for diagnostics
                 const isDelayedButHealthy = pacingPercent >= 95 && projectionPercent < 95
 
-                // BI Score (0–100)
+                // BI Score
                 let score = 100
-                if (status === 'critical') score = 40
-                else if (status === 'warning') score = 75
-                else if (status === 'on-track' && isDelayedButHealthy) score = 85
+                // viewability check early
                 if (avgViewability < 60) score -= (60 - avgViewability) * 0.5
-                score = Math.max(0, Math.min(100, Math.round(score)))
-
-                // Dev-only debug log
-                if (isDev) {
-                    console.log(`[BI] PI ${pi}: delivered=${safeDelivered} goal=${safeGoal} proj=${projectionPercent.toFixed(1)}% status=${status}`)
-                }
 
                 // -------------------------------------------------------
-                // Step 5: Daily impressions from data_by_date_purchase
+                // Step 5: Daily impressions Map
                 // -------------------------------------------------------
                 const dailyMap = new Map<string, number>()
                 let deliveredTodayFromAPI = 0
@@ -268,7 +248,6 @@ export async function getAggregatedAdOpsMetrics() {
                 if (apiAvailable && result.data) {
                     for (const site of result.data.sites || []) {
                         const dailyData = parseDailyData(site.data_by_date_purchase)
-
                         for (const entry of dailyData) {
                             const impressions = extractDayImpressions(entry.cpm)
                             const dateKey = entry.datetime || ''
@@ -277,11 +256,9 @@ export async function getAggregatedAdOpsMetrics() {
                             }
                         }
                     }
-
                     deliveredTodayFromAPI = dailyMap.get(todayStr) || 0
                 }
 
-                // Build history array sorted by date
                 const realHistoryArr = Array.from(dailyMap.entries())
                     .map(([date, value]) => {
                         const [d, m, y] = date.split('/').map(Number)
@@ -289,45 +266,62 @@ export async function getAggregatedAdOpsMetrics() {
                     })
                     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 
-                // Recent velocity (last 3 days average)
+                // -------------------------------------------------------
+                // Step 6: Diagnostics & Recommendations (Unified Pressure)
+                // -------------------------------------------------------
                 const last3Days = realHistoryArr.slice(-3)
                 const recentDailyAvg = last3Days.length > 0
-                    ? last3Days.reduce((sum, h) => sum + h.value, 0) / last3Days.length
+                    ? last3Days.reduce((sum: number, h: { value: number }) => sum + h.value, 0) / last3Days.length
                     : currentDaily
+                
+                const recalcPressure = safeDivide(requiredDaily, Math.max(1, recentDailyAvg), 1)
 
-                // Trend detection
+                // Re-evaluate status based on recalcPressure if needed, but original status uses long-term
+                if (projectionPercent < 85 || recalcPressure > 1.3) {
+                    status = 'critical'
+                } else if (projectionPercent < 95 || recalcPressure > 1.15) {
+                    status = 'warning'
+                } else if (pacingPercent >= 105) {
+                    status = 'over'
+                }
+
+                if (status === 'critical') score = 40
+                else if (status === 'warning') score = 75
+                else if (status === 'on-track' && isDelayedButHealthy) score = 85
+                score = Math.max(0, Math.min(100, Math.round(score)))
+
+                const diagnostics: string[] = []
+                const smartAlert = isDelayedButHealthy ? '⚠️ Risco Oculto: Pacing OK mas projeção baixa' : null
+                if (smartAlert) diagnostics.push(smartAlert)
+                if (recalcPressure > 1.2) diagnostics.push(`Pressão de entrega ALTA (${recalcPressure.toFixed(2)}x)`)
+                if (avgViewability < 60) diagnostics.push(`Viewability baixa (${avgViewability.toFixed(0)}%)`)
+                if (!apiAvailable) diagnostics.push('⚠️ API 00px indisponível — dados podem estar desatualizados')
+
+                const recommendations: string[] = []
+                if (recalcPressure > 1.1) recommendations.push(`Necessário acelerar entrega em ${((recalcPressure - 1) * 100).toFixed(0)}%`)
+                if (avgViewability < 55) recommendations.push("Otimizar inventário / whitelist")
+                if (daysLeft < 3 && projectionPercent < 98) recommendations.push("Aceleração máxima imediata")
+
+                // Trend & History
                 const yesterdayVal = realHistoryArr.length >= 2 ? realHistoryArr[realHistoryArr.length - 2].value : 0
                 const realTrend: 'up' | 'down' | 'neutral' = realHistoryArr.length >= 1
                     ? (deliveredTodayFromAPI > yesterdayVal ? 'up' : deliveredTodayFromAPI < yesterdayVal ? 'down' : 'neutral')
                     : 'neutral'
 
-                // Use API history when available, fallback to DB history
                 const finalHistory = realHistoryArr.length > 0
                     ? realHistoryArr.slice(-7).map(h => ({ date: h.date, value: h.value }))
                     : metricHistory.map(h => ({ date: h.date.toISOString(), value: h.delivered }))
 
                 const finalDeliveredToday = apiAvailable ? deliveredTodayFromAPI : Math.max(0, currentDaily)
 
-                // -------------------------------------------------------
-                // Step 6: Diagnostics & Recommendations
-                // -------------------------------------------------------
-                const diagnostics: string[] = []
-                const smartAlert = isDelayedButHealthy ? '⚠️ Risco Oculto: Pacing OK mas projeção baixa' : null
-                if (smartAlert) diagnostics.push(smartAlert)
-                if (pressure > 1.2) diagnostics.push(`Pressão de entrega ALTA (${pressure.toFixed(2)}x)`)
-                if (avgViewability < 60) diagnostics.push(`Viewability baixa (${avgViewability.toFixed(0)}%)`)
-                if (!apiAvailable) diagnostics.push('⚠️ API 00px indisponível — dados podem estar desatualizados')
-
-                const recommendations: string[] = []
-                if (pressure > 1.1) recommendations.push(`Necessário acelerar entrega em ${((pressure - 1) * 100).toFixed(0)}%`)
-                if (avgViewability < 55) recommendations.push("Otimizar inventário / whitelist")
-                if (daysLeft < 3 && projectionPercent < 98) recommendations.push("Aceleração máxima imediata")
+                // Dev-only debug log
+                if (isDev) {
+                    console.log(`[BI] PI ${pi}: delivered=${safeDelivered} goal=${safeGoal} proj=${projectionPercent.toFixed(1)}% status=${status}`)
+                }
 
                 // -------------------------------------------------------
                 // Step 7: Return campaign object
                 // -------------------------------------------------------
-                const recalcPressure = safeDivide(requiredDaily, Math.max(1, recentDailyAvg), 1)
-
                 return {
                     id: pi,
                     name: main.campaignName || pi,
