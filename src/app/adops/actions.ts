@@ -311,7 +311,7 @@ export async function getAggregatedAdOpsMetrics() {
 
                 const finalHistory = realHistoryArr.length > 0
                     ? realHistoryArr.slice(-7).map(h => ({ date: h.date, value: h.value }))
-                    : metricHistory.map(h => ({ date: h.date.toISOString(), value: h.delivered }))
+                    : metricHistory.map((h: { date: Date; delivered: number }) => ({ date: h.date.toISOString(), value: h.delivered }))
 
                 const finalDeliveredToday = apiAvailable ? deliveredTodayFromAPI : Math.max(0, currentDaily)
 
