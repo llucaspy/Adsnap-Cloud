@@ -161,6 +161,7 @@ export async function createMultipleCampaigns(payload: {
 
     revalidatePath('/')
     revalidatePath('/monitoring')
+    revalidatePath('/adops')
     return { success: true, count: results.length }
 }
 
@@ -222,11 +223,13 @@ export async function updateCampaign(id: string, formData: FormData) {
             externalAuthUrl: formData.get('externalAuthUrl') as string | null,
             externalCampaignId: formData.get('externalCampaignId') as string | null,
             isMonitoringActive: formData.get('isMonitoringActive') === 'true',
+            manualDashboardUrl: formData.get('manualDashboardUrl') as string | null,
         },
     })
 
     revalidatePath('/')
     revalidatePath('/monitoring')
+    revalidatePath('/adops')
     return campaign
 }
 
@@ -266,11 +269,13 @@ export async function addFormatToCampaign(data: {
             externalAuthUrl: (data as any).externalAuthUrl || null,
             externalCampaignId: (data as any).externalCampaignId || null,
             isMonitoringActive: (data as any).isMonitoringActive || false,
+            manualDashboardUrl: (data as any).manualDashboardUrl || null,
         },
     })
 
     revalidatePath('/')
     revalidatePath('/monitoring')
+    revalidatePath('/adops')
     return campaign
 }
 
@@ -447,6 +452,7 @@ export async function bulkCreateCampaigns(campaigns: any[]) {
                     externalAuthUrl: data.externalAuthUrl || null,
                     externalCampaignId: data.externalCampaignId || null,
                     isMonitoringActive: data.isMonitoringActive || false,
+                    manualDashboardUrl: data.manualDashboardUrl || null,
                 }
             })
             results.push({ success: true, id: campaign.id })
@@ -458,6 +464,7 @@ export async function bulkCreateCampaigns(campaigns: any[]) {
 
     revalidatePath('/')
     revalidatePath('/monitoring')
+    revalidatePath('/adops')
 
     return {
         success: true,

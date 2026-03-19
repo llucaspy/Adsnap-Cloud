@@ -32,6 +32,7 @@ model Campaign {
   externalAuthUrl     String?
   externalCampaignId  String?
   isMonitoringActive  Boolean         @default(false)
+  manualDashboardUrl  String?
   captures            Capture[]
   emailDispatches EmailDispatch[]
 }
@@ -98,4 +99,17 @@ model EmailDispatch {
   updatedAt    DateTime  @updatedAt
   pi           String    @default("")
   campaign     Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+}
+
+model DailyMetric {
+  id           String   @id @default(cuid())
+  campaignId   String
+  date         DateTime @default(now())
+  delivered    Int
+  viewability  Float
+  goal         Int
+  pacing       Float
+  createdAt    DateTime @default(now())
+
+  @@unique([campaignId, date])
 }

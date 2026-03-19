@@ -39,6 +39,7 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
         segmentation: firstCampaign.segmentation || 'PRIVADO',
         isScheduled: firstCampaign.isScheduled || false,
         scheduledTimes: firstCampaign.scheduledTimes || '[]',
+        manualDashboardUrl: firstCampaign.manualDashboardUrl || '',
     })
 
     // Format entries - one per campaign
@@ -126,6 +127,7 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                     data.append('externalAuthUrl', entry.externalAuthUrl)
                     data.append('externalCampaignId', entry.externalCampaignId)
                     data.append('isMonitoringActive', entry.isMonitoringActive.toString())
+                    data.append('manualDashboardUrl', shared.manualDashboardUrl || '')
                     data.append('isScheduled', shared.isScheduled.toString())
                     data.append('scheduledTimes', shared.scheduledTimes)
                     await updateCampaign(entry.id, data)
@@ -149,6 +151,7 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                         externalAuthUrl: entry.externalAuthUrl,
                         externalCampaignId: entry.externalCampaignId,
                         isMonitoringActive: entry.isMonitoringActive,
+                        manualDashboardUrl: shared.manualDashboardUrl || null,
                     } as any)
                 }
 
@@ -234,6 +237,16 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                             />
                         </FieldBlock>
                     </div>
+
+                    <FieldBlock label="Link do Dashboard Manual (Global)" icon={Globe}>
+                        <input
+                            type="url"
+                            value={shared.manualDashboardUrl}
+                            onChange={e => updateShared({ manualDashboardUrl: e.target.value })}
+                            className="modal-input"
+                            placeholder="https://exemplo.com/dash"
+                        />
+                    </FieldBlock>
 
                     {/* Formats Section */}
                     <div className="border-t border-white/5 pt-4">
