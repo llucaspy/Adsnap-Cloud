@@ -126,7 +126,8 @@ export async function getAggregatedAdOpsMetrics() {
                 const apiAvailable = result.success && !!result.data
 
                 // BI Agent History (fallback source)
-                const metricHistory = await prisma.dailyMetric.findMany({
+                // Type-cast to any to bypass Prisma sync issue on Vercel for dailyMetric
+                const metricHistory = await (prisma as any).dailyMetric.findMany({
                     where: { campaignId: pi },
                     orderBy: { date: 'desc' },
                     take: 7
