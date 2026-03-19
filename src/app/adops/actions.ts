@@ -125,13 +125,19 @@ export async function getAggregatedAdOpsMetrics() {
                 const result: LiveMetricsResult = await getLiveMetrics(monitoringCampaign.id)
                 const apiAvailable = result.success && !!result.data
 
-                // BI Agent History (fallback source)
-                // Type-cast to any to bypass Prisma sync issue on Vercel for dailyMetric
-                const metricHistory = await (prisma as any).dailyMetric.findMany({
-                    where: { campaignId: pi },
-                    orderBy: { date: 'desc' },
-                    take: 7
-                })
+                // BI Agent History (fallback source — may not exist if migration is pending)
+                let metricHistory: { date: Date; delivered: number }[] = []
+                try {
+                    if ((prisma as any).dailyMetric) {
+                        metricHistory = await (prisma as any).dailyMetric.findMany({
+                            where: { campaignId: pi },
+                            orderBy: { date: 'desc' },
+                            take: 7
+                        })
+                    }
+                } catch {
+                    // Model not yet migrated — silently skip
+                }
 
                 // -------------------------------------------------------
                 // Step 1: Extract totals from API purchases
