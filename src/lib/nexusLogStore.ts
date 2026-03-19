@@ -3,7 +3,7 @@ import prisma from './prisma';
 type NexusLog = {
     message: string;
     timestamp: number;
-    type: 'INFO' | 'SUCCESS' | 'ERROR' | 'SYSTEM';
+    type: 'INFO' | 'SUCCESS' | 'ERROR' | 'SYSTEM' | 'API_ERROR';
     details?: string;
     campaignId?: string;
 };

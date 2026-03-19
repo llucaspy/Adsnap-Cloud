@@ -2,6 +2,66 @@
 
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
+import { nexusLogStore } from '@/lib/nexusLogStore'
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+const FETCH_TIMEOUT_MS = 15_000 // 15 seconds
+
+// ---------------------------------------------------------------------------
+// Types for 00px GraphQL API responses
+// ---------------------------------------------------------------------------
+export interface CpmTotalData {
+    impressions: number
+    valids: number
+    viewability: number
+}
+
+export interface CpmPurchase {
+    quantity: number
+    total_data: CpmTotalData
+}
+
+export interface SitePurchases {
+    cpm: CpmPurchase
+}
+
+export interface SiteData {
+    site_name: string
+    purchases: SitePurchases | SitePurchases[]
+    data_by_date_purchase: unknown // JSON scalar — parsed at runtime
+}
+
+export interface CampaignResponse {
+    sites: SiteData[]
+}
+
+export interface LiveMetricsResult {
+    success: boolean
+    data?: CampaignResponse
+    error?: string
+    fetchedAt?: string // ISO timestamp
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Creates a fetch with AbortController timeout */
+function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+    return fetch(url, {
+        ...options,
+        signal: controller.signal,
+    }).finally(() => clearTimeout(timer))
+}
+
+// ---------------------------------------------------------------------------
+// Public Actions
+// ---------------------------------------------------------------------------
 
 export async function saveMonitoringConfig(campaignId: string, payload: { authUrl: string; externalId: string; active: boolean }) {
     try {
@@ -21,7 +81,7 @@ export async function saveMonitoringConfig(campaignId: string, payload: { authUr
     }
 }
 
-export async function getLiveMetrics(campaignId: string) {
+export async function getLiveMetrics(campaignId: string): Promise<LiveMetricsResult> {
     try {
         const campaign = await prisma.campaign.findUnique({
             where: { id: campaignId },
@@ -37,29 +97,35 @@ export async function getLiveMetrics(campaignId: string) {
             return { success: false, error: 'Monitoramento não configurado ou inativo' }
         }
 
-        // 1. Handshake JWT -> Session Token
-        // Em Node, o fetch segue redirecionamentos por padrão (redirect: 'follow')
-        const authResponse = await fetch(campaign.externalAuthUrl, {
+        // 1. Handshake JWT -> Session Token (with 15s timeout)
+        const authResponse = await fetchWithTimeout(campaign.externalAuthUrl, {
             method: 'GET',
-            redirect: 'follow'
-        })
+            redirect: 'follow',
+            cache: 'no-store'
+        }, FETCH_TIMEOUT_MS)
+
+        if (!authResponse.ok) {
+            const errMsg = `Handshake falhou: HTTP ${authResponse.status}`
+            await nexusLogStore.addLog(`00px: ${errMsg}`, 'API_ERROR', undefined, campaignId)
+            return { success: false, error: errMsg }
+        }
 
         const finalUrl = authResponse.url
         const urlObj = new URL(finalUrl)
         const sessionToken = urlObj.searchParams.get('s')
 
         if (!sessionToken) {
-            return { success: false, error: 'Não foi possível obter token de sessão' }
+            const errMsg = 'Token de sessão não encontrado na resposta 00px'
+            await nexusLogStore.addLog(`00px Auth: ${errMsg}`, 'API_ERROR', undefined, campaignId)
+            return { success: false, error: errMsg }
         }
 
-        // 2. Extrair ID da Campanha da URL se estiver faltando ou para validar
-        // URL exemplo: https://analytics.adx.space/dashboard/campaign/6988/site/3500?s=...
+        // 2. Extract Campaign ID from URL if missing
         let externalId = campaign.externalCampaignId;
         if (!externalId || externalId === '') {
             const match = finalUrl.match(/\/campaign\/(\d+)/);
             if (match && match[1]) {
                 externalId = match[1];
-                // Atualizar o banco para futuras consultas serem mais rápidas
                 await prisma.campaign.update({
                     where: { id: campaign.id },
                     data: { externalCampaignId: externalId }
@@ -68,12 +134,14 @@ export async function getLiveMetrics(campaignId: string) {
         }
 
         if (!externalId) {
-            return { success: false, error: 'ID da campanha externa não encontrado na URL' }
+            const errMsg = 'ID da campanha externa não encontrado'
+            await nexusLogStore.addLog(`00px: ${errMsg}`, 'API_ERROR', undefined, campaignId)
+            return { success: false, error: errMsg }
         }
 
-        // 3. GraphQL Query
-        // Usando o formato de filtro descoberto: {"campaigns.campaign_id": ID}
-        const filterJson = JSON.stringify({ "campaigns.campaign_id": parseInt(externalId) })
+        // 3. GraphQL Query (with 15s timeout)
+        const campaignIdInt = parseInt(externalId)
+        const filterJson = JSON.stringify({ "campaigns.campaign_id": campaignIdInt })
         const graphqlUrl = `https://graphql.00px.com.br/graphql/?s=${sessionToken}`
 
         const query = `
@@ -91,28 +159,55 @@ export async function getLiveMetrics(campaignId: string) {
                       }
                     }
                   }
+                  data_by_date_purchase(campaign_id: ${campaignIdInt})
                 }
               }
             }
         `
 
-        const gqlResponse = await fetch(graphqlUrl, {
+        const gqlResponse = await fetchWithTimeout(graphqlUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query })
-        })
+            body: JSON.stringify({ query }),
+            cache: 'no-store'
+        }, FETCH_TIMEOUT_MS)
+
+        // Validate HTTP status before parsing
+        if (!gqlResponse.ok) {
+            const errMsg = `GraphQL HTTP ${gqlResponse.status}: ${gqlResponse.statusText}`
+            await nexusLogStore.addLog(`00px: ${errMsg}`, 'API_ERROR', undefined, campaignId)
+            return { success: false, error: errMsg }
+        }
 
         const data = await gqlResponse.json()
 
         if (data.errors) {
-            return { success: false, error: data.errors[0].message }
+            const errMsg = data.errors[0]?.message || 'GraphQL error desconhecido'
+            await nexusLogStore.addLog(`00px GraphQL: ${errMsg}`, 'API_ERROR', JSON.stringify(data.errors).substring(0, 500), campaignId)
+            return { success: false, error: errMsg }
         }
 
-        return { success: true, data: data.data.campaign }
+        // Validate response structure
+        if (!data.data?.campaign?.sites) {
+            const errMsg = 'Resposta GraphQL sem dados de campanha/sites'
+            await nexusLogStore.addLog(`00px: ${errMsg}`, 'API_ERROR', JSON.stringify(data.data).substring(0, 200), campaignId)
+            return { success: false, error: errMsg }
+        }
+
+        return {
+            success: true,
+            data: data.data.campaign as CampaignResponse,
+            fetchedAt: new Date().toISOString()
+        }
 
     } catch (error) {
-        console.error('Error fetching live metrics:', error)
-        return { success: false, error: 'Erro ao buscar métricas em tempo real' }
+        const isTimeout = error instanceof DOMException && error.name === 'AbortError'
+        const errMsg = isTimeout
+            ? 'Timeout: API 00px não respondeu em 15s'
+            : (error instanceof Error ? error.message : 'Erro desconhecido')
+
+        await nexusLogStore.addLog(`00px Fatal: ${errMsg}`, 'API_ERROR', undefined, campaignId)
+        return { success: false, error: errMsg }
     }
 }
 

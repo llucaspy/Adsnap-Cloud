@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useSyncExternalStore } from 'react'
 import { 
     Activity, 
     Calendar, 
@@ -9,16 +9,23 @@ import {
     TrendingUp, 
     ChevronDown,
     AlertCircle,
+    AlertTriangle,
     CheckCircle2,
     Clock,
+    RefreshCw,
     X,
-    Bell
+    Bell,
+    Zap,
+    Layout,
+    HelpCircle
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
+import { useRouter } from 'next/navigation'
 
-// --- Notifications System ---
+// --- Constants ---
+const REFRESH_INTERVAL = 120000 // 2 minutes
 const ALERT_SOUND_URL = 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3'
 
 type ToastType = 'critical' | 'warning' | 'info'
@@ -113,14 +120,41 @@ interface Campaign {
     id: string
     name: string
     advertiser: string
-    campaignName: string
+    campaignName?: string
     startDate: string
     endDate: string
     goalImpressions: number
     deliveredImpressions: number
+    pacing: number // Real-time pacing (0-2)
+    pacingPercent: number
     viewability: number
     status: 'on-track' | 'warning' | 'critical' | 'over'
     formats: Format[]
+    projection: {
+        completion: number
+        completionPercent: number
+        total: number
+        dailyRate: number
+    }
+    requiredDaily: number
+    currentDaily: number
+    pressure: number
+    timeProgress: number
+    deliveryProgress: number
+    isDelayedButHealthy: boolean
+    diagnostics: string[]
+    pi: string
+    manualDashboardUrl: string | null
+    smartAlert: string | null
+    score: number
+    apiAvailable?: boolean
+    fetchedAt?: string | null
+    bi: {
+        trend: 'up' | 'down' | 'neutral'
+        deliveredToday: number
+        recommendations: string[]
+        history: { date: string, value: number }[]
+    }
 }
 
 interface AdOpsStats {
@@ -133,7 +167,7 @@ interface AdOpsStats {
 
 // Helper functions (adapted from reference)
 function formatNumber(n: number): string {
-    return n.toLocaleString('pt-BR')
+    return Math.round(n).toLocaleString('pt-BR')
 }
 
 function getTimeElapsed(start: string, end: string): number {
@@ -150,22 +184,37 @@ function getDaysRemaining(end: string): number {
     return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)))
 }
 
-function getDailyNeeded(delivered: number, goal: number, end: string): number {
-    const days = getDaysRemaining(end)
-    if (days <= 0) return 0
-    const remaining = goal - delivered
-    return Math.max(0, Math.ceil(remaining / days))
-}
-
 export default function AdOpsDashboardView({ stats, campaigns }: { stats: AdOpsStats, campaigns: Campaign[] }) {
+    const router = useRouter()
+    const [isRefreshing, setIsRefreshing] = useState(false)
+
+    // Auto-refresh every 2 minutes
+    useEffect(() => {
+        const interval = setInterval(() => {
+            router.refresh()
+        }, REFRESH_INTERVAL)
+        return () => clearInterval(interval)
+    }, [router])
+
+    const handleManualRefresh = () => {
+        setIsRefreshing(true)
+        router.refresh()
+        setTimeout(() => setIsRefreshing(false), 2000)
+    }
+
     return (
         <ToastProvider>
-            <DashboardContent stats={stats} campaigns={campaigns} />
+            <DashboardContent 
+                stats={stats} 
+                campaigns={campaigns} 
+                onRefresh={handleManualRefresh}
+                isRefreshing={isRefreshing}
+            />
         </ToastProvider>
     )
 }
 
-function DashboardContent({ stats, campaigns }: { stats: AdOpsStats, campaigns: Campaign[] }) {
+function DashboardContent({ stats, campaigns, onRefresh, isRefreshing }: { stats: AdOpsStats, campaigns: Campaign[], onRefresh: () => void, isRefreshing: boolean }) {
     const [activeTab, setActiveTab] = useState<'tudo' | 'critical' | 'warning' | 'on-track' | 'over'>('tudo')
 
     const filteredCampaigns = activeTab === 'tudo'
@@ -183,16 +232,32 @@ function DashboardContent({ stats, campaigns }: { stats: AdOpsStats, campaigns: 
                         </div>
                         <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40">Painel de Performance AdOps</span>
                     </div>
-                    <h1 className="text-3xl font-black text-white tracking-tighter">Visão Geral de Entrega</h1>
+                    <div className="flex items-center gap-4">
+                        <h1 className="text-3xl font-black text-white tracking-tighter">Visão Geral de Entrega</h1>
+                        <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 group/live cursor-default">
+                           <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                           <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">Vivo (2m)</span>
+                        </div>
+                    </div>
                     <p className="text-xs text-white/40 mt-1 font-medium">
                         {stats.atRiskCount} campanhas requerem atenção imediata.
                     </p>
                 </div>
-                <div className="flex items-center gap-3 bg-zinc-900/50 border border-white/5 px-4 py-2 rounded-xl backdrop-blur-md">
-                  <span className="text-[10px] font-bold text-white/30 uppercase tracking-widest">Status Global:</span>
-                  <div className="flex items-center gap-1.5">
-                    <div className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse" />
-                    <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Saudável</span>
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={onRefresh}
+                    disabled={isRefreshing}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white/60 hover:bg-white/10 hover:text-white transition-all disabled:opacity-50"
+                  >
+                    <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
+                    {isRefreshing ? 'Atualizando...' : 'Atualizar Agora'}
+                  </button>
+                  <div className="flex items-center gap-3 bg-zinc-900/50 border border-white/5 px-4 py-2 rounded-xl backdrop-blur-md">
+                    <span className="text-[10px] font-bold text-white/30 uppercase tracking-widest">Status Global:</span>
+                    <div className="flex items-center gap-1.5">
+                      <div className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse" />
+                      <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Saudável</span>
+                    </div>
                   </div>
                 </div>
             </header>
@@ -307,14 +372,10 @@ const STATUS_STYLES: Record<string, { text: string, bg: string, border: string, 
 
 function CampaignRefCard({ campaign, index }: { campaign: Campaign, index: number }) {
     const [expanded, setExpanded] = useState(false)
-    const [mounted, setMounted] = useState(false)
+    const mounted = useSyncExternalStore(() => () => {}, () => true, () => false)
     const { addToast } = useToast()
     const lastStatus = React.useRef(campaign.status)
     
-    useEffect(() => {
-        setMounted(true)
-    }, [])
-
     // Monitor status changes for alerts
     useEffect(() => {
         if (!mounted) return
@@ -333,7 +394,7 @@ function CampaignRefCard({ campaign, index }: { campaign: Campaign, index: numbe
 
     const timeElapsed = mounted ? getTimeElapsed(campaign.startDate, campaign.endDate) : 0
     const margin = campaign.deliveredImpressions - campaign.goalImpressions
-    const dailyNeeded = mounted ? getDailyNeeded(campaign.deliveredImpressions, campaign.goalImpressions, campaign.endDate) : 0
+    const isFakeHealthy = campaign.status === 'on-track' && (campaign.projection?.completionPercent || 0) < 95
 
     const { text, bg, border, label, ring, shadow, glow } = STATUS_STYLES[campaign.status]
 
@@ -345,6 +406,8 @@ function CampaignRefCard({ campaign, index }: { campaign: Campaign, index: numbe
             y: ((e.clientY - rect.top) / rect.height) * 100
         })
     }
+    
+    const [showPacingHelp, setShowPacingHelp] = useState(false)
 
     // Use any for variants to avoid complex TargetAndTransition / TargetResolver type conflicts in React 19 + Framer Motion
     const containerVariants: any = {
@@ -373,6 +436,15 @@ function CampaignRefCard({ campaign, index }: { campaign: Campaign, index: numbe
                 duration: 0.5, 
                 ease: "circOut"
             } 
+        }
+    }
+
+    const formatLastUpdate = (iso: string | null | undefined) => {
+        if (!iso) return 'Desconhecido'
+        try {
+            return format(new Date(iso), "HH:mm 'de' dd/MM", { locale: ptBR })
+        } catch {
+            return 'Erro no formato'
         }
     }
 
@@ -413,12 +485,48 @@ function CampaignRefCard({ campaign, index }: { campaign: Campaign, index: numbe
                         <div className="text-3xl font-black text-zinc-900 tracking-tighter truncate uppercase leading-none mb-3 group-hover:text-zinc-950 transition-colors duration-500 group-hover:tracking-normal drop-shadow-sm">{campaign.name}</div>
                         <div className="flex items-center gap-3">
                              <div className={`h-2.5 w-2.5 rounded-full ${glow} shadow-[0_0_15px_rgba(0,0,0,0.1)] group-hover:animate-ping`} />
-                             <div className="text-xs font-black text-zinc-400 truncate uppercase tracking-[0.35em] group-hover:text-zinc-500 transition-colors">{campaign.advertiser}</div>
+                             <div className="text-xs font-black text-zinc-400 truncate uppercase tracking-[0.35em] group-hover:text-zinc-500 transition-colors">
+                                {campaign.advertiser} • PI {campaign.pi}
+                             </div>
+                             {campaign.projection && (
+                                <div className={`px-2 py-0.5 rounded-md text-[9px] font-black border ${campaign.projection.completionPercent < 95 ? 'bg-rose-500/10 border-rose-500/20 text-rose-500' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500'}`}>
+                                    PROJEÇÃO: {campaign.projection.completionPercent.toFixed(1)}%
+                                </div>
+                             )}
+                             <div className={`px-2 py-0.5 rounded-md text-[9px] font-black border ${campaign.score < 80 ? 'bg-rose-500/10 border-rose-500/20 text-rose-500' : 'bg-indigo-500/10 border-indigo-500/20 text-indigo-500'}`}>
+                                BI SCORE: {campaign.score}/100
+                             </div>
+                             {campaign.apiAvailable === false && (
+                                <div className="px-2 py-0.5 rounded-md text-[9px] font-black bg-rose-500 text-white animate-pulse">
+                                    🔌 API OFF
+                                </div>
+                             )}
+                             {campaign.fetchedAt && (
+                                <div className="text-[9px] font-bold text-zinc-400 uppercase tracking-tighter">
+                                    Atualizado: {formatLastUpdate(campaign.fetchedAt)}
+                                </div>
+                             )}
                         </div>
                     </div>
                     <div className="flex items-center gap-4 shrink-0">
-                        <div className={`px-5 py-2.5 rounded-2xl text-[10px] font-black tracking-[0.25em] border backdrop-blur-sm transition-all duration-500 shadow-sm group-hover:shadow-md ${bg} ${text} ${border}`}>
-                            {label}
+                        {campaign.manualDashboardUrl && (
+                            <a 
+                                href={campaign.manualDashboardUrl as string}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 text-[10px] font-black uppercase tracking-widest hover:bg-indigo-500/20 transition-all"
+                            >
+                                <Layout size={12} />
+                                Dashboard
+                            </a>
+                        )}
+                        <div className="flex items-center gap-2">
+                            <div className={`px-5 py-2.5 rounded-2xl text-[10px] font-black tracking-[0.25em] border backdrop-blur-sm transition-all duration-500 shadow-sm group-hover:shadow-md ${bg} ${text} ${border}`}>
+                                {label}
+                            </div>
+                            <div className="px-4 py-2.5 rounded-2xl bg-zinc-900 text-zinc-50 text-[10px] font-black uppercase tracking-widest border border-zinc-800 shadow-xl group-hover:bg-emerald-600 transition-colors duration-500">
+                                Projeção: {campaign.projection.completionPercent.toFixed(1)}%
+                            </div>
                         </div>
                         <div className="w-10 h-10 rounded-full bg-zinc-50 flex items-center justify-center border border-zinc-100 group-hover:bg-zinc-900 group-hover:text-white transition-all duration-500">
                             <ChevronDown className={`w-5 h-5 transition-transform duration-700 cubic-bezier(0.4, 0, 0.2, 1) ${expanded ? 'rotate-180' : ''}`} />
@@ -426,13 +534,111 @@ function CampaignRefCard({ campaign, index }: { campaign: Campaign, index: numbe
                     </div>
                 </div>
 
+                {/* Alerta de Saúde (Fake Healthy) */}
+                {isFakeHealthy && (
+                    <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-700 text-[10px] font-black uppercase tracking-wider flex items-center gap-2">
+                        <AlertTriangle size={14} className="text-amber-500" />
+                        Atenção: Campanha parece saudável mas está com projeção baixa
+                    </div>
+                )}
+
+                {/* Smart Alert (PROMINENT BI INSIGHT) */}
+                {campaign.smartAlert && (
+                    <motion.div 
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="p-4 rounded-3xl bg-amber-500/10 border border-amber-500/20 text-amber-700 text-[11px] font-black uppercase tracking-wider flex items-start gap-3 shadow-[0_0_20px_rgba(245,158,11,0.05)]"
+                    >
+                        <AlertCircle size={16} className="shrink-0 mt-0.5 text-amber-500" />
+                        {campaign.smartAlert}
+                    </motion.div>
+                )}
+
+                {/* Intelligent Insights / Diagnostics */}
+                {campaign.diagnostics && campaign.diagnostics.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                        {campaign.diagnostics.map((d, i) => (
+                            <div key={i} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-100/50 border border-zinc-200 text-[10px] font-black text-zinc-500 uppercase tracking-wider">
+                                <AlertCircle size={10} className={d.includes('Risco') || d.includes('Atraso') ? 'text-rose-600' : 'text-orange-600'} />
+                                {d}
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {/* BI Agent Recommendations */}
+                {campaign.bi?.recommendations && campaign.bi.recommendations.length > 0 && (
+                    <div className="space-y-2 p-4 rounded-2xl bg-indigo-50/50 border border-indigo-100/50 block">
+                        <div className="flex items-center gap-2 text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-1">
+                            <Zap size={10} className="fill-indigo-500" />
+                            Insight do Agente BI
+                        </div>
+                        {campaign.bi.recommendations.map((rec, i) => (
+                            <div key={i} className="text-xs font-bold text-indigo-900 border-l-2 border-indigo-200 pl-3 py-0.5 leading-relaxed">
+                                {rec}
+                            </div>
+                        ))}
+                    </div>
+                )}
+
+                {/* Pacing Info Box */}
+                <AnimatePresence>
+                    {showPacingHelp && (
+                        <motion.div 
+                            initial={{ opacity: 0, height: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, height: 'auto', scale: 1 }}
+                            exit={{ opacity: 0, height: 0, scale: 0.95 }}
+                            className="bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-100 p-4 rounded-3xl mb-4 leading-relaxed relative overflow-hidden shadow-2xl z-20"
+                        >
+                            <div className="font-bold mb-2 flex items-center gap-2 text-zinc-100">
+                                <HelpCircle size={14} className="text-emerald-400" />
+                                Como ler esta métrica?
+                            </div>
+                            <p className="mb-2 text-zinc-400">
+                                Esta barra mostra o <strong>Pacing Ratio</strong>: o quanto você entregou comparado ao que era esperado para o tempo decorrido.
+                            </p>
+                            <div className="grid grid-cols-2 gap-3 mt-3">
+                                <div className="space-y-1">
+                                    <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" /> <span>95-105%: No prazo</span></div>
+                                    <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.4)]" /> <span>80-95%: Atenção</span></div>
+                                </div>
+                                <div className="space-y-1">
+                                    <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.4)]" /> <span>&lt; 80%: Crítico</span></div>
+                                    <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.4)]" /> <span>&gt; 105%: Over</span></div>
+                                </div>
+                            </div>
+                            <p className="mt-3 pt-3 border-t border-zinc-800 text-[10px] text-zinc-500 italic">
+                                A <strong>linha branca</strong> vertical indica o progresso do cronograma hoje.
+                            </p>
+                            <button 
+                                onClick={() => setShowPacingHelp(false)}
+                                className="absolute top-3 right-3 p-1 hover:bg-zinc-800 rounded-full transition-colors text-zinc-500"
+                            >
+                                <X size={14} />
+                            </button>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
                 {/* Pacing Indicator */}
                 <div className="space-y-4 bg-zinc-50/50 p-6 rounded-3xl border border-zinc-100/50 relative group/pacing overflow-hidden transition-all duration-500 hover:bg-zinc-50 hover:border-zinc-200">
                     <div className="flex justify-between items-center text-[10px] font-black tracking-[0.2em] uppercase mb-1 relative z-10">
-                        <span className="text-zinc-400">Entrega vs. Pacing Esperado</span>
+                        <span className="text-zinc-400 flex items-center gap-1.5">
+                            Progresso vs Tempo
+                            <button 
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowPacingHelp(!showPacingHelp);
+                                }}
+                                className="p-1.5 hover:bg-zinc-200 rounded-full transition-colors"
+                                title="O que é isso?"
+                            >
+                                <HelpCircle size={24} className="text-zinc-500" />
+                            </button>
+                        </span>
                         <div className="flex items-center gap-2">
                              <TrendingUp size={14} className={text} />
-                            <span className={`${text} font-black text-xl tabular-nums`}>{((campaign.deliveredImpressions / campaign.goalImpressions) * 100).toFixed(1)}%</span>
+                            <span className={`${text} font-black text-xl tabular-nums`}>{campaign.timeProgress.toFixed(1)}%</span>
                         </div>
                     </div>
                     <div className="h-4 w-full bg-zinc-200/50 rounded-full overflow-hidden flex items-center px-1 relative">
@@ -445,8 +651,13 @@ function CampaignRefCard({ campaign, index }: { campaign: Campaign, index: numbe
                             />
                             {/* Glassy track */}
                             <div 
-                                className={`h-full rounded-full transition-all duration-2500 cubic-bezier(0.16, 1, 0.3, 1) relative z-10 shadow-[inner_0_2px_8px_rgba(0,0,0,0.1)] ${campaign.status === 'on-track' ? 'bg-linear-to-r from-emerald-400 via-emerald-500 to-emerald-600' : campaign.status === 'critical' ? 'bg-linear-to-r from-rose-400 via-rose-500 to-rose-600' : 'bg-linear-to-r from-orange-400 via-orange-500 to-orange-600'}`}
-                                style={{ width: `${Math.min((campaign.deliveredImpressions / campaign.goalImpressions) * 100, 100)}%` }}
+                                className={`h-full rounded-full transition-all duration-2500 cubic-bezier(0.16, 1, 0.3, 1) relative z-10 shadow-[inner_0_2px_8px_rgba(0,0,0,0.1)] ${
+                                    campaign.status === 'on-track' ? 'bg-linear-to-r from-emerald-400 via-emerald-500 to-emerald-600' : 
+                                    campaign.status === 'over' ? 'bg-linear-to-r from-blue-400 via-blue-500 to-blue-600' :
+                                    campaign.status === 'critical' ? 'bg-linear-to-r from-rose-400 via-rose-500 to-rose-600' : 
+                                    'bg-linear-to-r from-orange-400 via-orange-500 to-orange-600'
+                                }`}
+                                style={{ width: `${Math.min(campaign.deliveryProgress, 100)}%` }}
                             >
                                 <div className="absolute inset-0 bg-linear-to-r from-transparent via-white/50 to-transparent animate-progress-glow" />
                                 {/* End shimmer live pulse */}
@@ -529,64 +740,127 @@ function CampaignRefCard({ campaign, index }: { campaign: Campaign, index: numbe
                                 </div>
                                 <div className="space-y-2">
                                     <div className="flex items-center gap-2 text-zinc-400 font-bold">
+                                        <Activity size={14} />
+                                        <span className="text-[10px] uppercase tracking-widest">Pressão</span>
+                                    </div>
+                                    <div className={`text-sm font-black ${campaign.pressure > 1.2 ? 'text-rose-600' : campaign.pressure > 1.15 ? 'text-orange-600' : 'text-emerald-600'}`}>
+                                        {campaign.pressure.toFixed(2)}x
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <div className="flex items-center gap-2 text-zinc-400 font-bold">
                                         <Clock size={14} />
                                         <span className="text-[10px] uppercase tracking-widest">Tempo</span>
                                     </div>
                                     <div className="text-xs font-semibold text-zinc-600">{mounted ? getDaysRemaining(campaign.endDate) : '--'} dias restantes</div>
                                 </div>
-                                {margin < 0 && (
+                                {campaign.requiredDaily > 0 && margin >= 0 && (
                                     <div className="space-y-2">
-                                        <div className="flex items-center gap-2 text-rose-500/60 font-bold">
-                                            <TrendingUp size={14} />
-                                            <span className="text-[10px] uppercase tracking-widest">Entrega/Dia</span>
+                                        <div className="flex items-center gap-2 text-zinc-400 font-bold">
+                                            <Target size={14} />
+                                            <span className="text-[10px] uppercase tracking-widest">Meta/Dia</span>
                                         </div>
-                                        <div className="text-xs font-bold text-rose-500 tabular-nums">
-                                            {formatNumber(dailyNeeded)}/dia
+                                        <div className="text-xs font-bold text-zinc-900 tabular-nums">
+                                            {formatNumber(campaign.requiredDaily)}/dia
+                                        </div>
+                                    </div>
+                                )}
+
+                                {campaign.bi && (
+                                    <div className="space-y-2 col-span-2 pt-2 border-t border-zinc-100">
+                                        <div className="flex justify-between items-center">
+                                            <div className="flex items-center gap-2 text-zinc-400 font-bold">
+                                                <TrendingUp size={14} className={campaign.bi.trend === 'up' ? 'text-emerald-500' : campaign.bi.trend === 'down' ? 'text-rose-500' : 'text-zinc-400'} />
+                                                <span className="text-[10px] uppercase tracking-widest">Entrega Hoje</span>
+                                            </div>
+                                            <div className="text-xs font-black text-zinc-900">
+                                                {formatNumber(campaign.bi.deliveredToday)}
+                                                <span className={`ml-1 text-[9px] ${campaign.bi.trend === 'up' ? 'text-emerald-500' : 'text-rose-500'}`}>
+                                                    {campaign.bi.trend === 'up' ? '▲ Alta' : campaign.bi.trend === 'down' ? '▼ Baixa' : '— Estável'}
+                                                </span>
+                                            </div>
                                         </div>
                                     </div>
                                 )}
                             </div>
 
-                            {/* Formats Table */}
+                            {/* Recovery Plan Section */}
                             <div className="space-y-4">
                                 <div className="flex items-center justify-between px-1">
-                                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-[0.22em]">Detalhamento por Formato</span>
-                                    <span className="text-[10px] font-semibold text-zinc-300 uppercase">{campaign.formats.length} formatos</span>
+                                    <span className="text-[10px] font-black text-zinc-900 uppercase tracking-[0.25em] flex items-center gap-2">
+                                        <Zap size={12} className="text-emerald-500 fill-emerald-500" />
+                                        Plano de Recuperação & Velocidade
+                                    </span>
+                                    <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg uppercase tracking-widest border border-emerald-100">BI Insight</span>
                                 </div>
                                 
-                                <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-lg">
-                                    <table className="w-full text-left border-collapse">
-                                        <thead>
-                                            <tr className="bg-zinc-50 border-b border-zinc-100 font-mono text-[9px] font-black text-zinc-400 uppercase tracking-widest">
-                                                <th className="px-5 py-4">Formato/Site</th>
-                                                <th className="px-5 py-4 text-right">Meta</th>
-                                                <th className="px-5 py-4 text-right">Entrega</th>
-                                                <th className="px-5 py-4 text-right">Pacing</th>
-                                                <th className="px-5 py-4 text-right">View.</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-zinc-50 font-mono text-[11px]">
-                                            {campaign.formats.map((f, fi) => (
-                                                <tr key={fi} className="hover:bg-zinc-50/80 transition-colors group/row">
-                                                    <td className="px-5 py-3.5 font-bold text-zinc-700 group-hover/row:text-zinc-900 transition-colors">
-                                                        {f.name}
-                                                    </td>
-                                                    <td className="px-5 py-3.5 text-right text-zinc-400 font-medium">
-                                                        {formatNumber(f.goal)}
-                                                    </td>
-                                                    <td className="px-5 py-3.5 text-right font-black text-zinc-900 uppercase group-hover/row:text-emerald-600 transition-colors">
-                                                        {formatNumber(f.delivered)}
-                                                    </td>
-                                                    <td className={`px-5 py-3.5 text-right font-black ${f.pacing < 50 ? 'text-rose-600' : f.pacing < 90 ? 'text-orange-600' : 'text-emerald-600'}`}>
-                                                        {f.pacing.toFixed(1)}%
-                                                    </td>
-                                                    <td className="px-5 py-3.5 text-right font-bold text-zinc-400">
-                                                        {f.viewability.toFixed(0)}%
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    {/* Ritmo Atual */}
+                                    <div className="p-4 rounded-2xl bg-white border border-zinc-100 shadow-sm hover:shadow-md transition-shadow group/v">
+                                        <div className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-1 group-hover/v:text-zinc-600 transition-colors">Ritmo Real (Média)</div>
+                                        <div className="text-xl font-black text-zinc-900 tabular-nums">{formatNumber(campaign.currentDaily)}</div>
+                                        <div className="text-[9px] text-zinc-400 font-medium mt-1">impres./dia registrados</div>
+                                    </div>
+
+                                    {/* Requisito para Meta */}
+                                    <div className="p-4 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-xl relative overflow-hidden group/v">
+                                        <div className="absolute top-0 right-0 p-2 opacity-10">
+                                            <Target size={32} className="text-white" />
+                                        </div>
+                                        <div className="relative z-10">
+                                            <div className="text-[9px] font-black text-emerald-400/60 uppercase tracking-widest mb-1">Requisito Meta Final</div>
+                                            <div className="text-xl font-black text-white tabular-nums">{formatNumber(campaign.requiredDaily)}</div>
+                                            <div className="text-[9px] text-white/40 font-medium mt-1">mínimo diário necessário</div>
+                                        </div>
+                                    </div>
+
+                                    {/* Esforço/Pressão */}
+                                    <div className={`p-4 rounded-2xl border shadow-sm transition-all group/v ${
+                                        campaign.pressure > 1.2 ? 'bg-rose-50 border-rose-100' : 
+                                        campaign.pressure > 1.05 ? 'bg-orange-50 border-orange-100' : 
+                                        'bg-emerald-50 border-emerald-100'
+                                    }`}>
+                                        <div className={`text-[9px] font-black uppercase tracking-widest mb-1 ${
+                                            campaign.pressure > 1.2 ? 'text-rose-400' : 
+                                            campaign.pressure > 1.05 ? 'text-orange-400' : 
+                                            'text-emerald-400'
+                                        }`}>Esforço de Entrega</div>
+                                        <div className={`text-xl font-black tabular-nums ${
+                                            campaign.pressure > 1.2 ? 'text-rose-600' : 
+                                            campaign.pressure > 1.05 ? 'text-orange-600' : 
+                                            'text-emerald-600'
+                                        }`}>
+                                            {campaign.pressure.toFixed(2)}x
+                                        </div>
+                                        <div className={`text-[9px] font-medium mt-1 ${
+                                            campaign.pressure > 1.2 ? 'text-rose-400/80' : 
+                                            campaign.pressure > 1.05 ? 'text-orange-400/80' : 
+                                            'text-emerald-400/80'
+                                        }`}>
+                                            {campaign.pressure > 1.0 ? 'necessário acelerar entrega' : 'ritmo atual é suficiente'}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Smart Recommendation Bar */}
+                                <div className="p-4 rounded-2xl bg-zinc-50 border border-zinc-100 flex items-start gap-3">
+                                    <div className={`p-2 rounded-xl shrink-0 ${
+                                        campaign.pressure > 1.2 ? 'bg-rose-500 text-white' : 
+                                        campaign.pressure > 1.05 ? 'bg-orange-500 text-white' : 
+                                        'bg-emerald-500 text-white'
+                                    }`}>
+                                        <AlertCircle size={16} />
+                                    </div>
+                                    <div>
+                                        <div className="text-[10px] font-black text-zinc-900 uppercase tracking-widest mb-0.5">Diagnóstico de Velocidade</div>
+                                        <p className="text-[11px] text-zinc-500 font-medium leading-relaxed">
+                                            {campaign.pressure > 1.2 
+                                                ? `A campanha está severamente atrasada. É necessário aumentar a entrega diária em ${( (campaign.pressure - 1) * 100 ).toFixed(0)}% imediatamente para evitar sub-entrega.` 
+                                                : campaign.pressure > 1.0 
+                                                ? `A entrega está ligeiramente abaixo do ideal. Um ajuste de ${( (campaign.pressure - 1) * 100 ).toFixed(0)}% na velocidade diária garante o atingimento da meta.`
+                                                : `Campanha com vitalidade excelente. O ritmo atual de ${formatNumber(campaign.currentDaily)}/dia supera o requisito de ${formatNumber(campaign.requiredDaily)}/dia.`}
+                                        </p>
+                                    </div>
                                 </div>
                             </div>
                         </div>

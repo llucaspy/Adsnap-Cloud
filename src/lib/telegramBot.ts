@@ -202,7 +202,8 @@ Selecione uma opção no menu abaixo ou use os botões fixos:
                 [btn('⚙️ Gerenciar Campanhas', 'menu:gerenciar')],
                 [btn('📚 Books / Comprovantes', 'menu:books')],
                 [btn('⚠️ Quarentena', 'menu:quarentena'), btn('📜 Logs', 'menu:logs')],
-                [btn('💾 Storage', 'menu:storage'), btn('🔔 Alertas', 'menu:alerts')],
+                [btn('🔌 Erros API', 'menu:api_errors'), btn('🔔 Alertas', 'menu:alerts')],
+                [btn('💾 Storage', 'menu:storage')],
             ]),
             ...getPersistentMenu() // Add both for first message
         },
@@ -224,7 +225,8 @@ Selecione uma opção:
         [btn('⚙️ Gerenciar Campanhas', 'menu:gerenciar')],
         [btn('📚 Books / Comprovantes', 'menu:books')],
         [btn('⚠️ Quarentena', 'menu:quarentena'), btn('📜 Logs', 'menu:logs')],
-        [btn('💾 Storage', 'menu:storage'), btn('🔔 Alertas', 'menu:alerts')],
+        [btn('🔌 Erros API', 'menu:api_errors'), btn('🔔 Alertas', 'menu:alerts')],
+        [btn('💾 Storage', 'menu:storage')],
     ]))
 }
 
@@ -253,6 +255,7 @@ async function handleCallback(query: any) {
         if (data === 'menu:fila') return await cbFila(chatId, msgId)
         if (data === 'menu:quarentena') return await cbQuarentena(chatId, msgId)
         if (data === 'menu:logs') return await cbLogs(chatId, msgId)
+        if (data === 'menu:api_errors') return await cbApiErrors(chatId, msgId)
         if (data === 'menu:storage') return await cbStorage(chatId, msgId)
         if (data === 'menu:gerenciar') return await cbGerenciar(chatId, msgId)
         if (data === 'menu:books') return await cbBooks(chatId, msgId)
@@ -529,6 +532,75 @@ async function cbLogs(chatId: string, msgId: number, isNewMsg: boolean = false) 
         }
 
         text += `${icon} <code>${time}</code> ${esc(resolvedMsg.substring(0, 100))}\n`
+    }
+
+    if (isNewMsg) {
+        await sendMessage(chatId, text, { reply_markup: markup })
+    } else {
+        await editMsg(chatId, msgId, text, markup)
+    }
+}
+
+// =============================================================================
+// 🔌 API ERRORS — Erros da API 00px separados dos logs gerais
+// =============================================================================
+async function cbApiErrors(chatId: string, msgId: number, isNewMsg: boolean = false) {
+    const { data: logs } = await supabase
+        .from('NexusLog')
+        .select('level, message, details, campaignId, createdAt')
+        .eq('level', 'API_ERROR')
+        .order('createdAt', { ascending: false })
+        .limit(15)
+
+    const markup = kb([[btn('🔄 Atualizar', 'menu:api_errors'), btn('◀️ Menu', 'menu:main')]])
+
+    if (!logs || logs.length === 0) {
+        const emptyText = '✅ <b>Nenhum erro de API registrado!</b>\n\n<i>Todos os endpoints estão operando normalmente.</i>'
+        if (isNewMsg) return await sendMessage(chatId, emptyText, { reply_markup: markup })
+        return await editMsg(chatId, msgId, emptyText, markup)
+    }
+
+    // Resolve campaign IDs to names
+    const campaignIdSet = new Set<string>()
+    for (const log of logs) {
+        if (log.campaignId) campaignIdSet.add(log.campaignId)
+    }
+
+    const campaignNamesMap = new Map<string, string>()
+    if (campaignIdSet.size > 0) {
+        const { data: camps } = await supabase.from('Campaign').select('id, client, pi').in('id', [...campaignIdSet])
+        for (const c of (camps || [])) {
+            campaignNamesMap.set(c.id, `${c.client} (PI: ${c.pi})`)
+        }
+    }
+
+    // Count errors in last 24h
+    const now = Date.now()
+    const last24h = logs.filter(l => now - new Date(l.createdAt).getTime() < 24 * 60 * 60 * 1000).length
+    const lastHour = logs.filter(l => now - new Date(l.createdAt).getTime() < 60 * 60 * 1000).length
+
+    let text = `🔌 <b>ERROS DE API (00px)</b>\n`
+    text += `⏱ Última hora: <b>${lastHour}</b> | 24h: <b>${last24h}</b>\n\n`
+
+    for (const log of logs.slice(0, 10)) {
+        const time = new Date(log.createdAt).toLocaleString('pt-BR', { 
+            day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+            timeZone: 'America/Sao_Paulo'
+        })
+        const campaign = log.campaignId ? campaignNamesMap.get(log.campaignId) || log.campaignId.substring(0, 8) : '—'
+        const msg = log.message.substring(0, 80)
+
+        text += `🔴 <code>${time}</code>\n`
+        text += `   📌 ${esc(campaign)}\n`
+        text += `   ${esc(msg)}\n`
+        if (log.details) {
+            text += `   <i>${esc(log.details.substring(0, 60))}${log.details.length > 60 ? '…' : ''}</i>\n`
+        }
+        text += '\n'
+    }
+
+    if (logs.length > 10) {
+        text += `<i>...e mais ${logs.length - 10} erros recentes</i>\n`
     }
 
     if (isNewMsg) {

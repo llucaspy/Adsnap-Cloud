@@ -10,36 +10,13 @@ import {
     RefreshCw,
     ExternalLink
 } from 'lucide-react'
-import { getLiveMetrics } from '@/app/monitoring/actions'
+import { getLiveMetrics, type CampaignResponse, type SiteData } from '@/app/monitoring/actions'
 import { useCallback } from 'react'
 
-interface LiveMetricsProps {
-    campaignId: string
-    campaignName: string
-}
+// Removed local interfaces in favor of imported ones from monitoring/actions.ts
 
-interface SiteData {
-    site_id: number
-    site_name: string
-    purchases?: {
-        cpm?: {
-            quantity?: number
-            total_data?: {
-                valids?: number
-                viewability?: number
-                impressions?: number
-            }
-        }
-    }
-}
-
-interface MonitoringData {
-    campaign_id: number
-    sites: SiteData[]
-}
-
-export function LiveMonitoringDashboard({ campaignId, campaignName }: LiveMetricsProps) {
-    const [data, setData] = useState<MonitoringData | null>(null)
+export function LiveMonitoringDashboard({ campaignId, campaignName }: { campaignId: string, campaignName: string }) {
+    const [data, setData] = useState<CampaignResponse | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
@@ -48,7 +25,7 @@ export function LiveMonitoringDashboard({ campaignId, campaignName }: LiveMetric
         if (!isInitial) setLoading(true)
         const result = await getLiveMetrics(campaignId)
         if (result.success) {
-            setData(result.data)
+            setData(result.data || null)
             setError(null)
             setLastUpdate(new Date())
         } else {
@@ -130,12 +107,26 @@ export function LiveMonitoringDashboard({ campaignId, campaignName }: LiveMetric
 }
 
 function SiteCard({ site }: { site: SiteData }) {
-    const cpm = site.purchases?.cpm || {}
-    const total = cpm.total_data || {}
-    const contratado = cpm.quantity || 0
-    const entregue = total.valids || 0
-    const viewability = total.viewability || 0
+    // A site can have multiple purchases. We aggregate them for this summary view.
+    const purchases = Array.isArray(site.purchases) ? site.purchases : [site.purchases].filter(Boolean)
     
+    let contratado = 0
+    let entregue = 0
+    let sumViewability = 0
+    let countWithData = 0
+
+    purchases.forEach(p => {
+        if (!p?.cpm) return
+        const td = p.cpm.total_data
+        contratado += (p.cpm.quantity || 0)
+        if (td) {
+            entregue += (td.impressions ?? td.valids ?? 0)
+            sumViewability += (td.viewability || 0)
+            countWithData++
+        }
+    })
+
+    const viewability = countWithData > 0 ? sumViewability / countWithData : 0
     const ritmo = contratado > 0 ? (entregue / contratado) * 100 : 0
     const faltam = Math.max(0, contratado - entregue)
 
