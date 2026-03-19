@@ -63,7 +63,7 @@ const RESPONSES = {
         "Pense em mim como o cérebro central do Adsnap. Eu cuido da complexidade para você focar no resultado."
     ],
     HELP: [
-        "Posso ajudar com:\n- Capturas: 'Tirar print do PI 991' ou 'Capturar tudo'\n- Gestão: 'Arquivar PI 123', 'Mudar link do PI 456'\n- Formatos: 'Adicionar formato Super Banner 970x250 com seletor .banner'\n- Status: 'Resumo geral'",
+        "Posso ajudar com:\n- Capturas: 'Tirar print do PI 991' ou 'Capturar tudo'\n- Gestão: 'Arquivar PI 123', 'Mudar link do PI 456'\n- Formatos: 'Adicionar formato Super Banner 970x250 com seletor .banner'\n- E-mails: 'Qual foi o último e-mail?' ou 'Verificar mensagens'\n- Status: 'Resumo geral'",
         "Tente comandos como: 'Como está o sistema?', 'Novo formato Billboard 970x250 .billboard', ou 'Restaurar PI 550'.",
         "Você pode me pedir para gerenciar campanhas, links, capturas e agora também configurar novos formatos de banner."
     ],
@@ -86,6 +86,11 @@ const RESPONSES = {
         "Protocolo de exportação ativado. Gerando ZIP dos prints de {date}...",
         "Entendido. Iniciando compilação de evidências para o dia {date}. O download começará em instantes.",
         "Acesso aos arquivos liberado. Preparando pacote de prints do dia {date}."
+    ],
+    SUCCESS_EMAIL: [
+        "O último e-mail relevante que recebi foi de **{from}** sobre **{subject}**.",
+        "Analisei sua caixa de entrada. O contato mais recente foi de **{from}** com o assunto: *{subject}*.",
+        "Encontrei uma conversa recente: **{from}** enviou um e-mail sobre '{subject}'."
     ]
 }
 
@@ -466,6 +471,36 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
             return {
                 message: `Status do Sistema:\n- ${count} Campanhas Ativas\n- ${scheduled} Agendadas\n- ${todaysCaptures} Capturas hoje.\n\nSistemas operando normalmente.`,
                 success: true
+            }
+        }
+
+        // ---------------------------------------------------------
+        // 10. CONSULTAR E-MAILS (NOVO)
+        // ---------------------------------------------------------
+        if (text.includes('email') || text.includes('e-mail') || text.includes('gmail') || text.includes('mensagem')) {
+            const lastEmail = await prisma.nexusLog.findFirst({
+                where: { level: 'EMAIL_ALERT' as any },
+                orderBy: { createdAt: 'desc' }
+            })
+
+            if (lastEmail) {
+                try {
+                    const details = JSON.parse(lastEmail.details || '{}')
+                    return {
+                        message: getRandom(RESPONSES.SUCCESS_EMAIL)
+                            .replace('{from}', details.from || 'Remetente Desconhecido')
+                            .replace('{subject}', details.subject || 'Sem Assunto') + 
+                            `\n\nSnippet: *"${details.snippet}"*`,
+                        success: true,
+                        data: details
+                    }
+                } catch {
+                    return { message: "Encontrei um alerta de e-mail, mas os detalhes estão corrompidos.", success: false }
+                }
+            }
+            return { 
+                message: "Não encontrei nenhum e-mail relevante processado recentemente. \n\n*Dica: Certifique-se de que o e-mail não tenha sido lido ainda e que o worker esteja rodando (pode levar alguns minutos para processar).* ", 
+                success: true 
             }
         }
 

@@ -1,11 +1,62 @@
-import 'dotenv/config'
+import dotenv from 'dotenv'
+import path from 'path'
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local') })
 import prisma from '../lib/prisma'
 import { processCampaign } from '../lib/captureService'
 import { nexusLogStore } from '../lib/nexusLogStore'
+import { getGmailClient, fetchRecentEmails } from '../lib/gmail'
+import { classifyEmail } from '../lib/gemini'
 
 async function worker() {
     console.log('[Nexus Worker] Iniciando processamento de fila...')
     await nexusLogStore.addLog('Nexus Worker: Iniciando ciclo de capturas', 'SYSTEM')
+    
+    // --- 0. PRIORIDADE: Gmail Monitoring & AI Filtering ---
+    console.log('[Nexus Worker] Verificando novos e-mails via Gmail API...')
+    try {
+        const credentials = {
+            web: {
+                client_id: process.env.GMAIL_CLIENT_ID,
+                client_secret: process.env.GMAIL_CLIENT_SECRET,
+                redirect_uris: [process.env.GMAIL_REDIRECT_URI]
+            }
+        }
+        const token = { refresh_token: process.env.GMAIL_REFRESH_TOKEN }
+        
+        if (credentials.web.client_id && token.refresh_token) {
+            const gmail = await getGmailClient(credentials, token)
+            const emails = await fetchRecentEmails(gmail)
+            const whitelist = (process.env.GMAIL_WHITELIST || '').split(',').map(e => e.trim().toLowerCase())
+            
+            console.log(`[Nexus Worker] ${emails.length} novos e-mails encontrados para análise.`)
+            
+            for (const email of emails) {
+                console.log(`[Nexus Worker] Analisando e-mail: "${email.subject}" de ${email.from}`)
+                const fromEmail = email.from.match(/<(.+?)>/)?.[1] || email.from.toLowerCase()
+                const isWhitelisted = whitelist.some(w => w && fromEmail.includes(w))
+                
+                const isConversation = isWhitelisted || await classifyEmail(email.subject, email.snippet, email.from)
+                
+                if (isConversation) {
+                    console.log(`[Nexus Worker] 📢 CONVERSA DETECTADA (Nexus AI: YES) de: ${email.from}`)
+                    await nexusLogStore.addLog(
+                        `📩 Nova conversa detectada: "${email.subject}" de ${email.from}`, 
+                        'EMAIL_ALERT',
+                        JSON.stringify({
+                            from: email.from,
+                            subject: email.subject,
+                            snippet: email.snippet,
+                            threadId: email.threadId
+                        })
+                    )
+                } else {
+                    console.log(`[Nexus Worker] 🔇 E-mail ignorado (Nexus AI: NO) de: ${email.from}`)
+                }
+            }
+        }
+    } catch (gmailErr) {
+        console.error('[Nexus Worker] Erro no monitoramento do Gmail:', gmailErr)
+    }
 
     try {
         // 1. Auto-enquadramento (Scheduling Check)
@@ -160,6 +211,7 @@ async function worker() {
             console.error('[Nexus Worker] Erro no módulo de email dispatch:', emailErr)
             await nexusLogStore.addLog('Nexus Worker: Erro ao processar disparos de email', 'ERROR')
         }
+
 
     } catch (error) {
         console.error('[Nexus Worker] Erro fatal no worker:', error)

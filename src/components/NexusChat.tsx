@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { Sparkles, Send, X, Bot, User, MessageSquare, Zap, Search, Archive, RefreshCw, Trash2, Camera, Download } from 'lucide-react'
+import { Sparkles, Send, X, Bot, User, MessageSquare, Zap, Search, Archive, RefreshCw, Trash2, Camera, Download, Mail, ExternalLink } from 'lucide-react'
 
 import { processNexusCommand } from '../app/aiActions'
 import { NexusRegistrationPreview } from './NexusRegistrationPreview'
@@ -240,12 +240,40 @@ export function NexusChat() {
                                 logs.map((log, i) => (
                                     <div key={i} className="font-mono text-[9px] border-l border-white/10 pl-3 py-1">
                                         <div className="flex items-center gap-2 mb-0.5">
-                                            <span className={`text-[8px] font-bold ${log.level === 'SUCCESS' ? 'text-green-400' : log.level === 'ERROR' ? 'text-red-400' : 'text-white/50'}`}>
+                                            <span className={`text-[8px] font-bold ${
+                                                log.level === 'SUCCESS' ? 'text-green-400' : 
+                                                log.level === 'ERROR' ? 'text-red-400' : 
+                                                log.level === 'EMAIL_ALERT' ? 'text-indigo-400' :
+                                                'text-white/50'
+                                            }`}>
                                                 [{log.level}]
                                             </span>
                                             <span className="text-white/20">{new Date(log.createdAt).toLocaleTimeString()}</span>
                                         </div>
-                                        <p className="text-white/60 leading-relaxed font-medium">{log.message}</p>
+                                        <div className="flex items-start gap-2">
+                                            {log.level === 'EMAIL_ALERT' && <Mail size={12} className="text-indigo-400 mt-1 shrink-0" />}
+                                            <div className="flex-1 min-w-0">
+                                                <p className={`text-white/60 leading-relaxed font-medium ${log.level === 'EMAIL_ALERT' ? 'text-indigo-100/80' : ''}`}>{log.message}</p>
+                                                {log.level === 'EMAIL_ALERT' && log.details && (() => {
+                                                    try {
+                                                        const details = JSON.parse(log.details)
+                                                        return (
+                                                            <div className="mt-2 p-2 rounded-lg bg-white/5 border border-white/10 space-y-1">
+                                                                <div className="text-[10px] text-white/40 italic line-clamp-2">&quot;{details.snippet}&quot;</div>
+                                                                <a 
+                                                                    href={`https://mail.google.com/mail/u/0/#all/${details.threadId}`} 
+                                                                    target="_blank" 
+                                                                    rel="noopener noreferrer"
+                                                                    className="flex items-center gap-1 text-[9px] font-black text-indigo-400 hover:text-indigo-300 transition-colors uppercase tracking-widest mt-1"
+                                                                >
+                                                                    Responder <ExternalLink size={8} />
+                                                                </a>
+                                                            </div>
+                                                        )
+                                                    } catch { return null }
+                                                })()}
+                                            </div>
+                                        </div>
                                     </div>
                                 ))
                             )}
