@@ -13,6 +13,7 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@prisma/client": "^5.22.0",
     "@supabase/supabase-js": "^2.97.0",
     "@types/bcryptjs": "^2.4.6",
@@ -21,6 +22,7 @@
     "date-fns": "^4.1.0",
     "dotenv": "^16.4.7",
     "framer-motion": "^12.34.3",
+    "googleapis": "^171.4.0",
     "jose": "^6.1.3",
     "jszip": "^3.10.1",
     "lucide-react": "^0.563.0",
@@ -28,6 +30,8 @@
     "pg": "^8.18.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "resend": "^6.9.2",
     "three": "^0.183.2"
   },

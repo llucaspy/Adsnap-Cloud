@@ -1,21 +1,90 @@
-import 'dotenv/config'
+import dotenv from 'dotenv'
+import path from 'path'
+dotenv.config({ path: path.resolve(process.cwd(), '.env.local') })
 import prisma from '../lib/prisma'
 import { processCampaign } from '../lib/captureService'
 import { nexusLogStore } from '../lib/nexusLogStore'
+import { getGmailClient, fetchRecentEmails } from '../lib/gmail'
+import { classifyEmail } from '../lib/gemini'
 
-async function worker() {
-    console.log('[Nexus Worker] Iniciando processamento de fila...')
-    await nexusLogStore.addLog('Nexus Worker: Iniciando ciclo de capturas', 'SYSTEM')
+let lastGmailCheck = 0
+const GMAIL_CHECK_INTERVAL = 2 * 60 * 1000 // 2 minutes
+const processedEmailIds = new Set<string>()
+
+async function checkGmail() {
+    console.log('[Nexus Worker] Verificando novos e-mails via Gmail API...')
+    try {
+        const credentials = {
+            web: {
+                client_id: process.env.GMAIL_CLIENT_ID,
+                client_secret: process.env.GMAIL_CLIENT_SECRET,
+                redirect_uris: [process.env.GMAIL_REDIRECT_URI]
+            }
+        }
+        const token = { refresh_token: process.env.GMAIL_REFRESH_TOKEN }
+
+        if (credentials.web.client_id && token.refresh_token) {
+            const gmail = await getGmailClient(credentials, token)
+            const emails = await fetchRecentEmails(gmail)
+            const whitelist = (process.env.GMAIL_WHITELIST || '').split(',').map(e => e.trim().toLowerCase())
+
+            if (emails.length > 0) {
+                console.log(`[Nexus Worker] ${emails.length} e-mails endereçados a você encontrados.`)
+            }
+
+            for (const email of emails) {
+                // Skip already-processed emails
+                if (processedEmailIds.has(email.id)) continue
+                processedEmailIds.add(email.id)
+
+                console.log(`[Nexus Worker] Analisando: "${email.subject}" de ${email.from}`)
+                const fromEmail = email.from.match(/<(.+?)>/)?.[1] || email.from.toLowerCase()
+                const isWhitelisted = whitelist.some(w => w && fromEmail.includes(w))
+
+                const isConversation = isWhitelisted || await classifyEmail(email)
+
+                if (isConversation) {
+                    console.log(`[Nexus Worker] 📢 CONVERSA DETECTADA de: ${email.from}`)
+                    await nexusLogStore.addLog(
+                        `📩 Nova conversa: "${email.subject}" de ${email.from}`,
+                        'EMAIL_ALERT',
+                        JSON.stringify({
+                            from: email.from,
+                            to: email.to,
+                            subject: email.subject,
+                            snippet: email.snippet,
+                            threadId: email.threadId,
+                            date: email.date
+                        })
+                    )
+                }
+            }
+
+            // Keep the set from growing indefinitely
+            if (processedEmailIds.size > 200) {
+                const arr = Array.from(processedEmailIds)
+                arr.splice(0, arr.length - 100)
+                processedEmailIds.clear()
+                arr.forEach(id => processedEmailIds.add(id))
+            }
+        }
+        lastGmailCheck = Date.now()
+    } catch (gmailErr) {
+        console.error('[Nexus Worker] Erro no monitoramento do Gmail:', gmailErr)
+    }
+}
+
+async function runWorkerCycle() {
+    console.log('[Nexus Worker] Iniciando ciclo de processamento...')
+    
+    // 1. Gmail Check (Highest Priority)
+    await checkGmail()
 
     try {
-        // 1. Auto-enquadramento (Scheduling Check)
-        // Busca campanhas agendadas que precisam ser movidas para a fila
-        const brtNowStr = new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' });
-        const brtNow = new Date(brtNowStr);
-        const today = new Date(Date.UTC(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate()));
-        const currentTime = `${String(brtNow.getHours()).padStart(2, '0')}:${String(brtNow.getMinutes()).padStart(2, '0')}`;
-
-        console.log(`[Nexus Worker] Verificando agendamentos (Data: ${today.toISOString()}, Hora: ${currentTime})`)
+        // 2. Auto-enquadramento (Scheduling Check)
+        const brtNowStr = new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })
+        const brtNow = new Date(brtNowStr)
+        const today = new Date(Date.UTC(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate()))
 
         const scheduledCampaigns = await prisma.campaign.findMany({
             where: {
@@ -27,39 +96,31 @@ async function worker() {
                     { flightStart: null, flightEnd: null }
                 ]
             }
-        });
+        })
 
         const toQueueIds = scheduledCampaigns.filter(c => {
             try {
-                const times = JSON.parse(c.scheduledTimes || '[]') as string[];
-                const lastCapture = c.lastCaptureAt ? new Date(c.lastCaptureAt) : null;
+                const times = JSON.parse(c.scheduledTimes || '[]') as string[]
+                const lastCapture = c.lastCaptureAt ? new Date(c.lastCaptureAt) : null
 
                 return times.some((t: string) => {
-                    const [h, m] = t.split(':').map(Number);
-                    const scheduledDate = new Date(today);
-                    scheduledDate.setUTCHours(h + 3, m, 0, 0); // Convert BRT to UTC (assuming BRT is UTC-3)
-
-                    // Se o horário agendado já passou e não houve captura hoje depois desse horário
-                    const hasPassed = brtNow.getTime() >= (new Date(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate(), h, m)).getTime();
-                    const notCapturedYet = !lastCapture || lastCapture.getTime() < (new Date(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate(), h, m)).getTime();
-
-                    return hasPassed && notCapturedYet;
-                });
-            } catch { return false; }
-        }).map(c => c.id);
+                    const [h, m] = t.split(':').map(Number)
+                    const hasPassed = brtNow.getTime() >= (new Date(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate(), h, m)).getTime()
+                    const notCapturedYet = !lastCapture || lastCapture.getTime() < (new Date(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate(), h, m)).getTime()
+                    return hasPassed && notCapturedYet
+                })
+            } catch { return false }
+        }).map(c => c.id)
 
         if (toQueueIds.length > 0) {
-            console.log(`[Nexus Worker] Enfileirando ${toQueueIds.length} campanhas agendadas pendentes.`)
             await prisma.campaign.updateMany({
                 where: { id: { in: toQueueIds } },
                 data: { status: 'QUEUED' }
-            });
-            await nexusLogStore.addLog(`Nexus Worker: ${toQueueIds.length} campanhas agendadas enfileiradas automaticamente`, 'SYSTEM');
+            })
+            await nexusLogStore.addLog(`Nexus Worker: ${toQueueIds.length} campanhas agendadas enfileiradas automaticamente`, 'SYSTEM')
         }
 
-        // 2. Buscar campanhas que precisam de captura
-        // - Status PENDING ou QUEUED
-        // - Que não foram arquivadas
+        // 3. Captura de Campanhas
         const campaigns = await prisma.campaign.findMany({
             where: {
                 status: { in: ['PENDING', 'QUEUED'] },
@@ -67,177 +128,130 @@ async function worker() {
             },
         })
 
-        if (campaigns.length === 0) {
-            console.log('[Nexus Worker] Campanha não encontrada para debug.')
-            return
-        }
+        if (campaigns.length > 0) {
+            console.log(`[Nexus Worker] Encontradas ${campaigns.length} campanhas para processar.`)
+            await nexusLogStore.addLog(`Nexus Worker: Processando ${campaigns.length} itens`, 'SYSTEM')
 
-        console.log(`[Nexus Worker] Encontradas ${campaigns.length} campanhas para processar.`)
-        await nexusLogStore.addLog(`Nexus Worker: Processando ${campaigns.length} itens`, 'SYSTEM')
-
-        for (const campaign of campaigns) {
-            console.log(`[Nexus Worker] Processando: ${campaign.client} - ${campaign.format}`)
-
-            try {
-                // Atualiza para PROCESSING para evitar duplicidade (embora o GHA rode serial)
-                await prisma.campaign.update({
-                    where: { id: campaign.id },
-                    data: { status: 'PROCESSING' }
-                })
-
-                const result = await processCampaign(campaign.id)
-
-                if (result.success) {
-                    console.log(`[Nexus Worker] Sucesso: ${campaign.id}`)
-                } else {
-                    console.error(`[Nexus Worker] Falha: ${campaign.id} - ${result.error}`)
+            for (const campaign of campaigns) {
+                if (Date.now() - lastGmailCheck > GMAIL_CHECK_INTERVAL) {
+                    await checkGmail()
                 }
-            } catch (err) {
-                console.error(`[Nexus Worker] Erro crítico na campanha ${campaign.id}:`, err)
+
+                console.log(`[Nexus Worker] Processando: ${campaign.client} - ${campaign.format}`)
+                try {
+                    await prisma.campaign.update({
+                        where: { id: campaign.id },
+                        data: { status: 'PROCESSING' }
+                    })
+                    await processCampaign(campaign.id)
+                } catch (err) {
+                    console.error(`[Nexus Worker] Erro na campanha ${campaign.id}:`, err)
+                }
             }
         }
 
-        // 3. Email Dispatch Check — send reports for ended campaigns (grouped by PI)
-        console.log('[Nexus Worker] Verificando disparos de email pendentes...')
-        try {
-            const pendingDispatches = await (prisma as any).emailDispatch.findMany({
-                where: {
-                    isActive: true,
-                    status: 'PENDING',
-                },
+        // 4. Email Dispatch Check
+        const pendingDispatches = await (prisma as any).emailDispatch.findMany({
+            where: { isActive: true, status: 'PENDING' },
+        })
+
+        for (const dispatch of pendingDispatches) {
+            const pi = dispatch.pi
+            if (!pi) continue
+
+            const piCampaigns = await prisma.campaign.findMany({
+                where: { pi, isArchived: false },
+                select: { id: true, client: true, flightEnd: true }
             })
 
-            for (const dispatch of pendingDispatches) {
-                const pi = dispatch.pi
-                if (!pi) continue
+            if (piCampaigns.length === 0) continue
 
-                // Get all campaigns with this PI to check flightEnd
-                const piCampaigns = await prisma.campaign.findMany({
-                    where: { pi, isArchived: false },
-                    select: { id: true, client: true, flightEnd: true }
-                })
+            const hasEnded = piCampaigns.some(c => {
+                if (!c.flightEnd) return false
+                const flightEndDate = new Date(c.flightEnd)
+                const flightEndDay = new Date(Date.UTC(flightEndDate.getFullYear(), flightEndDate.getMonth(), flightEndDate.getDate()))
+                return flightEndDay <= today
+            })
 
-                if (piCampaigns.length === 0) continue
+            if (!hasEnded) continue
 
-                // Check if ANY campaign in the group has ended
-                const hasEnded = piCampaigns.some(c => {
-                    if (!c.flightEnd) return false
-                    const flightEndDate = new Date(c.flightEnd)
-                    const flightEndDay = new Date(Date.UTC(flightEndDate.getFullYear(), flightEndDate.getMonth(), flightEndDate.getDate()))
-                    return flightEndDay <= today
-                })
+            const [dh, dm] = dispatch.dispatchTime.split(':').map(Number)
+            const dispatchMoment = new Date(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate(), dh, dm)
 
-                if (!hasEnded) continue
-
-                // Check if dispatch time has passed
-                const [dh, dm] = dispatch.dispatchTime.split(':').map(Number)
-                const dispatchMoment = new Date(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate(), dh, dm)
-
-                if (brtNow < dispatchMoment) continue
-
-                // Check if already sent today
-                if (dispatch.lastSentAt) {
-                    const lastSent = new Date(dispatch.lastSentAt)
-                    const lastSentDay = new Date(lastSent.getFullYear(), lastSent.getMonth(), lastSent.getDate())
-                    const todayDay = new Date(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate())
-                    if (lastSentDay.getTime() >= todayDay.getTime()) continue
-                }
-
-                // Send the report!
-                const firstClient = piCampaigns[0].client
-                console.log(`[Nexus Worker] Disparando email para campanha ${firstClient} (PI: ${pi})...`)
-                await nexusLogStore.addLog(`Nexus Worker: Disparando email de fim de veiculação para ${firstClient} (PI: ${pi})`, 'SYSTEM')
-
-                const recipients = JSON.parse(dispatch.recipients) as string[]
-                const { sendCampaignReport } = await import('../lib/emailService')
-                await sendCampaignReport({
-                    pi,
-                    recipients,
-                    dispatchId: dispatch.id,
-                })
+            if (brtNow < dispatchMoment) continue
+            if (dispatch.lastSentAt) {
+                const lastSent = new Date(dispatch.lastSentAt)
+                const lastSentDay = new Date(lastSent.getFullYear(), lastSent.getMonth(), lastSent.getDate())
+                const todayDay = new Date(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate())
+                if (lastSentDay.getTime() >= todayDay.getTime()) continue
             }
-        } catch (emailErr) {
-            console.error('[Nexus Worker] Erro no módulo de email dispatch:', emailErr)
-            await nexusLogStore.addLog('Nexus Worker: Erro ao processar disparos de email', 'ERROR')
+
+            console.log(`[Nexus Worker] Disparando email para PI ${pi}...`)
+            const recipients = JSON.parse(dispatch.recipients) as string[]
+            const { sendCampaignReport } = await import('../lib/emailService')
+            await sendCampaignReport({ pi, recipients, dispatchId: dispatch.id })
         }
         
-        // 4. Telegram Performance Alerts
-        console.log('[Nexus Worker] Verificando alertas de performance para Telegram...')
-        try {
-            const settings = await prisma.settings.findUnique({ where: { id: 1 } })
-            if (settings?.telegramAlertsEnabled) {
-                const now = new Date()
-                const brtNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }))
-                const currentHour = brtNow.getHours()
-                
-                // Só envia se for depois das 09:00 BRT
-                if (currentHour >= 9) {
-                    const lastAlert = settings.telegramLastAlertAt ? new Date(settings.telegramLastAlertAt) : null
-                    const lastAlertBRT = lastAlert ? new Date(lastAlert.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })) : null
-                    
-                    const isNewDay = !lastAlertBRT || 
-                        lastAlertBRT.getDate() !== brtNow.getDate() || 
-                        lastAlertBRT.getMonth() !== brtNow.getMonth() || 
-                        lastAlertBRT.getFullYear() !== brtNow.getFullYear()
+        // 5. Telegram Performance Alerts
+        const settings = await prisma.settings.findUnique({ where: { id: 1 } })
+        if (settings?.telegramAlertsEnabled) {
+            const now = new Date()
+            const brtNowTg = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }))
+            if (brtNowTg.getHours() >= 9) {
+                const lastAlert = settings.telegramLastAlertAt ? new Date(settings.telegramLastAlertAt) : null
+                const lastAlertBRT = lastAlert ? new Date(lastAlert.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })) : null
+                const isNewDay = !lastAlertBRT || lastAlertBRT.getDate() !== brtNowTg.getDate()
 
-                    if (isNewDay) {
-                        console.log('[Nexus Worker] Hora de enviar alerta diário de performance...')
-                        const { sendTelegramAlert } = await import('../lib/telegram')
-                        const { getAggregatedAdOpsMetrics } = await import('../app/adops/actions')
-                        
-                        const stats = await getAggregatedAdOpsMetrics()
-                        const critical = stats.campaigns.filter(c => c.status === 'critical')
-                        const warning = stats.campaigns.filter(c => c.status === 'warning')
-                        const over = stats.campaigns.filter(c => c.status === 'over')
+                if (isNewDay) {
+                    const { sendTelegramAlert } = await import('../lib/telegram')
+                    const { getAggregatedAdOpsMetrics } = await import('../app/adops/actions')
+                    const stats = await getAggregatedAdOpsMetrics()
+                    const critical = stats.campaigns.filter((c: any) => c.status === 'critical')
+                    const warning = stats.campaigns.filter((c: any) => c.status === 'warning')
+                    const over = stats.campaigns.filter((c: any) => c.status === 'over')
 
-                        if (critical.length > 0 || warning.length > 0 || over.length > 0) {
-                            let msg = '📊 *RESUMO DIÁRIO DE PERFORMANCE*\n\n'
-                            
-                            if (critical.length > 0) {
-                                msg += `🚨 *CRÍTICO (${critical.length})*\n`
-                                critical.forEach(c => msg += `• ${c.advertiser}: ${c.name} (${Math.round((c.deliveredImpressions/c.goalImpressions)*100)}%)\n`)
-                                msg += '\n'
-                            }
-                            
-                            if (warning.length > 0) {
-                                msg += `⚠️ *UNDER (${warning.length})*\n`
-                                warning.forEach(c => msg += `• ${c.advertiser}: ${c.name} (${Math.round((c.deliveredImpressions/c.goalImpressions)*100)}%)\n`)
-                                msg += '\n'
-                            }
-                            
-                            if (over.length > 0) {
-                                msg += `📈 *OVER (${over.length})*\n`
-                                over.forEach(c => msg += `• ${c.advertiser}: ${c.name} (${Math.round((c.deliveredImpressions/c.goalImpressions)*100)}%)\n`)
-                                msg += '\n'
-                            }
-
-                            msg += `\n🔗 [Ver no AdOps Dashboard](${process.env.NEXT_PUBLIC_APP_URL || 'https://adsnap-cloud.vercel.app'}/adops)`
-                            
-                            await sendTelegramAlert('Performance Alert', msg)
+                    if (critical.length > 0 || warning.length > 0 || over.length > 0) {
+                        let msg = '📊 *RESUMO DIÁRIO DE PERFORMANCE*\n\n'
+                        if (critical.length > 0) {
+                            msg += `🚨 *CRÍTICO (${critical.length})*\n`
+                            critical.forEach((c: any) => msg += `• ${c.advertiser}: ${c.name} (${Math.round((c.deliveredImpressions/c.goalImpressions)*100)}%)\n`)
+                            msg += '\n'
                         }
-
-                        // Atualiza timestamp mesmo se não houver alertas (para não checar de novo hoje)
-                        await prisma.settings.update({
-                            where: { id: 1 },
-                            data: { telegramLastAlertAt: now }
-                        })
-                        console.log('[Nexus Worker] Alerta de performance processado.')
+                        if (warning.length > 0) {
+                            msg += `⚠️ *UNDER (${warning.length})*\n`
+                            warning.forEach((c: any) => msg += `• ${c.advertiser}: ${c.name} (${Math.round((c.deliveredImpressions/c.goalImpressions)*100)}%)\n`)
+                            msg += '\n'
+                        }
+                        if (over.length > 0) {
+                            msg += `📈 *OVER (${over.length})*\n`
+                            over.forEach((c: any) => msg += `• ${c.advertiser}: ${c.name} (${Math.round((c.deliveredImpressions/c.goalImpressions)*100)}%)\n`)
+                            msg += '\n'
+                        }
+                        msg += `\n🔗 [Ver no AdOps Dashboard](${process.env.NEXT_PUBLIC_APP_URL || 'https://adsnap-cloud.vercel.app'}/adops)`
+                        await sendTelegramAlert('Performance Alert', msg)
                     }
+                    await prisma.settings.update({ where: { id: 1 }, data: { telegramLastAlertAt: now } })
                 }
             }
-        } catch (alertErr) {
-            console.error('[Nexus Worker] Erro nos alertas de Telegram:', alertErr)
         }
 
     } catch (error) {
-        console.error('[Nexus Worker] Erro fatal no worker:', error)
-        await nexusLogStore.addLog('Nexus Worker: Erro fatal durante a execução', 'ERROR')
+        console.error('[Nexus Worker] Erro no ciclo:', error)
     } finally {
-        console.log('[Nexus Worker] Ciclo finalizado.')
-        await nexusLogStore.addLog('Nexus Worker: Ciclo finalizado', 'SYSTEM')
         await prisma.$disconnect()
     }
 }
 
-// Executar
-worker()
+async function startWorker() {
+    console.log('[Nexus Worker] Sistema iniciado em modo contínuo.')
+    while (true) {
+        try {
+            await runWorkerCycle()
+        } catch (err) {
+            console.error('[Nexus Worker] Erro crítico no loop principal:', err)
+        }
+        await new Promise(resolve => setTimeout(resolve, 60000))
+    }
+}
+
+startWorker()

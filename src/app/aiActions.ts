@@ -11,12 +11,17 @@ import {
     scheduleAllCampaigns
 } from './actions'
 import prisma from '@/lib/prisma'
+import { createGmailClientFromEnv, searchEmails } from '@/lib/gmail'
+import { nexusBrain } from '@/lib/gemini'
+import * as brain from '@/lib/nexusBrain'
+
+console.log('[Gemini Module] Carregado!')
 
 export interface NexusResponse {
     message: string
     success: boolean
     actionPerformed?: 'CAPTURE' | 'CAPTURE_ALL' | 'ARCHIVE' | 'UPDATE_URL' | 'REGISTRATION_PREVIEW' | 'UPDATE_FORMATS' | 'STOP_CAPTURES' | 'SCHEDULE_ALL' | 'DOWNLOAD_ZIP'
-    data?: any
+    data?: unknown
 }
 
 // --- Personality Config ---
@@ -63,7 +68,7 @@ const RESPONSES = {
         "Pense em mim como o cérebro central do Adsnap. Eu cuido da complexidade para você focar no resultado."
     ],
     HELP: [
-        "Posso ajudar com:\n- Capturas: 'Tirar print do PI 991' ou 'Capturar tudo'\n- Gestão: 'Arquivar PI 123', 'Mudar link do PI 456'\n- Formatos: 'Adicionar formato Super Banner 970x250 com seletor .banner'\n- Status: 'Resumo geral'",
+        "Posso ajudar com:\n- Capturas: 'Tirar print do PI 991' ou 'Capturar tudo'\n- Gestão: 'Arquivar PI 123', 'Mudar link do PI 456'\n- Formatos: 'Adicionar formato Super Banner 970x250 com seletor .banner'\n- E-mails: 'Qual foi o último e-mail?' ou 'Verificar mensagens'\n- Status: 'Resumo geral'",
         "Tente comandos como: 'Como está o sistema?', 'Novo formato Billboard 970x250 .billboard', ou 'Restaurar PI 550'.",
         "Você pode me pedir para gerenciar campanhas, links, capturas e agora também configurar novos formatos de banner."
     ],
@@ -86,6 +91,11 @@ const RESPONSES = {
         "Protocolo de exportação ativado. Gerando ZIP dos prints de {date}...",
         "Entendido. Iniciando compilação de evidências para o dia {date}. O download começará em instantes.",
         "Acesso aos arquivos liberado. Preparando pacote de prints do dia {date}."
+    ],
+    SUCCESS_EMAIL: [
+        "O último e-mail relevante que recebi foi de **{from}** sobre **{subject}**.",
+        "Analisei sua caixa de entrada. O contato mais recente foi de **{from}** com o assunto: *{subject}*.",
+        "Encontrei uma conversa recente: **{from}** enviou um e-mail sobre '{subject}'."
     ]
 }
 
@@ -93,8 +103,9 @@ function getRandom(arr: string[]): string {
     return arr[Math.floor(Math.random() * arr.length)]
 }
 
-function extractCampaignsFromText(text: string): any[] {
-    const campaigns: any[] = []
+export async function extractCampaignsFromText(text: string): Promise<Partial<brain.ParsedCampaign>[]> {
+    const campaigns: Partial<brain.ParsedCampaign>[] = []
+    text.split(/---|Nova Campanha:|Campanha \d+:|Campanha:/i).filter(s => s.trim().length > 10)
 
     // Helper regex patterns
     const datePattern = /(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?/
@@ -149,24 +160,23 @@ function extractCampaignsFromText(text: string): any[] {
     if (campaigns.length === 0) {
         // Split by semantic blocks or explicit "new item" markers
         const blocks = text.split(/;|\ne |(?=agenc|client|campanh|link|formato|pi|data|segmen|inicio|fim|veicula)/i)
-        const currentData: any = { agency: 'Adsnap', segmentation: 'PRIVADO' }
+        const currentData: Partial<brain.ParsedCampaign> = { agency: 'Adsnap', segmentation: 'PRIVADO' }
         let hasData = false
 
         for (const block of blocks) {
             const piMatch = block.match(/pi[:\s]+(\d+)/i) || block.match(piPattern)
             const urlMatch = block.match(/link[:\s]+(https?:\/\/[^\s,]+)/i) || block.match(urlPattern)
             const clientMatch = block.match(/client[e]?[:\s]+([^,\n|]+)/i)
-            const agencyMatch = block.match(/agenc[ia]+[:\s]+([^,\n|]+)/i)
-            const nameMatch = block.match(/(?:campanha|nome)[:\s]+([^,\n|]+)/i)
-            const formatMatch = block.match(/formato[:\s]+([^,\n|]+)/i)
-            const segMatch = block.match(/(?:segmentação|segmento|tipo)[:\s]+([^,\n|]+)/i)
+            const agencyMatch = block.match(/(?:agência|agency)[:\s]+(.+)/i)
+            const nameMatch = block.match(/(?:nome|campanha|name)[:\s]+(.+)/i)
+            const formatMatch = block.match(/(?:formato|format)[:\s]+(.+)/i)
+            const segMatch = block.match(/(?:segmentação|segmentation|seg)[:\s]+(.+)/i)
+            const startMatch = block.match(/(?:início|start|desde)[:\s]+([\d\/.-]+)/i)
+            const endMatch = block.match(/(?:fim|end|até)[:\s]+([\d\/.-]+)/i)
 
-            const startMatch = block.match(/(?:inicio|início|desde|veiculaçã?o)[:\s]+(\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?)/i)
-            const endMatch = block.match(/(?:fim|até|termino|término)[:\s]+(\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?)/i)
-
-            if (piMatch) { currentData.pi = (Array.isArray(piMatch) && piMatch[1]) ? piMatch[1] : piMatch[0]; hasData = true; }
-            if (urlMatch) { currentData.url = (Array.isArray(urlMatch) && urlMatch[1]) ? urlMatch[1] : urlMatch[0]; hasData = true; }
             if (clientMatch) { currentData.client = clientMatch[1].trim(); hasData = true; }
+            if (piMatch) { currentData.pi = piMatch[1].trim(); hasData = true; }
+            if (urlMatch) { currentData.url = urlMatch[1].trim(); hasData = true; }
             if (agencyMatch) { currentData.agency = agencyMatch[1].trim(); hasData = true; }
             if (nameMatch) { currentData.campaignName = nameMatch[1].trim(); hasData = true; }
             if (formatMatch) { currentData.format = formatMatch[1].trim(); hasData = true; }
@@ -183,15 +193,194 @@ function extractCampaignsFromText(text: string): any[] {
     return campaigns.filter(c => c.client || c.pi || c.url)
 }
 
+function isOperationalCommand(text: string): boolean {
+    const t = text.toLowerCase().trim()
+    
+    // ONLY extremely clear, single-purpose technical keywords bypass the AI for speed.
+    // Anything even slightly conversational should go to Gemini.
+    const technicalKeywords = [
+        'status', 'bi', 'dashboard', 'painel', 'resumo bi',
+        'baixar zip', 'download zip', 'print tudo', 'capturar tudo',
+        'parar tudo', 'stop captures'
+    ]
+    
+    // If it's a very short command that matches exactly, skip AI.
+    if (t.length < 15) {
+        return technicalKeywords.some(kw => t === kw || t.startsWith(kw + ' '))
+    }
+    
+    return false
+}
+
+async function handleDirectCommand(prompt: string): Promise<NexusResponse | null> {
+    const text = prompt.toLowerCase()
+    
+    // 1. STATUS / DASHBOARD / BI
+    if (text.includes('status') || text.includes('resumo') || text.includes('como estão') || text.includes('análise') || text.includes('analise') || text.includes('bi')) {
+        if (text.includes('dashboard') || text.includes('métrica') || text.includes('detalhe') || text.includes('bi') || text.includes('análise') || text.includes('analise')) {
+            console.log('[Nexus FastPath] Calling BI AdOps Summary...')
+            const result = await brain.getAdOpsSummary()
+            if (result.success && result.data) {
+                const data = result.data as brain.BIData
+                const { total, healthScore, globalGoal, globalDelivered, globalToday, globalProjected, avgViewability, atRiskCampaigns } = data
+                const emoji = healthScore > 80 ? '✅' : healthScore > 50 ? '⚠️' : '🚨'
+                const progress = ((globalDelivered / globalGoal) * 100).toFixed(1)
+                const projPercent = ((globalProjected / globalGoal) * 100).toFixed(1)
+                
+                let message = `### 📊 Relatório BI de AdOps\n\n`
+                message += `- **Saúde Geral:** ${healthScore}% ${emoji}\n`
+                message += `- **Volume Total:** ${globalDelivered.toLocaleString()} / ${globalGoal.toLocaleString()} (${progress}%)\n`
+                message += `- **Entrega Hoje:** ${globalToday.toLocaleString()} impressões ⚡\n`
+                message += `- **Projeção Final:** ${globalProjected.toLocaleString()} (${projPercent}%)\n`
+                message += `- **Média Viewability:** ${avgViewability.toFixed(1)}%\n`
+                
+                if (atRiskCampaigns && atRiskCampaigns.length > 0) {
+                    message += `\n⚠️ **Campanhas em Atenção:** ${atRiskCampaigns.join(', ')}\n`
+                }
+                
+                message += `\n*Análise BI consolidada para ${total} campanhas.*`
+                
+                return {
+                    message,
+                    success: true,
+                    data: result.data
+                }
+            }
+            return {
+                message: result.message,
+                success: result.success,
+                data: result.data
+            }
+        }
+        
+        console.log('[Nexus FastPath] Calling Fast DB Status...')
+        const count = await prisma.campaign.count({ where: { isArchived: false } })
+        const scheduled = await prisma.campaign.count({ where: { isArchived: false, isScheduled: true } })
+        const todaysCaptures = await prisma.capture.count({
+            where: { createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) } }
+        })
+
+        return {
+            message: `Status do Sistema:\n- ${count} Campanhas Ativas\n- ${scheduled} Agendadas\n- ${todaysCaptures} Capturas hoje.\n\nSistemas operando normalmente.`,
+            success: true
+        }
+    }
+
+    // 2. CAPTURE ALL
+    if ((text.includes('print') || text.includes('capturar')) && (text.includes('tudo') || text.includes('todas'))) {
+        console.log('[Nexus FastPath] Triggering Global Capture...')
+        const trigger = await runAllCaptures()
+        return {
+            message: getRandom(RESPONSES.SUCCESS_CAPTURE_ALL).replace('{count}', trigger.count.toString()),
+            success: true,
+            actionPerformed: 'CAPTURE_ALL'
+        }
+    }
+
+    // 3. STOP CAPTURES
+    if ((text.includes('parar') || text.includes('interromper') || text.includes('cancelar') || text.includes('stop')) &&
+        (text.includes('print') || text.includes('captura') || text.includes('disparo') || text.includes('tudo'))) {
+        console.log('[Nexus FastPath] Stopping all captures...')
+        const result = await stopAllCaptures()
+        return {
+            message: getRandom(RESPONSES.SUCCESS_STOP).replace('{count}', result.stoppedCount.toString()),
+            success: true,
+            actionPerformed: 'STOP_CAPTURES',
+            data: { stoppedCount: result.stoppedCount }
+        }
+    }
+
+    // 4. DOWNLOAD ZIP
+    if (text.includes('baixar') || text.includes('download') || text.includes('exportar')) {
+        console.log('[Nexus FastPath] Preparing Download...')
+        const dateMatch = prompt.match(/(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?/)
+        let targetDate = new Date().toISOString().split('T')[0]
+
+        if (dateMatch) {
+            const day = parseInt(dateMatch[1])
+            const month = parseInt(dateMatch[2]) - 1
+            const year = dateMatch[3] ? (dateMatch[3].length === 2 ? 2000 + parseInt(dateMatch[3]) : parseInt(dateMatch[3])) : new Date().getFullYear()
+            targetDate = new Date(year, month, day).toISOString().split('T')[0]
+        }
+
+        return {
+            message: getRandom(RESPONSES.SUCCESS_DOWNLOAD).replace(/{date}/g, targetDate),
+            success: true,
+            actionPerformed: 'DOWNLOAD_ZIP',
+            data: { date: targetDate }
+        }
+    }
+
+    // 5. CAMPAIGN DETAILS (PI OR NAME)
+    if (text.includes('campanha') || text.includes('detalhe') || text.includes('ver pi') || text.match(/\b\d{3,6}\b/)) {
+        const piMatch = prompt.match(/\b\d{3,6}\b/)
+        const nameMatch = prompt.match(/(?:campanha|cliente|client)[:\s]+(.+)/i) || 
+                          prompt.match(/como está a campanha\s+(.+)/i)
+        
+        const rawQuery = piMatch ? piMatch[0] : (nameMatch ? nameMatch[1].trim() : null)
+        const query = rawQuery ? rawQuery.replace(/[?.,!]+$/, '').trim() : null
+        
+        if (query) {
+            console.log(`[Nexus FastPath] Searching for campaign: "${query}"`)
+            return await brain.getCampaign(query)
+        }
+    }
+
+    return null
+}
+
 export async function processNexusCommand(prompt: string): Promise<NexusResponse> {
+    console.time('NexusTotal')
+    console.log('[Nexus AI Action] Recebido prompt:', prompt)
     const text = prompt.toLowerCase()
 
-    // Simulação de latência de pensamento
-    await new Promise(resolve => setTimeout(resolve, 600))
-
     try {
+        // --- 1. FAST PATH (Pre-AI) ---
+        if (isOperationalCommand(text)) {
+            console.log('[Nexus AI Action] FastPath Match!')
+            const direct = await handleDirectCommand(prompt)
+            if (direct) {
+                console.timeEnd('NexusTotal')
+                return direct
+            }
+        }
+
+        // --- 2. NEXUS BRAIN (Parallel AI + Content) ---
+        console.log('[Nexus AI Action] Chamando Neural Brain (Async)...')
+        console.time('NexusAI')
+        
+        // Timeout de 12s para a IA (balanceado com o frontend de 20s)
+        const brainPromise = nexusBrain(prompt)
+        const timeoutPromise = new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('Brain Timeout')), 12000)
+        )
+        
+        let brainResult: NexusResponse | null = null
+        try {
+            brainResult = await Promise.race([brainPromise, timeoutPromise]) as NexusResponse
+        } catch (err) {
+            console.warn('[Nexus AI] Brain Error or Timeout (12s limit):', err)
+            // AI failed or timed out, we continue to manual fallbacks or standard response
+        }
+        console.timeEnd('NexusAI')
+        
+        if (brainResult?.success && brainResult.actionPerformed) {
+            console.timeEnd('NexusTotal')
+            return {
+                message: brainResult.message,
+                success: true,
+                actionPerformed: brainResult.actionPerformed,
+                data: brainResult.data
+            }
+        }
+        
+        if (brainResult?.success && brainResult.message) {
+            console.timeEnd('NexusTotal')
+            return { message: brainResult.message, success: true }
+        }
+
         // ---------------------------------------------------------
-        // 1. GESTÃO DE FORMATOS (NOVO)
+        // 1. GESTÃO DE FORMATOS (Legacy/Manual Override)
         // ---------------------------------------------------------
         if (text.includes('formato') && (text.includes('adicionar') || text.includes('novo') || text.includes('criar') || text.includes('configurar'))) {
             // Ex: "Adicionar formato Super Banner 970x90 com seletor .super-banner"
@@ -205,14 +394,13 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
                 const width = parseInt(dimsMatch[1])
                 const height = parseInt(dimsMatch[2])
                 const selector = selectorMatch[1]
-                const label = nameMatch ? nameMatch[1].trim() : `${width}x${height}`
+                const label = (nameMatch ? nameMatch[1].trim() : `${width}x${height}`)
                 const id = `${width}x${height}`
 
-                const settings = await getSettings() as any
-                const currentFormats = settings.bannerFormats ? JSON.parse(settings.bannerFormats) : []
+                const settings = await getSettings()
+                const currentFormats: { id: string; label: string; width: number; height: number; selector: string }[] = settings.bannerFormats ? JSON.parse(settings.bannerFormats) : []
 
-                // Check if exists
-                const existingIndex = currentFormats.findIndex((f: any) => f.id === id)
+                const existingIndex = currentFormats.findIndex((f) => f.id === id)
                 const newFormat = { id, label, width, height, selector }
 
                 if (existingIndex >= 0) {
@@ -221,16 +409,10 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
                     currentFormats.push(newFormat)
                 }
 
-                await updateSettings({
-                    ...settings,
-                    bannerFormats: JSON.stringify(currentFormats)
-                })
+                await updateSettings({ bannerFormats: JSON.stringify(currentFormats) })
 
                 return {
-                    message: getRandom(RESPONSES.SUCCESS_FORMAT)
-                        .replace('{label}', label)
-                        .replace('{width}', width.toString())
-                        .replace('{height}', height.toString()),
+                    message: (existingIndex >= 0 ? '✅ Formato atualizado' : '✅ Novo formato registrado') + `: ${label} (${width}x${height})`,
                     success: true,
                     actionPerformed: 'UPDATE_FORMATS',
                     data: newFormat
@@ -247,7 +429,7 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
         // 2. REGISTRO / CADASTRO
         // ---------------------------------------------------------
         if (text.includes('cadastr') || text.includes('criar') || text.includes('novo registro') || text.includes('adicionar camp')) {
-            const extracted = extractCampaignsFromText(prompt)
+            const extracted = await extractCampaignsFromText(prompt)
 
             if (extracted.length > 0) {
                 return {
@@ -453,26 +635,84 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
             }
         }
 
-        // ---------------------------------------------------------
-        // 9. STATUS / RELATÓRIO
-        // ---------------------------------------------------------
-        if (text.includes('status') || text.includes('resumo') || text.includes('como estão')) {
-            const count = await prisma.campaign.count({ where: { isArchived: false } })
-            const scheduled = await prisma.campaign.count({ where: { isArchived: false, isScheduled: true } })
-            const todaysCaptures = await prisma.capture.count({
-                where: { createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) } }
-            })
 
-            return {
-                message: `Status do Sistema:\n- ${count} Campanhas Ativas\n- ${scheduled} Agendadas\n- ${todaysCaptures} Capturas hoje.\n\nSistemas operando normalmente.`,
-                success: true
+        // ---------------------------------------------------------
+        // 10. CONSULTAR E-MAILS (V2 — LIVE SEARCH)
+        // ---------------------------------------------------------
+        const emailKeywords = [
+            'email', 'e-mail', 'gmail', 'mensagem', 'caixa de entrada', 'inbox',
+            'recebi', 'recebeu', 'mandou', 'enviou', 'tem algo', 'tem algum'
+        ]
+        const hasEmailIntent = emailKeywords.some(kw => text.toLowerCase().includes(kw))
+        
+        if (hasEmailIntent) {
+            try {
+                const gmailClient = await createGmailClientFromEnv()
+                
+                if (!gmailClient) {
+                    return {
+                        message: '⚠️ Gmail não configurado. Verifique GMAIL_CLIENT_ID, GMAIL_REFRESH_TOKEN e GMAIL_USER_EMAIL.',
+                        success: false
+                    }
+                }
+
+                const userEmail = process.env.GMAIL_USER_EMAIL || ''
+                const toFilter = userEmail ? `to:${userEmail}` : 'to:me'
+                
+                const { buildGmailQuery, askGeminiAboutEmails } = await import('@/lib/gemini')
+                const brDate = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+                
+                const aiQuery = await buildGmailQuery(prompt, brDate)
+                
+                let finalQuery = aiQuery
+                if (!aiQuery.includes('to:') && !aiQuery.includes('to =')) {
+                    finalQuery = `${toFilter} ${aiQuery}`
+                } else if (!aiQuery.includes(userEmail) && userEmail) {
+                    finalQuery = aiQuery.replace(/to:[^\s]+/, `to:${userEmail}`)
+                }
+
+                console.log(`[Nexus AI] Query Gemini: "${aiQuery}"`)
+                console.log(`[Nexus AI] Query Final: "${finalQuery}"`)
+                
+                const emails = await searchEmails(gmailClient, finalQuery, 15)
+                console.log(`[Nexus AI] Emails encontrados: ${emails.length}`)
+                
+                const geminiAnswer = await askGeminiAboutEmails(prompt, emails, finalQuery)
+                
+                return {
+                    message: geminiAnswer,
+                    success: true,
+                    data: emails.length > 0 ? { threadId: emails[0].threadId, from: emails[0].from } : undefined
+                }
+            } catch (emailErr) {
+                console.error('[Nexus AI] Erro na busca de emails:', emailErr)
+                return {
+                    message: 'Erro ao consultar o Gmail. Verifique se as credenciais estão corretas.',
+                    success: false
+                }
             }
         }
 
-        // Fallback
+        // ---------------------------------------------------------
+        // ULTIMATE PASS: Gemini (Nexus Brain)
+        // ---------------------------------------------------------
+        console.log('[Nexus AI Action] No manual override found. Passing to Nexus Brain (Gemini)...')
+        const aiResult = await nexusBrain(prompt)
+        
+        if (aiResult && aiResult.success) {
+            console.timeEnd('NexusTotal')
+            return {
+                message: aiResult.message,
+                success: true,
+                actionPerformed: aiResult.actionPerformed as NexusResponse['actionPerformed'],
+                data: aiResult.data
+            }
+        }
+
+        // Final Fallback (Should rarely be reached)
         return {
-            message: "Ainda estou aprendendo esse comando. Posso ajudar com Capturas, Arquivos, Links, Status ou Configuração de Formatos.",
-            success: true
+            message: "Desculpe, tive um problema nos meus circuitos neurais. Como posso ajudar de outra forma?",
+            success: false
         }
 
     } catch (error) {

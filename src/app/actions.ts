@@ -13,9 +13,11 @@ export async function getNexusActivity() {
         });
 
         return logs.map(log => ({
+            id: log.id,
             message: log.message,
             type: log.level,
-            timestamp: log.createdAt.getTime()
+            timestamp: log.createdAt.getTime(),
+            details: (log as any).details || null
         })).reverse(); // Reverse to show chronological order in the feed
     } catch (error) {
         console.error('[Actions] Failed to fetch nexus activity:', error);
@@ -309,7 +311,8 @@ export async function getQueueStatus() {
     const campaigns = await prisma.campaign.findMany({
         where: {
             status: { in: ['QUEUED', 'PROCESSING'] },
-            isArchived: false
+            isArchived: false,
+            updatedAt: { gte: new Date(Date.now() - 20 * 60 * 1000) }
         },
         select: {
             id: true,

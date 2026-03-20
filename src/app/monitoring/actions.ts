@@ -7,7 +7,7 @@ import { nexusLogStore } from '@/lib/nexusLogStore'
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-const FETCH_TIMEOUT_MS = 15_000 // 15 seconds
+const FETCH_TIMEOUT_MS = 10_000 // 10 seconds (reduced from 15s to avoid Nexus Chat timeouts)
 
 // ---------------------------------------------------------------------------
 // Types for 00px GraphQL API responses

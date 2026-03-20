@@ -102,8 +102,7 @@ function NexusOrb({ className = "", isTyping = false, showRays = true, particleC
                         left: '50%',
                         marginTop: '-0.5px',
                         marginLeft: '-0.5px',
-                        animation: `${i % 2 === 0 ? 'nexus-orbit-out' : 'nexus-orbit-in'} ${(isTyping ? 2.5 : 7) / p.speed}s linear infinite`,
-                        animationDelay: `${p.delay}s`,
+                        animation: `${i % 2 === 0 ? 'nexus-orbit-out' : 'nexus-orbit-in'} ${(isTyping ? 2.5 : 7) / p.speed}s linear infinite ${p.delay}s`,
                     }}
                 />
             ))}
