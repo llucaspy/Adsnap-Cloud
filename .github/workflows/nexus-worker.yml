@@ -29,6 +29,8 @@ jobs:
 
       - name: Create .env file
         run: |
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env
+          echo "SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" >> .env
           echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
           echo "${{ secrets.ADSNAP_CLOUD_KEYS }}" >> .env
 
@@ -60,6 +62,8 @@ jobs:
 
       - name: Create .env file
         run: |
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env
+          echo "SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" >> .env
           echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
           echo "${{ secrets.ADSNAP_CLOUD_KEYS }}" >> .env
 
