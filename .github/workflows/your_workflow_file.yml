@@ -1,0 +1,25 @@
+# Workflow Updated
+
+# Include validation for .env file
+if [ ! -f .env ]; then
+  echo '.env file not found!'
+  exit 1
+fi
+
+# More detailed logging in Nexus Worker
+echo 'Starting Nexus Worker... '
+# ... (detailed logging implementation here)
+
+# Retry strategy implementation
+RETRIES=3
+for i in $(seq 1 $RETRIES); do
+  echo "Attempt $i of $RETRIES..."
+  # Call Nexus Worker function
+  if some_function; then
+    echo 'Successfully completed.'
+    break
+  fi
+  echo 'Failed. Retrying...'
+done
+
+# Additional necessary content and commands go here
