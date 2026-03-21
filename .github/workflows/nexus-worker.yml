@@ -34,10 +34,27 @@ jobs:
           echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
           echo "${{ secrets.ADSNAP_CLOUD_KEYS }}" >> .env
 
+      - name: Validar criação do arquivo .env
+        run: |
+          if [ ! -s .env ]; then
+            echo "❌ O arquivo .env não foi criado ou está vazio."
+            exit 1
+          fi
+
+          echo "✅ O arquivo .env foi gerado corretamente:"
+          grep -i "SUPABASE" .env || echo "⚠️ SUPABASE_URL ou SERVICE_ROLE_KEY não encontrada"
+          grep -i "DATABASE_URL" .env || echo "⚠️ DATABASE_URL não encontrada"
+
       - name: Run Nexus Worker
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: npm run worker
+        run: |
+          echo "▶️ Iniciando Nexus Worker"
+          RETRIES=3
+          for i in $(seq 1 $RETRIES); do
+            echo "Tentativa $i de $RETRIES..."
+            npm run worker && break || echo "⚠️ Falha ao executar o Nexus Worker. Tentando novamente..."
+          done
 
       - name: Run Storage Monitor
         env:
