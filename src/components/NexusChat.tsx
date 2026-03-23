@@ -167,13 +167,13 @@ export function NexusChat() {
             setIsTyping(false)
         }
 
-        const safetyTimer = setTimeout(cleanup, 20000)
+        const safetyTimer = setTimeout(cleanup, 60000)
 
         try {
             console.log('[Nexus UI] Chamando processNexusCommand:', userMsg)
             
             const timeoutPromise = new Promise<any>((_, reject) => 
-                setTimeout(() => reject(new Error('Timeout')), 20000)
+                setTimeout(() => reject(new Error('Timeout')), 60000)
             )
             
             const response = await Promise.race([
@@ -346,7 +346,7 @@ export function NexusChat() {
                             <div className="flex items-center gap-1.5">
                                 <span className={`h-1 w-1 rounded-full ${isTyping || isGlobalPolling ? 'bg-white/70 animate-pulse' : 'bg-white/20'}`} />
                                 <span className="text-[8px] font-black text-white/40 uppercase tracking-widest">
-                                    {isTyping ? 'Processando' : isGlobalPolling ? 'Global Link' : 'Online'}
+                                    {isTyping ? 'Analisando...' : isGlobalPolling ? 'Global Link' : 'Online'}
                                 </span>
                             </div>
                         </div>
@@ -473,13 +473,19 @@ export function NexusChat() {
                     )}
                     {isTyping && !showLogs && (
                         <div className="flex justify-start">
-                            <div className="bg-white/5 p-3 rounded-xl rounded-tl-none border border-white/10 flex items-center gap-2.5">
-                                <div className="flex gap-1">
-                                    <div className="w-1 h-1 bg-white/60 rounded-full" style={{ animation: 'bounce 1s infinite 0ms' }} />
-                                    <div className="w-1 h-1 bg-white/60 rounded-full" style={{ animation: 'bounce 1s infinite 150ms' }} />
-                                    <div className="w-1 h-1 bg-white/60 rounded-full" style={{ animation: 'bounce 1s infinite 300ms' }} />
+                            <div className="bg-white/5 p-3 rounded-xl rounded-tl-none border border-white/10 flex flex-col gap-2">
+                                <div className="flex items-center gap-2.5">
+                                    <div className="flex gap-1">
+                                        <div className="w-1 h-1 bg-white/60 rounded-full" style={{ animation: 'bounce 1s infinite 0ms' }} />
+                                        <div className="w-1 h-1 bg-white/60 rounded-full" style={{ animation: 'bounce 1s infinite 150ms' }} />
+                                        <div className="w-1 h-1 bg-white/60 rounded-full" style={{ animation: 'bounce 1s infinite 300ms' }} />
+                                    </div>
+                                    <span className="text-[8px] font-black text-white/20 uppercase tracking-[0.2em]">Nexus está pensando...</span>
                                 </div>
-                                <span className="text-[8px] font-black text-white/20 uppercase tracking-[0.2em]">Sincronizando...</span>
+                                {/* Progress visualizer */}
+                                <div className="w-full h-[1px] bg-white/5 overflow-hidden">
+                                     <div className="h-full bg-white/20 animate-[progress_30s_linear_infinite]" />
+                                </div>
                             </div>
                         </div>
                     )}

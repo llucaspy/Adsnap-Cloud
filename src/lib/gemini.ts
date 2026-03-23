@@ -51,7 +51,7 @@ PERGUNTA: "${prompt}"
 
     async function callGemini(text: string): Promise<string> {
         const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 20000)
+        const timeoutId = setTimeout(() => controller.abort(), 60000)
         try {
             console.time('[Gemini Fetch]')
             const response = await fetch(`${GEMINI_URL}?key=${apiKey}`, {

@@ -352,7 +352,7 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
         // Timeout de 12s para a IA (balanceado com o frontend de 20s)
         const brainPromise = nexusBrain(prompt)
         const timeoutPromise = new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error('Brain Timeout')), 12000)
+            setTimeout(() => reject(new Error('Brain Timeout')), 55000)
         )
         
         let brainResult: NexusResponse | null = null
