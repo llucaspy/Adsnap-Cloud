@@ -362,3 +362,50 @@ export async function getStorageStats(): Promise<BrainResponse> {
         return { success: false, message: `Erro ao buscar storage: ${error}` }
     }
 }
+
+export async function getDeleteWizardData(): Promise<BrainResponse> {
+    try {
+        const campaigns = await prisma.campaign.findMany({
+            where: { isArchived: false },
+            select: {
+                id: true,
+                client: true,
+                pi: true,
+                format: true,
+                captures: {
+                    select: {
+                        createdAt: true
+                    }
+                }
+            },
+            orderBy: { client: 'asc' }
+        })
+
+        const data = campaigns.map(c => {
+            // Group captures by date (YYYY-MM-DD BRT safe)
+            const dates = Array.from(new Set(
+                c.captures.map(cap => {
+                    const date = new Date(cap.createdAt)
+                    return date.toISOString().split('T')[0]
+                })
+            )).sort().reverse()
+
+            return {
+                id: c.id,
+                client: c.client,
+                pi: c.pi,
+                format: c.format,
+                captureDates: dates,
+                totalCaptures: c.captures.length
+            }
+        })
+
+        return {
+            success: true,
+            message: 'Dados para o assistente de exclusão carregados.',
+            data
+        }
+    } catch (error) {
+        return { success: false, message: `Erro ao buscar dados: ${error}` }
+    }
+}

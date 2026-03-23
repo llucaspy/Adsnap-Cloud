@@ -1192,3 +1192,111 @@ export async function simulateMonthlyCleanup() {
         return { success: false, error: 'Erro ao processar simulação de backup.' }
     }
 }
+
+/**
+ * Permanently deletes campaigns and all associated captures (DB + Storage).
+ */
+export async function deleteCampaignsAction(ids: string[]) {
+    if (!ids || ids.length === 0) return { success: false, error: 'Nenhum ID fornecido' }
+
+    try {
+        // 1. Get all capture screenshot paths for these campaigns
+        const captures = await prisma.capture.findMany({
+            where: { campaignId: { in: ids } },
+            select: { screenshotPath: true }
+        })
+
+        // 2. Extract relative paths and delete from Supabase
+        const { getSupabase } = await import('@/lib/supabase')
+        const sb = getSupabase()
+        
+        const storagePaths = captures
+            .map(c => {
+                const parts = c.screenshotPath.split('/public/screenshots/')
+                return parts.length > 1 ? parts[1] : null
+            })
+            .filter(Boolean) as string[]
+
+        if (storagePaths.length > 0) {
+            // Supabase remove can take up to 1000 paths at once
+            await sb.storage.from('screenshots').remove(storagePaths)
+        }
+
+        // 3. Delete campaigns (captures will cascade delete due to schema)
+        await prisma.campaign.deleteMany({
+            where: { id: { in: ids } }
+        })
+
+        // 4. Log the audit trail
+        nexusLogStore.addLog(`Nexus: ${ids.length} campanhas e seus prints foram excluídos permanentemente via chat.`, 'SYSTEM')
+        
+        revalidatePath('/')
+        revalidatePath('/monitoring')
+        return { success: true }
+    } catch (error) {
+        console.error('[Actions] Delete campaigns error:', error)
+        return { success: false, error: String(error) }
+    }
+}
+
+/**
+ * Deletes specific prints (captures) for selected campaigns on selected dates.
+ */
+export async function deletePrintsAction(campaignIds: string[], dates: string[]) {
+    if (!campaignIds.length || !dates.length) return { success: false, error: 'Seleção incompleta' }
+
+    try {
+        // 1. Find captures for these campaigns on these specific dates
+        // Dates come as YYYY-MM-DD
+        const captures = await prisma.capture.findMany({
+            where: {
+                campaignId: { in: campaignIds },
+                OR: dates.map(date => {
+                    const start = new Date(date)
+                    start.setUTCHours(0,0,0,0)
+                    const end = new Date(date)
+                    end.setUTCHours(23,59,59,999)
+                    return {
+                        createdAt: { gte: start, lte: end }
+                    }
+                })
+            },
+            select: { id: true, screenshotPath: true }
+        })
+
+        if (captures.length === 0) {
+            return { success: true, count: 0, message: 'Nenhum print encontrado nestas datas.' }
+        }
+
+        // 2. Extract relative paths and delete from Supabase
+        const { getSupabase } = await import('@/lib/supabase')
+        const sb = getSupabase()
+        
+        const storagePaths = captures
+            .map(c => {
+                const parts = c.screenshotPath.split('/public/screenshots/')
+                return parts.length > 1 ? parts[1] : null
+            })
+            .filter(Boolean) as string[]
+
+        if (storagePaths.length > 0) {
+            await sb.storage.from('screenshots').remove(storagePaths)
+        }
+
+        // 3. Delete capture records from Prisma
+        await prisma.capture.deleteMany({
+            where: { id: { in: captures.map(c => c.id) } }
+        })
+
+        // 4. Update parent campaigns' lastCaptureAt if necessary (optional improvement)
+        
+        nexusLogStore.addLog(`Nexus: ${captures.length} prints de ${dates.length} datas foram excluídos via chat.`, 'SYSTEM')
+        
+        revalidatePath('/')
+        return { success: true, count: captures.length }
+    } catch (error) {
+        console.error('[Actions] Delete prints error:', error)
+        return { success: false, error: String(error) }
+    }
+}
+

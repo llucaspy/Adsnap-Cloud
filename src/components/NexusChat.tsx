@@ -7,6 +7,7 @@ import remarkGfm from 'remark-gfm'
 
 import { processNexusCommand } from '../app/aiActions'
 import { NexusRegistrationPreview } from './NexusRegistrationPreview'
+import { NexusDeleteWizard } from './NexusDeleteWizard'
 
 import { NexusSmallCore } from './NexusCore'
 import * as brain from '../lib/nexusBrain'
@@ -41,6 +42,8 @@ export function NexusChat() {
     const hasShownFinalMessage = useRef(false)
     const [pendingCampaigns, setPendingCampaigns] = useState<Partial<ParsedCampaign>[]>([])
     const [showPreview, setShowPreview] = useState(false)
+    const [deleteData, setDeleteData] = useState<any[]>([])
+    const [showDeleteWizard, setShowDeleteWizard] = useState(false)
     const [queueStatus, setQueueStatus] = useState<{ client: string, status: string, count: number } | null>(null)
     const [logs, setLogs] = useState<brain.LogEntry[]>([])
     const [showLogs, setShowLogs] = useState(false)
@@ -167,13 +170,13 @@ export function NexusChat() {
             setIsTyping(false)
         }
 
-        const safetyTimer = setTimeout(cleanup, 60000)
+        const safetyTimer = setTimeout(cleanup, 100000)
 
         try {
             console.log('[Nexus UI] Chamando processNexusCommand:', userMsg)
             
             const timeoutPromise = new Promise<any>((_, reject) => 
-                setTimeout(() => reject(new Error('Timeout')), 60000)
+                setTimeout(() => reject(new Error('Timeout')), 100000)
             )
             
             const response = await Promise.race([
@@ -197,6 +200,11 @@ export function NexusChat() {
             if (response.actionPerformed === 'REGISTRATION_PREVIEW' && response.data) {
                 setPendingCampaigns(response.data)
                 setShowPreview(true)
+            }
+
+            if (response.actionPerformed === 'DELETE_WIZARD' && response.data) {
+                setDeleteData(response.data as any[])
+                setShowDeleteWizard(true)
             }
 
             if (response.actionPerformed === 'DOWNLOAD_ZIP' && response.data?.date) {
@@ -539,6 +547,22 @@ export function NexusChat() {
                         setMessages(prev => [...prev, {
                             role: 'assistant',
                             content: `✨ Excelente! Cadastro de ${count} ${count === 1 ? 'campanha' : 'campanhas'} realizado com sucesso. Elas já estão prontas no monitoramento.`,
+                            type: 'action',
+                            success: true
+                        }])
+                    }}
+                />
+            )}
+
+            {showDeleteWizard && (
+                <NexusDeleteWizard
+                    data={deleteData}
+                    onClose={() => setShowDeleteWizard(false)}
+                    onConfirm={(message) => {
+                        setShowDeleteWizard(false)
+                        setMessages(prev => [...prev, {
+                            role: 'assistant',
+                            content: message,
                             type: 'action',
                             success: true
                         }])

@@ -12,7 +12,7 @@ export interface ActionData {
 export interface NexusBrainResult {
     message: string
     success: boolean
-    actionPerformed?: 'CAPTURE' | 'CAPTURE_ALL' | 'ARCHIVE' | 'REGISTRATION_PREVIEW' | 'UPDATE_URL'
+    actionPerformed?: 'CAPTURE' | 'CAPTURE_ALL' | 'ARCHIVE' | 'REGISTRATION_PREVIEW' | 'UPDATE_URL' | 'DELETE_WIZARD'
     data?: unknown
 }
 
@@ -37,12 +37,14 @@ FERRAMENTAS DISPONÍVEIS:
 - getCampaignBI(piOrName) - DETALHES DE BI e ADOPS. Use para análises de entrega, pacing, metas e projeções.
 - getAdOpsSummary() - Análise de BI global (saúde de TODO o sistema).
 - createCampaign, archiveCampaign, runCapture, getLogs - Operações de gestão.
+- deleteWizard() - VOCÊ PRECISA USAR ESTA FERRAMENTA sempre que o usuário quiser APAGAR, DELETAR ou LIMPAR campanhas ou prints. Ela abre um assistente interativo para seleção.
 
 INSTRUÇÕES DE RESPOSTA:
 1. Pense como um analista: se o usuário quer saber "como está a Pé de Meia", ele quer um BI. Use getCampaignBI.
-2. Responda em JSON: {"action": "ferramenta", "params": {...}, "answer": "Intro curta"}
-3. **TONALIDADE**: Profissional, analítico, direto e propositivo. Se encontrar um Pacing baixo, sugira otimização.
-4. Responda em PORTUGUÊS.
+2. Se o usuário quiser apagar algo, use obrigatoriamente deleteWizard().
+3. Responda em JSON: {"action": "ferramenta", "params": {...}, "answer": "Intro curta"}
+4. **TONALIDADE**: Profissional, analítico, direto e propositivo. Se encontrar um Pacing baixo, sugira otimização.
+5. Responda em PORTUGUÊS.
 
 PERGUNTA: "${prompt}"
 
@@ -160,6 +162,9 @@ PERGUNTA: "${prompt}"
             case 'getLogs':
                 result = await brain.getLogs(params.limit as number | undefined)
                 break
+            case 'deleteWizard':
+                result = await brain.getDeleteWizardData()
+                break
             default:
                 return { message: `Ação "${action}" não reconhecida`, success: false }
         }
@@ -193,6 +198,7 @@ PERGUNTA: "${prompt}"
             if (action === 'archiveCampaign') perf = 'ARCHIVE'
             if (action === 'createCampaign') perf = 'REGISTRATION_PREVIEW'
             if (action === 'updateCampaign') perf = 'UPDATE_URL'
+            if (action === 'deleteWizard') perf = 'DELETE_WIZARD'
 
             return { 
                 message: responseMsg, 
