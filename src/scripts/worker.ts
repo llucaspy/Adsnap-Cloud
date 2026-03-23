@@ -97,6 +97,8 @@ async function cleanupStuckCampaigns() {
  */
 async function runWorkerCycle() {
     console.log('[Nexus Worker] Iniciando ciclo de processamento...')
+    await nexusLogStore.addLog('Nexus Worker: Ciclo iniciado no servidor.', 'SYSTEM')
+    
     const now = new Date()
     const brtNowStr = now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })
     const brtNow = new Date(brtNowStr)

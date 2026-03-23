@@ -29,14 +29,19 @@ jobs:
 
       - name: Create .env file
         run: |
-          echo "${{ secrets.ADSNAP_CLOUD_KEYS }}" > .env
-          echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
-          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
-          echo "SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" >> .env
-          echo "NEXT_PUBLIC_SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env
-          # Ensure .env.local exists for compatibility with some scripts
+          touch .env
+          echo "ADSNAP_CLOUD_KEYS='${{ secrets.ADSNAP_CLOUD_KEYS }}'" >> .env
+          echo "DATABASE_URL='${{ secrets.DATABASE_URL }}'" >> .env
+          echo "GEMINI_API_KEY='${{ secrets.GEMINI_API_KEY }}'" >> .env
+          echo "SUPABASE_SERVICE_ROLE_KEY='${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}'" >> .env
+          echo "NEXT_PUBLIC_SUPABASE_URL='${{ secrets.SUPABASE_URL }}'" >> .env
           cp .env .env.local
-          echo "✅ .env files created and synchronized."
+          echo "✅ .env files created."
+
+      - name: Check Database Connection
+        run: npx tsx src/scripts/check-db.ts
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       - name: Run Nexus Worker
         run: npm run worker
