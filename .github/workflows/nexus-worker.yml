@@ -22,31 +22,27 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps chromium
 
       - name: Create .env file
         run: |
-          touch .env
-          echo "ADSNAP_CLOUD_KEYS='${{ secrets.ADSNAP_CLOUD_KEYS }}'" >> .env
-          echo "DATABASE_URL='${{ secrets.DATABASE_URL }}'" >> .env
-          echo "GEMINI_API_KEY='${{ secrets.GEMINI_API_KEY }}'" >> .env
-          echo "SUPABASE_SERVICE_ROLE_KEY='${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}'" >> .env
-          echo "NEXT_PUBLIC_SUPABASE_URL='${{ secrets.SUPABASE_URL }}'" >> .env
+          echo "${{ secrets.ADSNAP_CLOUD_KEYS }}" > .env
           cp .env .env.local
-          echo "✅ .env files created."
+          echo "✅ .env and .env.local created from ADSNAP_CLOUD_KEYS"
+          echo "Keys found:"
+          grep -oE '^[A-Z_]+' .env || true
 
       - name: Check Database Connection
         run: npx tsx src/scripts/check-db.ts
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GITHUB_ACTIONS: "true"
 
       - name: Run Nexus Worker
         run: npm run worker
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GITHUB_ACTIONS: "true"
 
       - name: Run Storage Monitor
