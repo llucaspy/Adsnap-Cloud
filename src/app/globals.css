@@ -305,6 +305,18 @@ body {
   text-shadow: 0 0 20px rgba(255, 255, 255, 0.25), 0 0 60px rgba(255, 255, 255, 0.08);
 }
 
+.glow-text-sm {
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.15);
+}
+
+.glass-premium {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
 /* ------------------------------------------
    GLOW BUTTON
    ------------------------------------------ */

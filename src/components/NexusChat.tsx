@@ -328,7 +328,7 @@ export function NexusChat() {
 
             {/* Chat Window */}
             <div
-                className={`fixed bottom-6 right-6 z-60 flex flex-col transition-all duration-500 ease-out h-[600px] w-full max-w-[420px] shadow-[0_32px_80px_rgba(0,0,0,0.6)] border border-white/10 ${
+                className={`fixed bottom-6 right-6 z-60 flex flex-col transition-all duration-500 ease-out h-[655px] w-[824px] max-w-[calc(100vw-3rem)] shadow-[0_32px_80px_rgba(0,0,0,0.6)] border border-white/10 ${
                     isOpen ? 'translate-y-0 opacity-100 scale-100' : 'translate-y-12 opacity-0 scale-95 pointer-events-none'
                 }`}
                 style={{
@@ -368,7 +368,7 @@ export function NexusChat() {
                 </div>
 
                 {/* Messages Area */}
-                <div ref={scrollRef} className="flex-1 overflow-auto p-4 space-y-4 nexus-scrollbar scroll-smooth">
+                <div ref={scrollRef} className="flex-1 overflow-auto p-6 space-y-6 nexus-scrollbar scroll-smooth bg-[radial-gradient(circle_at_50%_50%,rgba(255,255,255,0.02)_0%,transparent_100%)]">
                     {showLogs ? (
                         <div className="space-y-3 animate-in fade-in duration-500">
                             <div className="flex items-center justify-between mb-2">
@@ -424,10 +424,10 @@ export function NexusChat() {
                             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-4 duration-500`}>
                                 <div className={`max-w-[85%] relative ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
                                     <div
-                                        className={`p-4 rounded-2xl text-[13px] leading-relaxed transition-all shadow-xl ${msg.role === 'user'
-                                            ? 'bg-white text-black rounded-tr-none font-medium'
-                                            : 'bg-white/5 text-white/95 rounded-tl-none border border-white/10'
-                                            }`}
+                                        className={`p-5 rounded-3xl text-[14px] leading-relaxed transition-all shadow-2xl backdrop-blur-xl ${msg.role === 'user'
+                                            ? 'bg-white text-black rounded-tr-none font-bold shadow-[0_10px_40px_rgba(255,255,255,0.15)] ring-1 ring-white/20'
+                                            : 'bg-white/[0.04] text-white/95 rounded-tl-none border border-white/10 bg-gradient-to-br from-white/[0.08] via-white/[0.02] to-transparent'
+                                            } ${msg.success === true && msg.type === 'action' ? 'border-indigo-500/40 shadow-[0_0_30px_rgba(99,102,241,0.1)]' : ''}`}
                                     >
                                         {msg.role === 'user' ? (
                                             msg.content
@@ -446,11 +446,11 @@ export function NexusChat() {
                                                             <span className="flex-1">{props.children}</span>
                                                         </li>
                                                     ),
-                                                    strong: (props) => <strong className="font-black text-white" {...props} />,
-                                                    blockquote: (props) => <blockquote className="border-l-2 border-white/20 pl-3 italic text-white/50 my-3" {...props} />,
-                                                    table: (props) => <div className="overflow-x-auto my-4"><table className="w-full text-left border-collapse border border-white/10 rounded-lg overflow-hidden" {...props} /></div>,
-                                                    th: (props) => <th className="bg-white/10 p-2 text-[10px] font-black uppercase tracking-widest border border-white/10" {...props} />,
-                                                    td: (props) => <td className="p-2 border border-white/10 text-[11px]" {...props} />,
+                                                    strong: (props) => <strong className="font-black text-white glow-text-sm" {...props} />,
+                                                    blockquote: (props) => <blockquote className="border-l-2 border-indigo-500/30 bg-indigo-500/5 pl-3 py-1 italic text-white/70 my-4 rounded-r-md" {...props} />,
+                                                    table: (props) => <div className="overflow-x-auto my-6 rounded-xl border border-white/10 bg-black/20 shadow-inner"><table className="w-full text-left border-collapse" {...props} /></div>,
+                                                    th: (props) => <th className="bg-white/5 p-3 text-[10px] font-black uppercase tracking-widest border-b border-white/10 text-white/60" {...props} />,
+                                                    td: (props) => <td className="p-3 border-b border-white/5 text-[11px] text-white/80 hover:bg-white/[0.02] transition-colors" {...props} />,
                                                 }}
                                             >
                                                 {msg.content}
