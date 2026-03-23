@@ -161,7 +161,7 @@ async function runWorkerCycle() {
                 status: { in: ['PENDING', 'QUEUED'] },
                 isArchived: false
             },
-            take: 10
+            take: 20
         })
 
         if (campaigns.length > 0) {
