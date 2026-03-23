@@ -28,12 +28,20 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Create .env file
-        run: echo "${{ secrets.ADSNAP_CLOUD_KEYS }}" > .env
+        run: |
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env
+          echo "SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" >> .env
+          echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
+          echo "${{ secrets.ADSNAP_CLOUD_KEYS }}" >> .env
 
       - name: Run Nexus Worker
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: npm run worker
 
       - name: Run Storage Monitor
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: npm run monitor
 
   monthly-cleanup:
@@ -53,7 +61,13 @@ jobs:
         run: npm ci
 
       - name: Create .env file
-        run: echo "${{ secrets.ADSNAP_CLOUD_KEYS }}" > .env
+        run: |
+          echo "SUPABASE_URL=${{ secrets.SUPABASE_URL }}" >> .env
+          echo "SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" >> .env
+          echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
+          echo "${{ secrets.ADSNAP_CLOUD_KEYS }}" >> .env
 
       - name: Run Monthly Cleanup
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: npm run monthly-cleanup
