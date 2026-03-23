@@ -318,6 +318,34 @@ export async function getAdOpsSummary(): Promise<BrainResponse> {
     }
 }
 
+export async function getCampaignBI(piOrName: string): Promise<BrainResponse> {
+    try {
+        const query = (piOrName || "").toLowerCase().trim()
+        const metrics = await getAggregatedAdOpsMetrics()
+        
+        const campaign = metrics.campaigns.find(c => 
+            c.pi.toLowerCase() === query || 
+            c.name.toLowerCase().includes(query) ||
+            c.advertiser.toLowerCase().includes(query)
+        )
+
+        if (!campaign) {
+            return { 
+                success: false, 
+                message: `Não encontrei métricas de BI (AdOps) para "${piOrName}". Verifique se o PI está correto ou se a campanha está ativa no Dashboard.` 
+            }
+        }
+
+        return {
+            success: true,
+            message: `Métricas de BI para ${campaign.name} (PI: ${campaign.pi})`,
+            data: campaign
+        }
+    } catch (error) {
+        return { success: false, message: `Erro ao buscar métricas de BI: ${error}` }
+    }
+}
+
 export async function getStorageStats(): Promise<BrainResponse> {
     try {
         const usage = await getStorageUsage()
