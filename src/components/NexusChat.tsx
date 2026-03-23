@@ -42,7 +42,7 @@ export function NexusChat() {
     const hasShownFinalMessage = useRef(false)
     const [pendingCampaigns, setPendingCampaigns] = useState<Partial<ParsedCampaign>[]>([])
     const [showPreview, setShowPreview] = useState(false)
-    const [deleteData, setDeleteData] = useState<any[]>([])
+    const [deleteData, setDeleteData] = useState<any>(null)
     const [showDeleteWizard, setShowDeleteWizard] = useState(false)
     const [queueStatus, setQueueStatus] = useState<{ client: string, status: string, count: number } | null>(null)
     const [logs, setLogs] = useState<brain.LogEntry[]>([])

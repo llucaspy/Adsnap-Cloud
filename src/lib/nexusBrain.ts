@@ -381,12 +381,15 @@ export async function getDeleteWizardData(): Promise<BrainResponse> {
             orderBy: { client: 'asc' }
         })
 
-        const data = campaigns.map(c => {
+        const globalDateCounts: Record<string, number> = {}
+
+        const campaignsData = campaigns.map(c => {
             // Group captures by date (YYYY-MM-DD BRT safe)
             const dates = Array.from(new Set(
                 c.captures.map(cap => {
-                    const date = new Date(cap.createdAt)
-                    return date.toISOString().split('T')[0]
+                    const dateStr = cap.createdAt.toISOString().split('T')[0]
+                    globalDateCounts[dateStr] = (globalDateCounts[dateStr] || 0) + 1
+                    return dateStr
                 })
             )).sort().reverse()
 
@@ -400,10 +403,18 @@ export async function getDeleteWizardData(): Promise<BrainResponse> {
             }
         })
 
+        // Format global dates for the UI
+        const globalDates = Object.entries(globalDateCounts)
+            .map(([date, count]) => ({ date, count }))
+            .sort((a, b) => b.date.localeCompare(a.date))
+
         return {
             success: true,
             message: 'Dados para o assistente de exclusão carregados.',
-            data
+            data: {
+                campaigns: campaignsData,
+                globalDates
+            }
         }
     } catch (error) {
         return { success: false, message: `Erro ao buscar dados: ${error}` }
