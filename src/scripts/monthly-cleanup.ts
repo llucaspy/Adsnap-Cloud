@@ -1,10 +1,8 @@
-import 'dotenv/config'
-import { PrismaClient } from '@prisma/client'
+import '../lib/env'
+import prisma from '../lib/prisma'
 import { supabase } from '../lib/supabase'
 import JSZip from 'jszip'
 import { format, subMonths, startOfMonth, endOfMonth } from 'date-fns'
-
-const prisma = new PrismaClient()
 
 const BOT_TOKEN = process.env.NexusTelegram || ''
 const CHAT_ID = process.env.chatidtelegram || ''

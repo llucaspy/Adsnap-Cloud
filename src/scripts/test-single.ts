@@ -1,4 +1,4 @@
-import 'dotenv/config'
+import '../lib/env'
 import { processCampaign } from '../lib/captureService'
 
 async function testSingle() {

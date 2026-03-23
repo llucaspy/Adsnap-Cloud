@@ -1,19 +1,16 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-
 let supabaseInstance: SupabaseClient | null = null
 
 export const getSupabase = () => {
     if (supabaseInstance) return supabaseInstance
 
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
     if (!supabaseUrl || !supabaseServiceKey) {
         console.warn('[Supabase] Credenciais ausentes no .env - Retornando cliente vazio (isso pode causar erros em runtime)')
-        // Don't crash at build time, but let it fail if actually called
-        if (!supabaseUrl || !supabaseServiceKey) {
-            throw new Error('Supabase URL and Service Role Key are required for this operation.')
-        }
+        throw new Error('Supabase URL and Service Role Key are required for this operation.')
     }
 
     supabaseInstance = createClient(supabaseUrl!, supabaseServiceKey!, {

@@ -1,4 +1,4 @@
-import 'dotenv/config'
+import '../lib/env'
 
 async function testToken() {
     const token = process.env.GITHUB_TOKEN

@@ -1,7 +1,5 @@
-import 'dotenv/config'
-import { PrismaClient } from '@prisma/client'
-
-const prisma = new PrismaClient()
+import '../lib/env'
+import prisma from '../lib/prisma'
 
 async function monitorStorage() {
     console.log('[Storage Monitor] Iniciando verificação...')

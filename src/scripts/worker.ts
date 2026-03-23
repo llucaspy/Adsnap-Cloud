@@ -1,6 +1,4 @@
-import dotenv from 'dotenv'
-import path from 'path'
-dotenv.config({ path: path.resolve(process.cwd(), '.env.local') })
+import '../lib/env'
 import prisma from '../lib/prisma'
 import { processCampaign } from '../lib/captureService'
 import { nexusLogStore } from '../lib/nexusLogStore'
