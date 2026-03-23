@@ -2,7 +2,6 @@
 
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
-import { redirect } from 'next/navigation'
 import { nexusLogStore } from '@/lib/nexusLogStore'
 
 export async function getNexusActivity() {
@@ -43,6 +42,29 @@ export async function runCapture(campaignId: string) {
 
     revalidatePath('/')
     return { success: true, message: 'Capture queued for GitHub Worker' }
+}
+
+export async function runCaptureBatch(campaignIds: string[]) {
+    if (!campaignIds || campaignIds.length === 0) return { success: true, count: 0 }
+
+    console.log(`[Nexus] Enfileirando lote de ${campaignIds.length} capturas...`)
+
+    await prisma.campaign.updateMany({
+        where: { id: { in: campaignIds } },
+        data: { status: 'QUEUED' }
+    })
+
+    nexusLogStore.addLog(`Nexus: Lote de ${campaignIds.length} campanhas enfileirado via interface.`, 'SYSTEM')
+
+    // Trigger GitHub Worker ONCE
+    const triggered = await triggerNexusWorker()
+    if (!triggered) {
+        nexusLogStore.addLog('Nexus: Worker não disparado no lote (verifique chaves)', 'ERROR')
+    }
+
+    revalidatePath('/')
+    revalidatePath('/monitoring')
+    return { success: true, count: campaignIds.length }
 }
 
 export async function getCampaignDetailsByPi(pi: string) {
@@ -398,6 +420,11 @@ export async function triggerNexusWorker() {
 
     try {
         console.log(`[Nexus] Triggering GitHub worker for ${repo}...`)
+        
+        // Timeout de 15 segundos para evitar travamento da Server Action
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 15000)
+
         const response = await fetch(
             `https://api.github.com/repos/${repo}/actions/workflows/nexus-worker.yml/dispatches`,
             {
@@ -410,9 +437,12 @@ export async function triggerNexusWorker() {
                 },
                 body: JSON.stringify({
                     ref: 'main' // Trigger the main branch
-                })
+                }),
+                signal: controller.signal
             }
         )
+
+        clearTimeout(timeoutId)
 
         if (response.ok) {
             console.log('[Nexus] GitHub worker triggered successfully.')
@@ -738,7 +768,53 @@ export async function getAdminMetrics() {
             }
         }
 
-        // 5. Nexus Health
+        // 5. Gemini AI Status
+        let geminiStatus = {
+            isActive: false,
+            isRateLimited: false,
+            tier: 'free' as string,
+            modelsAvailable: 0,
+            error: null as string | null,
+            retryAfter: null as string | null
+        }
+
+        const geminiKey = process.env.GEMINI_API_KEY
+        if (geminiKey) {
+            try {
+                // Check key validity by listing models
+                const modelsRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${geminiKey}`, {
+                    signal: AbortSignal.timeout(10000)
+                })
+                if (modelsRes.ok) {
+                    const modelsData = await modelsRes.json()
+                    geminiStatus.isActive = true
+                    geminiStatus.modelsAvailable = modelsData.models?.length || 0
+                }
+
+                // Quick generation test to check rate limits
+                const testRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: 'OK' }] }] }),
+                    signal: AbortSignal.timeout(10000)
+                })
+
+                if (testRes.status === 429) {
+                    geminiStatus.isRateLimited = true
+                    const errData = await testRes.json()
+                    const retryInfo = errData.error?.details?.find((d: any) => d.retryDelay)
+                    geminiStatus.retryAfter = retryInfo?.retryDelay || null
+                } else if (!testRes.ok) {
+                    geminiStatus.error = `Status ${testRes.status}`
+                }
+            } catch (err) {
+                geminiStatus.error = err instanceof Error ? err.message : 'Timeout'
+            }
+        } else {
+            geminiStatus.error = 'GEMINI_API_KEY não configurada'
+        }
+
+        // 6. Nexus Health
         const lastRun = settings?.storageCheckLastRun
 
         return {
@@ -762,6 +838,7 @@ export async function getAdminMetrics() {
                 percentage: (dailyEmails / 100) * 100
             },
             telegram: telegramStatus,
+            gemini: geminiStatus,
             health: {
                 lastRun: lastRun,
                 isHealthy: lastRun ? (new Date().getTime() - lastRun.getTime() < 24 * 60 * 60 * 1000) : false

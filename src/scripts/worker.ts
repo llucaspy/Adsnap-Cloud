@@ -5,8 +5,6 @@ import { nexusLogStore } from '../lib/nexusLogStore'
 import { getGmailClient, fetchRecentEmails } from '../lib/gmail'
 import { classifyEmail } from '../lib/gemini'
 
-let lastGmailCheck = 0
-const GMAIL_CHECK_INTERVAL = 2 * 60 * 1000 // 2 minutes
 const processedEmailIds = new Set<string>()
 
 /**
@@ -62,7 +60,6 @@ async function checkGmail() {
                 arr.forEach(id => processedEmailIds.add(id))
             }
         }
-        lastGmailCheck = Date.now()
     } catch (gmailErr) {
         console.error('[Nexus Worker] Erro no monitoramento do Gmail:', gmailErr)
     }

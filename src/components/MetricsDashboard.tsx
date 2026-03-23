@@ -11,7 +11,9 @@ import {
     RefreshCw,
     TrendingUp,
     Clock,
-    Send
+    Send,
+    Sparkles,
+    Zap
 } from 'lucide-react'
 import { getAdminMetrics } from '@/app/actions'
 import { TelegramStatusCard } from './TelegramStatusCard'
@@ -111,22 +113,27 @@ export function MetricsDashboard() {
                     description="Reset à meia-noite"
                 />
 
-                {/* Nexus Engine Health */}
+                {/* Gemini AI Status */}
                 <div className="glass group rounded-[32px] p-6 border border-white/5 hover:border-white/10 transition-all flex flex-col justify-between">
                     <div className="flex items-start justify-between">
-                        <div className="p-3 rounded-2xl bg-orange-400/10 border border-orange-400/20">
-                            <TrendingUp className="w-5 h-5 text-orange-400" />
+                        <div className="p-3 rounded-2xl bg-cyan-400/10 border border-cyan-400/20">
+                            <Sparkles className="w-5 h-5 text-cyan-400" />
                         </div>
-                        <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase ${metrics.health.isHealthy ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}`}>
-                            {metrics.health.isHealthy ? <CheckCircle2 size={10} /> : <AlertTriangle size={10} />}
-                            {metrics.health.isHealthy ? 'Operacional' : 'Sem Atividade'}
+                        <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase ${metrics.gemini.isActive && !metrics.gemini.isRateLimited ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : metrics.gemini.isRateLimited ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}`}>
+                            {metrics.gemini.isActive && !metrics.gemini.isRateLimited ? <CheckCircle2 size={10} /> : metrics.gemini.isRateLimited ? <Zap size={10} className="animate-pulse" /> : <AlertTriangle size={10} />}
+                            {metrics.gemini.isActive && !metrics.gemini.isRateLimited ? 'Ativo' : metrics.gemini.isRateLimited ? 'Rate Limit' : 'Erro/Inativo'}
                         </div>
                     </div>
                     <div>
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-white/30 mb-1">Último Ciclo Nexus</p>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-white/30 mb-1">Google Gemini AI</p>
                         <h3 className="text-lg font-black text-white flex items-center gap-2">
-                            <Clock size={16} className="text-white/20" />
-                            {formatTime(metrics.health.lastRun)}
+                            {metrics.gemini.isRateLimited ? (
+                                <span className="text-amber-400 text-sm">Cota Excedida (Aguarde {metrics.gemini.retryAfter || 'alguns segundos'})</span>
+                            ) : metrics.gemini.isActive ? (
+                                <><Zap size={16} className="text-cyan-400" /> {metrics.gemini.modelsAvailable} Modelos</>
+                            ) : (
+                                <span className="text-rose-400 text-sm italic">{metrics.gemini.error || 'Não configurado'}</span>
+                            )}
                         </h3>
                     </div>
                 </div>
