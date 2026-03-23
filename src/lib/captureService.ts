@@ -224,7 +224,16 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
         await nexusLogStore.addLog(`Nexus: Lançando browser Playwright (${targetW}x${targetH})`, 'SYSTEM', undefined, campaignId);
         const isMobile = campaign.device === 'mobile' || (targetW === 320 && (targetH === 100 || targetH === 50));
 
-        browser = await chromium.launch({ headless: true });
+        browser = await chromium.launch({
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--font-render-hinting=none'
+            ]
+        });
 
         const context = await browser.newContext(isMobile ? {
             ...devices['iPhone 13'],
@@ -527,6 +536,12 @@ async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: strin
 
 async function compositeStudioImage(screenshot: Buffer, url: string, isMobile: boolean): Promise<Buffer> {
     const studioBrowser = await chromium.launch({ headless: true });
+    
+    // Timeout de segurança para a composição (60s)
+    const timeoutPromise = new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Studio Composition Timeout')), 60000)
+    );
+
     try {
         const studioPage = await studioBrowser.newPage();
         await studioPage.setViewportSize({ width: 1920, height: 1080 });
@@ -738,7 +753,11 @@ async function compositeStudioImage(screenshot: Buffer, url: string, isMobile: b
         await studioPage.setContent(html);
         await studioPage.waitForTimeout(500);
 
-        const finalBuffer = await studioPage.screenshot({ type: 'png' });
+        const finalBuffer = await Promise.race([
+            studioPage.screenshot({ type: 'png' }),
+            timeoutPromise
+        ]);
+
         return finalBuffer;
     } finally {
         await studioBrowser.close();

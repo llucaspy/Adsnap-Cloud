@@ -50,7 +50,7 @@ PERGUNTA: "${prompt}"
 
     async function callGemini(text: string): Promise<string> {
         const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 60000)
+        const timeout = setTimeout(() => controller.abort(), 100000)
         try {
             console.time('[Gemini Fetch]')
             const response = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
@@ -61,7 +61,7 @@ PERGUNTA: "${prompt}"
             })
             console.timeEnd('[Gemini Fetch]')
             const data = await response.json()
-            clearTimeout(timeoutId)
+            clearTimeout(timeout)
             return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
         } catch {
             return ''
@@ -233,16 +233,22 @@ Responda APENAS "SIM" ou "NAO".`
         }]
     }
 
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 30000) // 30s timeout
+
     try {
         const response = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            signal: controller.signal
         })
         const data = await response.json()
+        clearTimeout(timeout)
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim().toUpperCase() || ''
         return text.includes('SIM')
     } catch (error) {
+        clearTimeout(timeout)
         console.error('[Gemini] Erro na classificação:', error)
         return false
     }
@@ -278,16 +284,22 @@ Retorne APENAS a query do Gmail (ex: from:Adreson to:${userEmail} newer_than:7d)
         }]
     }
 
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 30000)
+
     try {
         const response = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            signal: controller.signal
         })
         const data = await response.json()
+        clearTimeout(timeout)
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim().replace(/"/g, '').replace(/\./g, '') || 'newer_than:7d'
         return text
     } catch (error) {
+        clearTimeout(timeout)
         console.error('[Gemini] Erro ao construir query:', error)
         return 'newer_than:7d'
     }
@@ -337,19 +349,25 @@ Responda de forma direta e útil. Se a pergunta for sobre "último email" ou "em
         }]
     }
 
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 60000) // 60s for chat
+
     try {
         const response = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            signal: controller.signal
         })
         const data = await response.json()
+        clearTimeout(timeout)
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
         
         if (!text) return formatFallbackResponse(emails, userQuestion, finalQuery)
         
         return text
     } catch {
+        clearTimeout(timeout)
         return formatFallbackResponse(emails, userQuestion, finalQuery)
     }
 }
