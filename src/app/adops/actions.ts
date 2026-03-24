@@ -243,7 +243,8 @@ async function fetchAndCacheMetrics(): Promise<AdOpsMetrics> {
                 let totalGoal = 0
                 let avgViewability = 0
                 let metricsCount = 0
-                const formats: FormatEntry[] = []
+                let formats: FormatEntry[] = []
+                let fetchedAt = result.fetchedAt || null
 
                 if (apiAvailable && result.data) {
                     const sites = result.data.sites || []
@@ -271,6 +272,16 @@ async function fetchAndCacheMetrics(): Promise<AdOpsMetrics> {
                         }
                     }
                     if (metricsCount > 0) avgViewability = safeDivide(avgViewability, metricsCount)
+                } else if (metricsCache) {
+                    // Fallback to cache if API is down
+                    const previous = metricsCache.data.campaigns.find(c => c.id === pi)
+                    if (previous) {
+                        totalDelivered = previous.deliveredImpressions
+                        totalGoal = previous.goalImpressions
+                        avgViewability = previous.viewability
+                        formats = previous.formats || []
+                        fetchedAt = previous.fetchedAt
+                    }
                 }
 
                 if (totalGoal === 0) totalGoal = group.length * 1_000_000 
@@ -345,7 +356,7 @@ async function fetchAndCacheMetrics(): Promise<AdOpsMetrics> {
                 if (isDelayedButHealthy) diagnostics.push('⚠️ Risco Oculto: Pacing OK mas projeção baixa')
                 if (recalcPressure > 1.2) diagnostics.push(`Pressão de entrega ALTA (${recalcPressure.toFixed(2)}x)`)
                 if (avgViewability < 60) diagnostics.push(`Viewability baixa (${avgViewability.toFixed(0)}%)`)
-                if (!apiAvailable) diagnostics.push('⚠️ API 00px indisponível')
+                if (!apiAvailable) diagnostics.push('⚠️ API Indisponível (Dados em cache)')
 
                 const recommendations: string[] = []
                 if (recalcPressure > 1.1) recommendations.push(`Acelerar entrega em ${((recalcPressure - 1) * 100).toFixed(0)}%`)
@@ -371,7 +382,7 @@ async function fetchAndCacheMetrics(): Promise<AdOpsMetrics> {
                     pi,
                     manualDashboardUrl,
                     apiAvailable,
-                    fetchedAt: result.fetchedAt || null,
+                    fetchedAt,
                     projection: { completion: projectedFinalValue, completionPercent: projectionPercent, total: projectedFinalValue, dailyRate: currentDaily },
                     timeProgress,
                     deliveryProgress,
