@@ -101,7 +101,7 @@ function extractDayImpressions(cpmRaw: DailyCpmData | string | undefined): numbe
 // Main Export
 // ---------------------------------------------------------------------------
 let metricsCache: { data: AdOpsMetrics, timestamp: number } | null = null
-const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+const CACHE_TTL = 2 * 60 * 1000 // 2 minutes
 let isRefreshing = false
 let currentRefreshPromise: Promise<AdOpsMetrics> | null = null
 
