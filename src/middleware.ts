@@ -8,11 +8,9 @@ function getJwtSecret() {
 
 // Rotas públicas que NÃO exigem autenticação
 const PUBLIC_ROUTES = [
-    '/',
     '/login',
     '/api/auth',
     '/api/cron',
-    '/api/debug',
     '/api/nexus',
     '/api/telegram',
 ]
