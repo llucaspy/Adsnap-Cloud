@@ -185,7 +185,8 @@ async function fetchAndCacheMetrics(): Promise<AdOpsMetrics> {
     try {
         const campaigns = await prisma.campaign.findMany({
             where: {
-                isArchived: false
+                isArchived: false,
+                showOnDashboard: true
             }
         })
 

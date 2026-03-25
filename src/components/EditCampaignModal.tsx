@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useTransition } from 'react'
-import { X, Globe, Monitor, Smartphone, Layers, ChevronDown, ChevronUp, Save, Calendar, Building2, User2, Hash, Loader2, Plus, Trash2 } from 'lucide-react'
+import { X, Globe, Monitor, Smartphone, Layers, ChevronDown, ChevronUp, Save, Calendar, Building2, User2, Hash, Loader2, Plus, Trash2, Activity } from 'lucide-react'
 import { updateCampaign, addFormatToCampaign, deleteCampaign } from '@/app/actions'
 
 interface EditCampaignModalProps {
@@ -41,6 +41,7 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
         isScheduled: firstCampaign.isScheduled || false,
         scheduledTimes: firstCampaign.scheduledTimes || '[]',
         manualDashboardUrl: firstCampaign.manualDashboardUrl || '',
+        showOnDashboard: firstCampaign.showOnDashboard !== false, // default to true
     })
 
     // Format entries - one per campaign
@@ -133,6 +134,7 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                     data.append('manualDashboardUrl', shared.manualDashboardUrl || '')
                     data.append('isScheduled', shared.isScheduled.toString())
                     data.append('scheduledTimes', shared.scheduledTimes)
+                    data.append('showOnDashboard', shared.showOnDashboard.toString())
                     if (entry.dailyGoalThreshold) data.append('dailyGoalThreshold', entry.dailyGoalThreshold.toString())
                     await updateCampaign(entry.id, data)
                 }
@@ -157,6 +159,7 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                         isMonitoringActive: entry.isMonitoringActive,
                         manualDashboardUrl: shared.manualDashboardUrl || null,
                         dailyGoalThreshold: entry.dailyGoalThreshold,
+                        showOnDashboard: shared.showOnDashboard,
                     } as any)
                 }
 
@@ -252,6 +255,27 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                             placeholder="https://exemplo.com/dash"
                         />
                     </FieldBlock>
+                    
+                    <div className="flex items-center justify-between p-4 rounded-2xl bg-white/5 border border-white/10">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center">
+                                <Activity className="text-indigo-400" size={20} />
+                            </div>
+                            <div>
+                                <p className="text-xs font-black text-white uppercase tracking-widest">Exibir no Dashboard de AdOps</p>
+                                <p className="text-[10px] text-white/30 font-medium">Define se esta PI aparecerá na visão geral de performance.</p>
+                            </div>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={shared.showOnDashboard}
+                                onChange={e => updateShared({ showOnDashboard: e.target.checked })}
+                                className="sr-only peer"
+                            />
+                            <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white/40 after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
+                        </label>
+                    </div>
 
                     {/* Formats Section */}
                     <div className="border-t border-white/5 pt-4">

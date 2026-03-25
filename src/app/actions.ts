@@ -249,6 +249,7 @@ export async function updateCampaign(id: string, formData: FormData) {
             isMonitoringActive: formData.get('isMonitoringActive') === 'true',
             manualDashboardUrl: formData.get('manualDashboardUrl') as string | null,
             dailyGoalThreshold: formData.get('dailyGoalThreshold') ? Number(formData.get('dailyGoalThreshold')) : null,
+            showOnDashboard: formData.get('showOnDashboard') === 'true',
         },
     })
 
@@ -297,6 +298,7 @@ export async function addFormatToCampaign(data: {
             isMonitoringActive: (data as any).isMonitoringActive || false,
             manualDashboardUrl: (data as any).manualDashboardUrl || null,
             dailyGoalThreshold: data.dailyGoalThreshold || null,
+            showOnDashboard: (data as any).showOnDashboard !== false,
         },
     })
 
@@ -489,6 +491,7 @@ export async function bulkCreateCampaigns(campaigns: any[]) {
                     externalCampaignId: data.externalCampaignId || null,
                     isMonitoringActive: data.isMonitoringActive || false,
                     manualDashboardUrl: data.manualDashboardUrl || null,
+                    showOnDashboard: data.showOnDashboard !== false,
                 }
             })
             results.push({ success: true, id: campaign.id })
