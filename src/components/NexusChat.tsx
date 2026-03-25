@@ -38,6 +38,8 @@ export function NexusChat() {
     ])
     const [isTyping, setIsTyping] = useState(false)
     const scrollRef = useRef<HTMLDivElement>(null)
+    const chatRef = useRef<HTMLDivElement>(null)
+    const toggleRef = useRef<HTMLButtonElement>(null)
 
     const [isGlobalPolling, setIsGlobalPolling] = useState(false)
     const hasShownFinalMessage = useRef(false)
@@ -50,6 +52,22 @@ export function NexusChat() {
     const [showLogs, setShowLogs] = useState(false)
     const [emailToast, setEmailToast] = useState<{ from: string, subject: string, threadId: string } | null>(null)
     const lastEmailAlertIdRef = useRef<string | null>(null)
+    
+    // Click outside to close
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (isOpen && 
+                chatRef.current && 
+                !chatRef.current.contains(event.target as Node) &&
+                toggleRef.current &&
+                !toggleRef.current.contains(event.target as Node)
+            ) {
+                setIsOpen(false)
+            }
+        }
+        document.addEventListener('mousedown', handleClickOutside)
+        return () => document.removeEventListener('mousedown', handleClickOutside)
+    }, [isOpen])
 
 
     useEffect(() => {
@@ -287,6 +305,7 @@ export function NexusChat() {
 
             {/* The Orb */}
             <button
+                ref={toggleRef}
                 onClick={() => setIsOpen(!isOpen)}
                 className={`fixed bottom-8 right-8 z-[9999] w-16 h-16 rounded-full flex items-center justify-center transition-all duration-700 hover:scale-110 group ${isOpen ? 'rotate-90' : ''}`}
                 style={{
@@ -310,6 +329,7 @@ export function NexusChat() {
 
             {/* Chat Window */}
             <div
+                ref={chatRef}
                 className={`fixed bottom-6 right-6 z-[9999] flex flex-col transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] h-[700px] w-[900px] max-w-[calc(100vw-3rem)] max-h-[calc(100vh-6rem)] overflow-hidden shadow-[0_40px_100px_-20px_rgba(0,0,0,0.7)] border border-white/10 rounded-[32px] ${
                     isOpen ? 'translate-y-0 opacity-100 scale-100' : 'translate-y-12 opacity-0 scale-95 pointer-events-none'
                 }`}

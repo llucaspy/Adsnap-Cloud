@@ -35,7 +35,7 @@ model Campaign {
   manualDashboardUrl  String?
   dailyGoalThreshold  Int?
   lastThresholdAlertAt DateTime?
-  showOnDashboard     Boolean         @default(true)
+  showOnDashboard     Boolean         @default(false)
   captures            Capture[]
   emailDispatches EmailDispatch[]
 }
