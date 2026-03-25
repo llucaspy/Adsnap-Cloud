@@ -24,6 +24,7 @@ interface FormatEntry {
     externalAuthUrl: string
     externalCampaignId: string
     isMonitoringActive: boolean
+    dailyGoalThreshold: number | null
 }
 
 export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: EditCampaignModalProps) {
@@ -57,6 +58,7 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
             externalAuthUrl: c.externalAuthUrl || '',
             externalCampaignId: c.externalCampaignId || '',
             isMonitoringActive: c.isMonitoringActive || false,
+            dailyGoalThreshold: c.dailyGoalThreshold || null,
         }))
     )
 
@@ -130,6 +132,7 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                     data.append('manualDashboardUrl', shared.manualDashboardUrl || '')
                     data.append('isScheduled', shared.isScheduled.toString())
                     data.append('scheduledTimes', shared.scheduledTimes)
+                    if (entry.dailyGoalThreshold) data.append('dailyGoalThreshold', entry.dailyGoalThreshold.toString())
                     await updateCampaign(entry.id, data)
                 }
 
@@ -152,6 +155,7 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                         externalCampaignId: entry.externalCampaignId,
                         isMonitoringActive: entry.isMonitoringActive,
                         manualDashboardUrl: shared.manualDashboardUrl || null,
+                        dailyGoalThreshold: entry.dailyGoalThreshold,
                     } as any)
                 }
 
@@ -416,6 +420,19 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                                                         </div>
                                                     )}
                                                 </div>
+                                                
+                                            <div className="border-t border-white/5 pt-4">
+                                                <FieldBlock label="Meta Diária de Impressões (Alerta)" icon={Hash}>
+                                                    <input
+                                                        type="number"
+                                                        value={entry.dailyGoalThreshold || ''}
+                                                        onChange={e => updateEntry(index, { dailyGoalThreshold: e.target.value ? Number(e.target.value) : null })}
+                                                        className="modal-input"
+                                                        placeholder="Ex: 30000"
+                                                    />
+                                                    <p className="text-[9px] text-white/20 mt-1 uppercase tracking-tight">O Nexus avisará no Telegram ao atingir 90% e 100% dessa entrega.</p>
+                                                </FieldBlock>
+                                            </div>
                                             </div>
                                         )}
                                     </div>

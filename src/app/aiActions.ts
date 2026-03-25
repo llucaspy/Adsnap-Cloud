@@ -326,6 +326,30 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
         }
     }
 
+    // 6. SET THRESHOLD ALERT (NEW)
+    if ((text.includes('alerta') || text.includes('avise') || text.includes('notifique')) && 
+        (text.includes('impressão') || text.includes('entrega') || text.includes('chegar'))) {
+        
+        const piMatch = prompt.match(/\b\d{3,6}\b/)
+        const thresholdMatch = prompt.match(/(\d+)\s*(?:mil|k)/i) || prompt.match(/(\d{4,9})/)
+        
+        if (piMatch && thresholdMatch) {
+            const pi = piMatch[0]
+            let threshold = parseInt(thresholdMatch[1])
+            if (prompt.toLowerCase().includes('mil') || prompt.toLowerCase().includes(' k')) {
+                threshold *= 1000
+            }
+            
+            console.log(`[Nexus FastPath] Setting threshold for PI ${pi}: ${threshold}`)
+            const result = await brain.setCampaignThreshold(pi, threshold)
+            return {
+                message: result.message,
+                success: result.success,
+                data: result.data
+            }
+        }
+    }
+
     return null
 }
 
@@ -351,9 +375,7 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
         
         // Timeout de 12s para a IA (balanceado com o frontend de 20s)
         const brainPromise = nexusBrain(prompt)
-        const timeoutPromise = new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error('Brain Timeout')), 55000)
-        )
+        const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Timeout: Nexus Brain não respondeu em 95s')), 95000))
         
         let brainResult: NexusResponse | null = null
         try {

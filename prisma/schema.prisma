@@ -33,6 +33,8 @@ model Campaign {
   externalCampaignId  String?
   isMonitoringActive  Boolean         @default(false)
   manualDashboardUrl  String?
+  dailyGoalThreshold  Int?
+  lastThresholdAlertAt DateTime?
   captures            Capture[]
   emailDispatches EmailDispatch[]
 }

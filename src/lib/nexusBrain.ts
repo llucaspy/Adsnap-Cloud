@@ -420,3 +420,36 @@ export async function getDeleteWizardData(): Promise<BrainResponse> {
         return { success: false, message: `Erro ao buscar dados: ${error}` }
     }
 }
+
+export async function setCampaignThreshold(piOrId: string, threshold: number): Promise<BrainResponse> {
+    try {
+        const campaign = await prisma.campaign.findFirst({
+            where: {
+                OR: [
+                    { id: piOrId },
+                    { pi: piOrId }
+                ],
+                isArchived: false
+            }
+        })
+
+        if (!campaign) {
+            return { success: false, message: `Campanha "${piOrId}" não encontrada ou arquivada.` }
+        }
+
+        await prisma.campaign.update({
+            where: { id: campaign.id },
+            data: { dailyGoalThreshold: threshold }
+        })
+
+        nexusLogStore.addLog(`Nexus Brain: Alerta de entrega configurado para ${campaign.client} em ${threshold.toLocaleString()} impressões`, 'SYSTEM')
+
+        return {
+            success: true,
+            message: `Entendido! Configurei um alerta para a campanha **${campaign.client}** (PI ${campaign.pi}). Vou te avisar assim que ela atingir **${threshold.toLocaleString()}** impressões hoje.`,
+            data: { campaignId: campaign.id, threshold }
+        }
+    } catch (error) {
+        return { success: false, message: `Erro ao configurar alerta: ${error}` }
+    }
+}

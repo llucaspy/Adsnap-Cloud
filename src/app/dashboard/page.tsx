@@ -19,7 +19,6 @@ export default async function DashboardPage() {
         prisma.campaign.count({ where: { status: 'QUARANTINE', isArchived: false } }),
         prisma.capture.findMany({
             where: {
-                createdAt: { gte: brtStart },
                 status: 'SUCCESS'
             },
             take: 8,

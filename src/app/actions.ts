@@ -248,6 +248,7 @@ export async function updateCampaign(id: string, formData: FormData) {
             externalCampaignId: formData.get('externalCampaignId') as string | null,
             isMonitoringActive: formData.get('isMonitoringActive') === 'true',
             manualDashboardUrl: formData.get('manualDashboardUrl') as string | null,
+            dailyGoalThreshold: formData.get('dailyGoalThreshold') ? Number(formData.get('dailyGoalThreshold')) : null,
         },
     })
 
@@ -270,6 +271,7 @@ export async function addFormatToCampaign(data: {
     flightEnd: string | null
     isScheduled: boolean
     scheduledTimes: string
+    dailyGoalThreshold?: number | null
 }) {
     if (!data.agency || !data.client || !data.pi || !data.format || !data.url) {
         throw new Error('Todos os campos são obrigatórios')
@@ -294,6 +296,7 @@ export async function addFormatToCampaign(data: {
             externalCampaignId: (data as any).externalCampaignId || null,
             isMonitoringActive: (data as any).isMonitoringActive || false,
             manualDashboardUrl: (data as any).manualDashboardUrl || null,
+            dailyGoalThreshold: data.dailyGoalThreshold || null,
         },
     })
 

@@ -216,6 +216,51 @@ async function runWorkerCycle() {
         console.error('[Nexus Worker] Erro nos alertas Telegram:', err)
     }
 
+    // 5. Daily Impression Threshold Alerts (NEW)
+    try {
+        const thresholdCampaigns = await prisma.campaign.findMany({
+            where: {
+                dailyGoalThreshold: { not: null },
+                isArchived: false,
+            }
+        })
+
+        if (thresholdCampaigns.length > 0) {
+            const { getAggregatedAdOpsMetrics } = await import('../app/adops/actions')
+            const { sendTelegramAlert } = await import('../lib/telegram')
+            const stats = await getAggregatedAdOpsMetrics()
+
+            for (const campaign of thresholdCampaigns) {
+                const metric = stats.campaigns.find(c => c.pi === campaign.pi)
+                const deliveredToday = metric?.bi?.deliveredToday || 0
+                const threshold = campaign.dailyGoalThreshold!
+                
+                // Check if already alerted today
+                const lastAlert = campaign.lastThresholdAlertAt
+                const alertedToday = lastAlert && new Date(lastAlert.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })).getDate() === brtNow.getDate()
+
+                if (!alertedToday && deliveredToday >= threshold * 0.9) {
+                    const status = deliveredToday >= threshold ? 'ATINGIDO' : 'PRÓXIMO'
+                    const emoji = deliveredToday >= threshold ? '✅' : '⚡'
+                    
+                    await sendTelegramAlert(
+                        'Meta Diária', 
+                        `${emoji} Nexus: Limite diário ${status} para **${campaign.client}** (PI ${campaign.pi})\n- Meta: ${threshold.toLocaleString()}\n- Entregue hoje: ${deliveredToday.toLocaleString()}\n- Progresso: ${((deliveredToday / threshold) * 100).toFixed(1)}%`
+                    )
+
+                    await prisma.campaign.update({
+                        where: { id: campaign.id },
+                        data: { lastThresholdAlertAt: new Date() }
+                    })
+                    
+                    await nexusLogStore.addLog(`Nexus Worker: Alerta de limite diário [${status}] enviado para ${campaign.client}`, 'SYSTEM')
+                }
+            }
+        }
+    } catch (err) {
+        console.error('[Nexus Worker] Erro nos alertas de limite diário:', err)
+    }
+
     await prisma.$disconnect()
 }
 

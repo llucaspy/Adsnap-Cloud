@@ -20,11 +20,18 @@ export async function nexusBrain(prompt: string): Promise<NexusBrainResult> {
     const apiKey = process.env.GEMINI_API_KEY || ''
     if (!apiKey) return { message: 'GEMINI_API_KEY não configurada', success: false }
 
-    const systemPrompt = `Você é o Nexus, o núcleo de inteligência do Adsnap Cloud, atuando como um Analista de BI e AdOps Corporativo Sênior. 
+    const systemPrompt = `Você é o Nexus AI, o núcleo neural do Adsnap Cloud. 
+    Sua missão é ser um consultor de AdOps sênior, analítico e proativo.
 
-SUA MISSÃO: Fornecer análises precisas, profundas e proativas sobre o desempenho das campanhas.
+    CAPACIDADES VISUAIS (LIBERDADE TOTAL):
+    - GRÁFICOS: Para análises de tendência ou métricas, você PODE incluir um campo "chartData" no seu JSON de resposta (com action "none" se for apenas conversa).
+      Formato chartData: { type: "area"|"bar"|"pie", data: [{name: "Jan", v: 10}, ...], keys: ["v"], xAxis: "name", title: "Título" }
+    - DIAGRAMAS: Para processos ou fluxos, use blocos de código mermaid: \`\`\`mermaid ... \`\`\`
+    - TABELAS: Use tabelas Markdown para dados comparativos.
+    - ANALISE: Sempre que mostrar dados, faça uma análise de Pacing, Viewability e Pior/Melhor performance.
 
-CONCEITO DE BI (BUSINESS INTELLIGENCE):
+    INSTRUÇÕES DE RESPOSTA:
+BI (BUSINESS INTELLIGENCE):
 No Adsnap, "BI" ou "Métricas" refere-se especificamente aos dados de entrega vindos do Dashboard AdOps (Viewability, Meta, Entregue, Pacing, Projeção). CAPTURAS (prints) não são BI. Ao ser solicitado por "BI", "Métricas", "Desempenho", "Saúde do Flight" ou "Como está a entrega", utilize obrigatoriamente getCampaignBI.
 
 CONHECIMENTO DO SISTEMA:
@@ -38,6 +45,7 @@ FERRAMENTAS DISPONÍVEIS:
 - getAdOpsSummary() - Análise de BI global (saúde de TODO o sistema).
 - createCampaign, archiveCampaign, runCapture, getLogs - Operações de gestão.
 - deleteWizard() - VOCÊ PRECISA USAR ESTA FERRAMENTA sempre que o usuário quiser APAGAR, DELETAR ou LIMPAR campanhas ou prints. Ela abre um assistente interativo para seleção.
+- setCampaignThreshold(piOrId, threshold) - Configura um ALERTA de entrega diária. Use quando o usuário pedir para ser avisado ou notificado quando uma campanha atingir X impressões no dia.
 
 INSTRUÇÕES DE RESPOSTA:
 1. Pense como um analista: se o usuário quer saber "como está a Pé de Meia", ele quer um BI. Use getCampaignBI.
@@ -76,23 +84,39 @@ PERGUNTA: "${prompt}"
      */
     function extractHumanAnswer(text: string): string {
         if (!text) return ""
-        try {
-            const jsonMatch = text.match(/\{[\s\S]*\}/)
-            if (jsonMatch) {
-                const data = JSON.parse(jsonMatch[0])
-                if (data.answer) return data.answer
-            }
-        } catch {
-            // Se falhar o parse, continua para limpeza por Regex
-        }
         
-        // Remove blocos de código markdown e chaves soltas que pareçam JSON
-        return text
-            .replace(/```json[\s\S]*?```/g, '')
-            .replace(/```[\s\S]*?```/g, '')
-            .replace(/\{"action"[\s\S]*?\}/g, '')
-            .replace(/\{[\s\S]*?\}/g, '') // Remove qualquer JSON genérico
-            .trim() || text // Se a limpeza apagar tudo, retorna o texto original como última esperança
+        let workingText = text
+
+        // 1. First, handle explicit code blocks which are often used for JSON
+        workingText = workingText.replace(/```json[\s\S]*?```/g, (match) => {
+            try {
+                const content = match.replace(/```json|```/g, '').trim()
+                const data = JSON.parse(content)
+                return data.answer || ""
+            } catch {
+                return "" // Remove invalid JSON blocks
+            }
+        })
+        workingText = workingText.replace(/```[\s\S]*?```/g, '')
+
+        // 2. Identify and process potential JSON blocks outside code fences
+        // This regex looks for { ... "action": ... } pattern
+        const jsonBlockPattern = /\{[\s\S]*?"action"[\s\S]*?\}/g
+        workingText = workingText.replace(jsonBlockPattern, (match) => {
+            try {
+                const data = JSON.parse(match)
+                return data.answer || ""
+            } catch {
+                // If not valid JSON, but matched the pattern, it's likely the technical block
+                return ""
+            }
+        })
+
+        // 3. Final cleanup: remove any leftover singleton braces that look like broken JSON
+        // but be careful not to remove conversational ones.
+        // For now, the above should cover 99% of cases.
+
+        return workingText.trim() || text
     }
 
     try {
@@ -164,6 +188,9 @@ PERGUNTA: "${prompt}"
                 break
             case 'deleteWizard':
                 result = await brain.getDeleteWizardData()
+                break
+            case 'setCampaignThreshold':
+                result = await brain.setCampaignThreshold(params.piOrId as string, params.threshold as number)
                 break
             default:
                 return { message: `Ação "${action}" não reconhecida`, success: false }

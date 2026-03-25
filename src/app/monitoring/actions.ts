@@ -7,7 +7,7 @@ import { nexusLogStore } from '@/lib/nexusLogStore'
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-const FETCH_TIMEOUT_MS = 10_000 // 10 seconds (reduced from 15s to avoid Nexus Chat timeouts)
+const FETCH_TIMEOUT_MS = 90_000 // 90 seconds (1min 30s) as requested by user
 
 // ---------------------------------------------------------------------------
 // Types for 00px GraphQL API responses
@@ -203,7 +203,7 @@ export async function getLiveMetrics(campaignId: string): Promise<LiveMetricsRes
     } catch (error) {
         const isTimeout = error instanceof DOMException && error.name === 'AbortError'
         const errMsg = isTimeout
-            ? 'Timeout: API 00px não respondeu em 15s'
+            ? 'Timeout: API 00px não respondeu em 90s'
             : (error instanceof Error ? error.message : 'Erro desconhecido')
 
         await nexusLogStore.addLog(`00px Fatal: ${errMsg}`, 'API_ERROR', undefined, campaignId)

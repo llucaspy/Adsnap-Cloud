@@ -39,10 +39,11 @@
   ],
   "exclude": [
     "node_modules",
-    "check-*.ts",
-    "test-*.ts",
-    "test-*.js",
-    "migrate-*.js",
+    "src/scripts",
+    "**/check-*.ts",
+    "**/test-*.ts",
+    "**/test-*.js",
+    "**/migrate-*.js",
     "*.js",
     ".reference_ui"
   ]

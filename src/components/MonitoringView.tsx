@@ -418,10 +418,9 @@ function PiCard({ group, router, isPending, startTransition, formats }: { group:
     const handleRunBatch = () => {
         if (!confirm(`Deseja capturar os ${group.campaigns.length} formatos desta PI?`)) return
         startTransition(async () => {
-            const { runCapture } = await import('@/app/actions')
-            for (const c of group.campaigns) {
-                await runCapture(c.id)
-            }
+            const { runCaptureBatch } = await import('@/app/actions')
+            const campaignIds = group.campaigns.map((c: any) => c.id)
+            await runCaptureBatch(campaignIds)
             router.refresh()
         })
     }
