@@ -84,6 +84,7 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
             externalAuthUrl: entries[0]?.externalAuthUrl || '',
             externalCampaignId: entries[0]?.externalCampaignId || '',
             isMonitoringActive: entries[0]?.isMonitoringActive || false,
+            dailyGoalThreshold: entries[0]?.dailyGoalThreshold || null,
         }
         setEntries(prev => [...prev, newEntry])
         setExpandedIndex(entries.length)

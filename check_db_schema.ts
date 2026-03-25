@@ -13,7 +13,7 @@ async function main() {
         })
         console.log('SUCCESS: Columns found.')
         console.log('Sample:', campaign)
-    } catch (e) {
+    } catch (e: any) {
         console.error('ERROR: Columns missing or query failed.')
         console.error(e.message)
     } finally {

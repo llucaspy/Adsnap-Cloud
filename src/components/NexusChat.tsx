@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { Send, Zap, X, Mail, Trash2, Camera, Download } from 'lucide-react'
+import { Send, Zap, X, Mail, Trash2, Camera, Download, Search } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
