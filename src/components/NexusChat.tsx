@@ -257,7 +257,6 @@ export function NexusChat() {
             cleanup()
         }
     }
-
     const quickActions = [
         { icon: Camera, label: "Tirar Print Geral", cmd: "Capturar tudo" },
         { icon: Download, label: "Baixar Prints de Hoje", cmd: "Baixar todos os prints de hoje" },
@@ -268,7 +267,7 @@ export function NexusChat() {
         <>
             {/* Email Toast Notification */}
             {emailToast && (
-                <div className="fixed top-6 right-6 z-80 animate-in slide-in-from-top-4 fade-in duration-500 max-w-sm">
+                <div className="fixed top-6 right-6 z-[10000] animate-in slide-in-from-top-4 fade-in duration-500 max-w-sm">
                     <div className="bg-black/95 border border-white/20 rounded-2xl p-4 shadow-[0_20px_60px_rgba(0,0,0,0.8)] backdrop-blur-xl">
                         <div className="flex items-start gap-3">
                             <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
@@ -303,6 +302,14 @@ export function NexusChat() {
                 </div>
             )}
 
+            {/* Backdrop Blur */}
+            {isOpen && (
+                <div 
+                    className="fixed inset-0 z-[9998] bg-black/40 backdrop-blur-[12px] transition-all duration-700 animate-in fade-in"
+                    aria-hidden="true"
+                />
+            )}
+
             {/* The Orb */}
             <button
                 ref={toggleRef}
@@ -318,7 +325,7 @@ export function NexusChat() {
                 {isOpen ? (
                     <X size={24} className="text-white/80" />
                 ) : (
-                    <div className="relative">
+                    <div className="relative w-10 h-10">
                         <NexusSmallCore isTyping={isTyping} />
                         {queueStatus && (
                             <div className="absolute -top-1 -right-1 w-3 h-3 bg-indigo-500 rounded-full animate-pulse border-2 border-black" />
@@ -343,18 +350,17 @@ export function NexusChat() {
                     <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-2xl bg-white/[0.03] border border-white/10 flex items-center justify-center relative overflow-hidden group">
                            <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                           <NexusSmallCore isTyping={isTyping || isGlobalPolling} />
+                           <div className="w-8 h-8">
+                               <NexusSmallCore isTyping={isTyping || isGlobalPolling} />
+                           </div>
                         </div>
-                        <div>
+                        <div className="flex flex-col">
+                            <h2 className="text-sm font-medium tracking-tight bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent">
+                                Nexus AI Core
+                            </h2>
                             <div className="flex items-center gap-2">
-                                <h3 className="font-black text-white text-lg tracking-tight">Nexus AI</h3>
-                                <span className="px-1.5 py-0.5 rounded-md bg-white/5 border border-white/10 text-[8px] font-black text-white/30 uppercase tracking-widest">v2.5 Alpha</span>
-                            </div>
-                            <div className="flex items-center gap-2 mt-0.5">
-                                <div className={`h-1.5 w-1.5 rounded-full ${isTyping || isGlobalPolling ? 'bg-indigo-400 animate-pulse shadow-[0_0_8px_rgba(129,140,248,0.5)]' : 'bg-white/20'}`} />
-                                <span className="text-[9px] font-bold text-white/40 uppercase tracking-widest leading-none">
-                                    {isTyping ? 'Neural Processing...' : isGlobalPolling ? 'Global Sync Active' : 'Nexus Core Online'}
-                                </span>
+                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                <span className="text-[10px] text-white/40 uppercase tracking-[0.2em] font-medium">Neural Link Active</span>
                             </div>
                         </div>
                     </div>
@@ -519,15 +525,16 @@ export function NexusChat() {
                 )}
 
                 {/* Input Area */}
-                <div className="p-8 pt-2">
+                <div className="p-6 pt-2 border-t border-white/10 bg-black/40 backdrop-blur-3xl">
                     <div className="relative group">
-                        <div className="absolute inset-0 bg-indigo-500/5 blur-xl group-focus-within:bg-indigo-500/10 transition-all rounded-3xl" />
                         <input
+                            type="text"
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), handleSend())}
-                            placeholder="Connect to Nexus Core..."
-                            className="relative w-full bg-white/[0.05] border border-white/10 rounded-[22px] p-4 pr-16 text-sm text-white outline-none focus:bg-white/[0.08] focus:border-indigo-500/40 transition-all font-medium placeholder:text-white/10"
+                            onKeyDown={(e) => e.key === 'Enter' && !isTyping && handleSend()}
+                            placeholder="Faça algum pergunta para o nexus AI"
+                            disabled={isTyping}
+                            className="w-full bg-white/[0.03] border border-white/[0.08] rounded-2xl px-6 py-4 pr-16 text-sm text-white placeholder:text-white/20 focus:outline-none focus:ring-2 focus:ring-white/10 focus:border-white/20 transition-all duration-300 group-hover:bg-white/5 disabled:opacity-50"
                         />
                         <button
                             onClick={() => handleSend()}
@@ -536,10 +543,6 @@ export function NexusChat() {
                         >
                             <Send size={20} />
                         </button>
-                    </div>
-                    <div className="mt-4 flex items-center justify-between px-2">
-                        <p className="text-[8px] text-white/5 uppercase tracking-[0.5em] font-black">Adsnap Cloud Nexus — Security Protocol Active</p>
-                        <Zap size={10} className="text-white/5" />
                     </div>
                 </div>
             </div>
