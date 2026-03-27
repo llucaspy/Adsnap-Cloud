@@ -456,11 +456,12 @@ export async function triggerNexusWorker() {
         } else {
             const error = await response.text()
             console.error('[Nexus] GitHub trigger failed:', error)
-            nexusLogStore.addLog(`Nexus: Falha ao disparar GitHub Worker: ${response.status}`, 'ERROR')
+            nexusLogStore.addLog(`Nexus: Falha ao disparar GitHub Worker (${response.status}): ${error.substring(0, 100)}`, 'ERROR')
             return false
         }
     } catch (err) {
-        console.error('[Nexus] Error triggering GitHub worker:', err)
+        console.error('[Nexus] Exception in triggerNexusWorker:', err)
+        nexusLogStore.addLog(`Nexus: Erro crítico ao disparar Worker: ${(err as Error).message}`, 'ERROR')
         return false
     }
 }
