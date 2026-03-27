@@ -418,6 +418,11 @@ export async function triggerNexusWorker() {
         return false
     }
 
+    // Diagnostic log: show first 7 chars of token to verify if it's the correct one
+    const tokenPrefix = token.substring(0, 10);
+    console.log(`[Nexus] Using GITHUB_TOKEN starting with: ${tokenPrefix}`);
+    nexusLogStore.addLog(`Nexus: Usando GITHUB_TOKEN (${tokenPrefix}...)`, 'INFO');
+
     // Sanitize repo if it's a full URL
     if (repo.includes('github.com/')) {
         repo = repo.split('github.com/')[1].replace(/\/$/, '').replace(/\.git$/, '')
