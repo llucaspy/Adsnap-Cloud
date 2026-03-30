@@ -28,7 +28,7 @@ export interface ChannelData {
 export interface CpmPurchase {
     quantity: number
     total_data?: CpmTotalData | null
-    channels?: any // Returns JSON array directly
+    channels?: unknown // JSON scalar representing ChannelData[]
 }
 
 export interface SitePurchases {
@@ -39,7 +39,7 @@ export interface SiteData {
     site_id: number
     site_name: string
     purchases: SitePurchases | SitePurchases[]
-    data_by_date_purchase: any // Returns JSON array directly
+    data_by_date_purchase: unknown // JSON scalar representing DailyEntry[]
 }
 
 export interface CampaignResponse {
