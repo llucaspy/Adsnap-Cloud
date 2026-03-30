@@ -15,6 +15,9 @@ interface MediaEntry {
     url: string
     device: string
     format: string
+    externalChannelId: string
+    isMultiChannel: boolean
+    allowedChannels: string
 }
 
 interface StepProps {
@@ -87,7 +90,14 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
                     flightEnd: formData.flightEnd || null,
                     isScheduled: formData.isScheduled,
                     scheduledTimes: formData.scheduledTimes,
-                    mediaEntries,
+                    mediaEntries: mediaEntries.map(e => ({
+                        url: e.url,
+                        device: e.device,
+                        format: e.format,
+                        externalChannelId: e.externalChannelId,
+                        isMultiChannel: e.isMultiChannel,
+                        allowedChannels: e.allowedChannels
+                    })),
                 })
                 alert(`${result.count} campanha(s) ativada(s) com sucesso!`)
                 window.location.reload()
@@ -481,15 +491,24 @@ function StepMedia({ formData, updateFields, next, back, bannerFormats = [], med
     const [currentUrl, setCurrentUrl] = useState('')
     const [currentDevice, setCurrentDevice] = useState('desktop')
     const [currentFormat, setCurrentFormat] = useState('')
+    const [currentChannelId, setCurrentChannelId] = useState('')
 
     const canAdd = currentUrl && currentFormat
     const canContinue = mediaEntries.length > 0
 
     const addEntry = () => {
         if (!canAdd || !setMediaEntries) return
-        setMediaEntries([...mediaEntries, { url: currentUrl, device: currentDevice, format: currentFormat }])
-        // Reset format only, keep URL and device for convenience
+        setMediaEntries([...mediaEntries, { 
+            url: currentUrl, 
+            device: currentDevice, 
+            format: currentFormat,
+            externalChannelId: currentChannelId,
+            isMultiChannel: false,
+            allowedChannels: '[]'
+        }])
+        // Reset format and channel, keep URL and device for convenience
         setCurrentFormat('')
+        setCurrentChannelId('')
     }
 
     const removeEntry = (index: number) => {
@@ -581,6 +600,14 @@ function StepMedia({ formData, updateFields, next, back, bannerFormats = [], med
                     value={currentUrl}
                     onChange={setCurrentUrl}
                     placeholder="https://exemplo.com.br/materia"
+                />
+
+                <InputField
+                    label="ID Canal 00px (Referência)"
+                    icon={Layers}
+                    value={currentChannelId}
+                    onChange={setCurrentChannelId}
+                    placeholder="Ex: 81848 (Opcional)"
                 />
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

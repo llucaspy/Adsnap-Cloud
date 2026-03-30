@@ -196,20 +196,25 @@ export async function extractCampaignsFromText(text: string): Promise<Partial<br
 function isOperationalCommand(text: string): boolean {
     const t = text.toLowerCase().trim()
     
-    // ONLY extremely clear, single-purpose technical keywords bypass the AI for speed.
-    // Anything even slightly conversational should go to Gemini.
+    // Technical keywords that bypass AI for instant response.
     const technicalKeywords = [
-        'status', 'bi', 'dashboard', 'painel', 'resumo bi',
-        'baixar zip', 'download zip', 'print tudo', 'capturar tudo',
-        'parar tudo', 'stop captures'
+        'status', 'bi', 'dashboard', 'painel', 'resumo bi', 'resumo',
+        'baixar zip', 'download zip', 'baixar', 'download', 'exportar',
+        'print tudo', 'capturar tudo', 'tirar print',
+        'parar tudo', 'stop captures', 'parar', 'interromper',
+        'como estão', 'como esta', 'métricas', 'metricas',
+        'campanha', 'ver pi', 'detalhe',
+        'alerta', 'avise', 'notifique',
+        'formato', 'agendar', 'schedule'
     ]
     
-    // If it's a very short command that matches exactly, skip AI.
-    if (t.length < 15) {
-        return technicalKeywords.some(kw => t === kw || t.startsWith(kw + ' '))
+    // Short commands: exact or prefix match
+    if (t.length < 25) {
+        return technicalKeywords.some(kw => t === kw || t.startsWith(kw + ' ') || t.includes(kw))
     }
     
-    return false
+    // Longer messages: look for strong operational signals
+    return technicalKeywords.some(kw => t.includes(kw))
 }
 
 async function handleDirectCommand(prompt: string): Promise<NexusResponse | null> {
@@ -373,16 +378,17 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
         console.log('[Nexus AI Action] Chamando Neural Brain (Async)...')
         console.time('NexusAI')
         
-        // Timeout de 12s para a IA (balanceado com o frontend de 20s)
+        // Timeout de 8s para a IA (balanceado com o frontend de 20s)
         const brainPromise = nexusBrain(prompt)
-        const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Timeout: Nexus Brain não respondeu em 95s')), 95000))
+        const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error('AI_TIMEOUT')), 8000))
         
         let brainResult: NexusResponse | null = null
         try {
             brainResult = await Promise.race([brainPromise, timeoutPromise]) as NexusResponse
         } catch (err) {
-            console.warn('[Nexus AI] Brain Error or Timeout (12s limit):', err)
-            // AI failed or timed out, we continue to manual fallbacks or standard response
+            const isTimeout = err instanceof Error && err.message === 'AI_TIMEOUT'
+            console.warn(`[Nexus AI] Brain ${isTimeout ? 'Timeout (8s limit)' : 'Error'}:`, err)
+            // AI failed or timed out — continue to manual fallbacks
         }
         console.timeEnd('NexusAI')
         

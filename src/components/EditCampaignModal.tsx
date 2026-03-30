@@ -25,6 +25,9 @@ interface FormatEntry {
     externalCampaignId: string
     isMonitoringActive: boolean
     dailyGoalThreshold: number | null
+    externalChannelId: string
+    isMultiChannel: boolean
+    allowedChannels: string
 }
 
 export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: EditCampaignModalProps) {
@@ -60,6 +63,9 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
             externalCampaignId: c.externalCampaignId || '',
             isMonitoringActive: c.isMonitoringActive || false,
             dailyGoalThreshold: c.dailyGoalThreshold || null,
+            externalChannelId: c.externalChannelId || '',
+            isMultiChannel: c.isMultiChannel || false,
+            allowedChannels: c.allowedChannels || '[]',
         }))
     )
 
@@ -86,6 +92,9 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
             externalCampaignId: entries[0]?.externalCampaignId || '',
             isMonitoringActive: entries[0]?.isMonitoringActive || false,
             dailyGoalThreshold: entries[0]?.dailyGoalThreshold || null,
+            externalChannelId: entries[0]?.externalChannelId || '',
+            isMultiChannel: entries[0]?.isMultiChannel || false,
+            allowedChannels: entries[0]?.allowedChannels || '[]',
         }
         setEntries(prev => [...prev, newEntry])
         setExpandedIndex(entries.length)
@@ -130,11 +139,14 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                     data.append('flightEnd', entry.flightEnd)
                     data.append('externalAuthUrl', entry.externalAuthUrl)
                     data.append('externalCampaignId', entry.externalCampaignId)
+                    data.append('externalChannelId', entry.externalChannelId)
                     data.append('isMonitoringActive', entry.isMonitoringActive.toString())
                     data.append('manualDashboardUrl', shared.manualDashboardUrl || '')
                     data.append('isScheduled', shared.isScheduled.toString())
                     data.append('scheduledTimes', shared.scheduledTimes)
                     data.append('showOnDashboard', shared.showOnDashboard.toString())
+                    data.append('isMultiChannel', entry.isMultiChannel.toString())
+                    data.append('allowedChannels', entry.allowedChannels)
                     if (entry.dailyGoalThreshold) data.append('dailyGoalThreshold', entry.dailyGoalThreshold.toString())
                     await updateCampaign(entry.id, data)
                 }
@@ -440,6 +452,15 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                                                                     onChange={e => updateEntry(index, { externalCampaignId: e.target.value })}
                                                                     className="modal-input"
                                                                     placeholder="Ex: 6988"
+                                                                />
+                                                            </FieldBlock>
+                                                            <FieldBlock label="ID Canal 00px (Referência)" icon={Layers}>
+                                                                <input
+                                                                    type="text"
+                                                                    value={entry.externalChannelId}
+                                                                    onChange={e => updateEntry(index, { externalChannelId: e.target.value })}
+                                                                    className="modal-input"
+                                                                    placeholder="Ex: 81848"
                                                                 />
                                                             </FieldBlock>
                                                         </div>

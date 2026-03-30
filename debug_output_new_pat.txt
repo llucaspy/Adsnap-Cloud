@@ -1,0 +1,8 @@
+--- Debugging Nexus Worker Trigger ---
+GITHUB_TOKEN: github_pat_11BN...
+GITHUB_REPO: https://github.com/llucaspy/Adsnap-Cloud
+Sanitized repo: llucaspy/Adsnap-Cloud
+URL: https://api.github.com/repos/llucaspy/Adsnap-Cloud/actions/workflows/nexus-worker.yml/dispatches
+Status: 204
+OK: true
+Success!

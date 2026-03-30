@@ -189,13 +189,13 @@ export function NexusChat() {
             setIsTyping(false)
         }
 
-        const safetyTimer = setTimeout(cleanup, 100000)
+        const safetyTimer = setTimeout(cleanup, 20000)
 
         try {
             console.log('[Nexus UI] Chamando processNexusCommand:', userMsg)
             
             const timeoutPromise = new Promise<any>((_, reject) => 
-                setTimeout(() => reject(new Error('Timeout')), 100000)
+                setTimeout(() => reject(new Error('Timeout')), 20000)
             )
             
             const response = await Promise.race([

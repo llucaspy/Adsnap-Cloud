@@ -36,6 +36,9 @@ model Campaign {
   dailyGoalThreshold  Int?
   lastThresholdAlertAt DateTime?
   showOnDashboard     Boolean         @default(false)
+  isMultiChannel      Boolean         @default(false)
+  allowedChannels     String?         @default("[]")
+  externalChannelId   String?
   captures            Capture[]
   emailDispatches EmailDispatch[]
 }

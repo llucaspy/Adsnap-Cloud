@@ -71,20 +71,31 @@ function parseDailyData(raw: unknown): DailyEntry[] {
 }
 
 /** Extract impressions from a cpm data object (handles both direct and nested channels) */
-function extractDayImpressions(cpmRaw: DailyCpmData | string | undefined): number {
+function extractDayImpressions(cpmRaw: DailyCpmData | string | undefined, targetChannelId?: string | null): number {
     if (!cpmRaw) return 0
 
     const cpm: DailyCpmData = typeof cpmRaw === 'string' 
         ? (() => { try { return JSON.parse(cpmRaw) } catch { return {} } })()
         : cpmRaw
 
-    // 1. Direct impressions field (preferred)
+    // 1. If targetChannelId is provided, look ONLY for that channel
+    if (targetChannelId && cpm.total_data_purchase_type_channels && typeof cpm.total_data_purchase_type_channels === 'object') {
+        const ch = cpm.total_data_purchase_type_channels[targetChannelId]
+        if (ch && typeof ch.impressions === 'number') {
+            return ch.impressions
+        }
+        // If target exists but has no data, return 0 (don't fallback to total)
+        return 0
+    }
+
+    // 2. Direct impressions field (fallback/original behavior if no target)
     if (typeof cpm.impressions === 'number' && cpm.impressions > 0) {
         return cpm.impressions
     }
 
-    // 2. Sum from nested channels
-    if (cpm.total_data_purchase_type_channels && typeof cpm.total_data_purchase_type_channels === 'object') {
+    // 3. Fallback: Sum from nested channels ONLY if no targetChannelId was specified
+    // (This keeps legacy behavior for ads not using specific channel tracking)
+    if (!targetChannelId && cpm.total_data_purchase_type_channels && typeof cpm.total_data_purchase_type_channels === 'object') {
         let sum = 0
         for (const ch of Object.values(cpm.total_data_purchase_type_channels)) {
             if (ch && typeof ch.impressions === 'number') {
@@ -249,29 +260,71 @@ async function fetchAndCacheMetrics(): Promise<AdOpsMetrics> {
                 if (apiAvailable && result.data) {
                     const sites = result.data.sites || []
                     for (const site of sites) {
+                        const processedChannels = new Set<string>()
                         const purchasesList = Array.isArray(site.purchases) ? site.purchases : [site.purchases]
                         for (const purchase of purchasesList as any[]) {
                             if (!purchase.cpm) continue
-                            const q = purchase.cpm.quantity || 0
-                            const td = purchase.cpm.total_data
-                            const d = td?.impressions ?? td?.valids ?? 0
-                            const v = (td?.viewability ?? 0) * 100
-                            totalGoal += q
-                            if (td) {
-                                totalDelivered += d
-                                avgViewability += v
-                                metricsCount++
+                            
+                            // If channel targeting is active, we might need to skip some redundant purchase-level data
+                            const targetChannelId = monitoringCampaign.externalChannelId
+                            const channels = purchase.cpm.channels || []
+                            
+                            if (targetChannelId) {
+                                const channel = channels.find((ch: any) => ch.channel_id.toString() === targetChannelId)
+                                if (channel) {
+                                    // Deduplicate: Only count this channel once per PI site
+                                    const channelKey = `${site.site_id}-${channel.channel_id}`
+                                    if (!processedChannels.has(channelKey)) {
+                                        const td = channel.total_data
+                                        const q = channel.channel_purchased_quantity || 0
+                                        const d = td?.impressions ?? td?.valids ?? 0
+                                        const v = (td?.viewability ?? 0) * 100
+                                        
+                                        totalGoal += q
+                                        if (td) {
+                                            totalDelivered += d
+                                            avgViewability += v
+                                            metricsCount++
+                                        }
+                                        processedChannels.add(channelKey)
+                                    }
+                                }
+                            } else {
+                                // Fallback: Legacy/Standard behavior (no channel filtering)
+                                const q = purchase.cpm.quantity || 0
+                                const td = purchase.cpm.total_data
+                                const d = td?.impressions ?? td?.valids ?? 0
+                                const v = (td?.viewability ?? 0) * 100
+                                totalGoal += q
+                                if (td) {
+                                    totalDelivered += d
+                                    avgViewability += v
+                                    metricsCount++
+                                }
                             }
+
+                            // Individual formats still show their target metrics
+                            let formatTd = purchase.cpm.total_data
+                            let formatGoal = purchase.cpm.quantity || 0
+                            if (targetChannelId) {
+                                const channel = channels.find((ch: any) => ch.channel_id.toString() === targetChannelId)
+                                if (channel) {
+                                    if (channel.total_data) formatTd = channel.total_data
+                                    formatGoal = channel.channel_purchased_quantity || 0
+                                }
+                            }
+
                             formats.push({
-                                name: site.site_name,
-                                goal: q,
-                                delivered: d,
-                                viewability: v,
-                                pacing: safeDivide(d, q) * 100
+                                name: (purchase as any).format || 'CPM',
+                                goal: formatGoal,
+                                delivered: formatTd?.impressions ?? formatTd?.valids ?? 0,
+                                viewability: (formatTd?.viewability ?? 0) * 100,
+                                pacing: 0 // Will be calculated after
                             })
                         }
                     }
                     if (metricsCount > 0) avgViewability = safeDivide(avgViewability, metricsCount)
+
                 } else if (metricsCache) {
                     // Fallback to cache if API is down
                     const previous = metricsCache.data.campaigns.find(c => c.id === pi)
@@ -319,10 +372,20 @@ async function fetchAndCacheMetrics(): Promise<AdOpsMetrics> {
                 const todayStr = getTodayBrazil()
 
                 if (apiAvailable && result.data) {
+                    const processedChannelDates = new Set<string>()
                     for (const site of result.data.sites || []) {
                         const dailyData = parseDailyData(site.data_by_date_purchase)
                         for (const entry of dailyData) {
-                            const impressions = extractDayImpressions(entry.cpm)
+                            const targetChannelId = monitoringCampaign.externalChannelId
+                            
+                            // Deduplicate daily metrics if they share the same channel
+                            if (targetChannelId) {
+                                const channelKey = `${site.site_id}-${targetChannelId}-${entry.datetime}`
+                                if (processedChannelDates.has(channelKey)) continue
+                                processedChannelDates.add(channelKey)
+                            }
+
+                            const impressions = extractDayImpressions(entry.cpm, targetChannelId)
                             const dateKey = entry.datetime || ''
                             if (dateKey && impressions > 0) {
                                 dailyMap.set(dateKey, (dailyMap.get(dateKey) || 0) + impressions)

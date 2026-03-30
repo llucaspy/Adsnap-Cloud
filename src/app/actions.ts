@@ -143,7 +143,7 @@ export async function createMultipleCampaigns(payload: {
     flightEnd: string | null
     isScheduled: boolean
     scheduledTimes: string
-    mediaEntries: { url: string; device: string; format: string }[]
+    mediaEntries: { url: string; device: string; format: string; externalChannelId?: string; isMultiChannel?: boolean; allowedChannels?: string }[]
 }) {
     const {
         agency, client, campaignName, pi, segmentation,
@@ -178,6 +178,9 @@ export async function createMultipleCampaigns(payload: {
                 status: 'PENDING',
                 isScheduled,
                 scheduledTimes,
+                externalChannelId: entry.externalChannelId || null,
+                isMultiChannel: entry.isMultiChannel || false,
+                allowedChannels: entry.allowedChannels || '[]',
             },
         })
         results.push(campaign)
@@ -246,10 +249,13 @@ export async function updateCampaign(id: string, formData: FormData) {
             scheduledTimes,
             externalAuthUrl: formData.get('externalAuthUrl') as string | null,
             externalCampaignId: formData.get('externalCampaignId') as string | null,
+            externalChannelId: formData.get('externalChannelId') as string | null,
             isMonitoringActive: formData.get('isMonitoringActive') === 'true',
             manualDashboardUrl: formData.get('manualDashboardUrl') as string | null,
             dailyGoalThreshold: formData.get('dailyGoalThreshold') ? Number(formData.get('dailyGoalThreshold')) : null,
             showOnDashboard: formData.get('showOnDashboard') === 'true',
+            isMultiChannel: formData.get('isMultiChannel') === 'true',
+            allowedChannels: formData.get('allowedChannels') as string | null,
         },
     })
 
@@ -295,10 +301,13 @@ export async function addFormatToCampaign(data: {
             scheduledTimes: data.scheduledTimes || '[]',
             externalAuthUrl: (data as any).externalAuthUrl || null,
             externalCampaignId: (data as any).externalCampaignId || null,
+            externalChannelId: (data as any).externalChannelId || null,
             isMonitoringActive: (data as any).isMonitoringActive || false,
             manualDashboardUrl: (data as any).manualDashboardUrl || null,
             dailyGoalThreshold: data.dailyGoalThreshold || null,
             showOnDashboard: (data as any).showOnDashboard !== false,
+            isMultiChannel: (data as any).isMultiChannel || false,
+            allowedChannels: (data as any).allowedChannels || '[]',
         },
     })
 
@@ -495,9 +504,12 @@ export async function bulkCreateCampaigns(campaigns: any[]) {
                     scheduledTimes: '[]',
                     externalAuthUrl: data.externalAuthUrl || null,
                     externalCampaignId: data.externalCampaignId || null,
+                    externalChannelId: data.externalChannelId || null,
                     isMonitoringActive: data.isMonitoringActive || false,
                     manualDashboardUrl: data.manualDashboardUrl || null,
                     showOnDashboard: data.showOnDashboard !== false,
+                    isMultiChannel: data.isMultiChannel || false,
+                    allowedChannels: data.allowedChannels || '[]',
                 }
             })
             results.push({ success: true, id: campaign.id })

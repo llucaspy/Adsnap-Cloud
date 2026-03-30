@@ -18,9 +18,17 @@ export interface CpmTotalData {
     viewability: number
 }
 
+export interface ChannelData {
+    channel_id: number
+    channel_descr: string
+    channel_purchased_quantity: number
+    total_data: CpmTotalData | Record<string, never>
+}
+
 export interface CpmPurchase {
     quantity: number
-    total_data: CpmTotalData
+    total_data?: CpmTotalData | null
+    channels?: ChannelData[]
 }
 
 export interface SitePurchases {
@@ -28,6 +36,7 @@ export interface SitePurchases {
 }
 
 export interface SiteData {
+    site_id: number
     site_name: string
     purchases: SitePurchases | SitePurchases[]
     data_by_date_purchase: unknown // JSON scalar — parsed at runtime
@@ -148,6 +157,7 @@ export async function getLiveMetrics(campaignId: string): Promise<LiveMetricsRes
             query {
               campaign(filter: ${JSON.stringify(filterJson)}) {
                 sites {
+                  site_id
                   site_name
                   purchases {
                     cpm {
@@ -156,6 +166,16 @@ export async function getLiveMetrics(campaignId: string): Promise<LiveMetricsRes
                         impressions
                         valids
                         viewability
+                      }
+                      channels {
+                        channel_id
+                        channel_descr
+                        channel_purchased_quantity
+                        total_data {
+                          impressions
+                          valids
+                          viewability
+                        }
                       }
                     }
                   }
