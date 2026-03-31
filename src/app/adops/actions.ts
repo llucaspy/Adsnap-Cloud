@@ -117,16 +117,14 @@ let isRefreshing = false
 let currentRefreshPromise: Promise<AdOpsMetrics> | null = null
 
 export async function getAggregatedAdOpsMetrics(): Promise<AdOpsMetrics> {
-    const now = Date.now()
-    
     // 1. Return fresh cache if available
-    if (metricsCache && (now - metricsCache.timestamp < CACHE_TTL)) {
+
+    if (metricsCache && (Date.now() - metricsCache.timestamp < CACHE_TTL)) {
         return metricsCache.data
     }
 
     // 2. If refresh is already in progress, wait for it if no cache exists
     if (isRefreshing && currentRefreshPromise) {
-        console.log('[BI Cache] Refresh in progress, joining promise...')
         try {
             return await currentRefreshPromise
         } catch (err) {
@@ -194,12 +192,20 @@ async function fetchAndCacheMetrics(): Promise<AdOpsMetrics> {
     isRefreshing = true
     
     try {
+        const thresholdDate = new Date()
+        thresholdDate.setHours(thresholdDate.getHours() - 48)
+
         const campaigns = await prisma.campaign.findMany({
             where: {
                 isArchived: false,
-                showOnDashboard: true
+                showOnDashboard: true,
+                OR: [
+                    { flightEnd: null },
+                    { flightEnd: { gte: thresholdDate } }
+                ]
             }
         })
+
 
         if (campaigns.length === 0) {
             const emptyResult: AdOpsMetrics = {
@@ -233,7 +239,6 @@ async function fetchAndCacheMetrics(): Promise<AdOpsMetrics> {
                 const main = group[0]
                 const manualDashboardUrl = group.find(c => (c as any).manualDashboardUrl)?.manualDashboardUrl || null
 
-                // Fetch real metrics
                 const result: LiveMetricsResult = await getLiveMetrics(monitoringCampaign.id)
                 const apiAvailable = result.success && !!result.data
 
@@ -254,8 +259,13 @@ async function fetchAndCacheMetrics(): Promise<AdOpsMetrics> {
                 let totalGoal = 0
                 let avgViewability = 0
                 let metricsCount = 0
-                let formats: FormatEntry[] = []
+                let formats: any[] = []
                 let fetchedAt = result.fetchedAt || null
+
+                // Collection of all target channel IDs for this PI group
+                const targetChannelIds = Array.from(new Set(group.map(c => (c as any).externalChannelId).filter(Boolean))) as string[]
+                const isMultiChannelPi = targetChannelIds.length > 1
+
 
                 if (apiAvailable && result.data) {
                     const sites = result.data.sites || []
@@ -265,13 +275,13 @@ async function fetchAndCacheMetrics(): Promise<AdOpsMetrics> {
                         for (const purchase of purchasesList as any[]) {
                             if (!purchase.cpm) continue
                             
-                            // If channel targeting is active, we might need to skip some redundant purchase-level data
-                            const targetChannelId = monitoringCampaign.externalChannelId
                             const channels = purchase.cpm.channels || []
                             
-                            if (targetChannelId) {
-                                const channel = channels.find((ch: any) => ch.channel_id.toString() === targetChannelId)
-                                if (channel) {
+                            if (targetChannelIds.length > 0) {
+                                // Filter channels that belong to ANY format in this PI group
+                                const matchingChannels = channels.filter((ch: any) => targetChannelIds.includes(ch.channel_id.toString()))
+                                
+                                for (const channel of matchingChannels) {
                                     // Deduplicate: Only count this channel once per PI site
                                     const channelKey = `${site.site_id}-${channel.channel_id}`
                                     if (!processedChannels.has(channelKey)) {
@@ -290,6 +300,7 @@ async function fetchAndCacheMetrics(): Promise<AdOpsMetrics> {
                                     }
                                 }
                             } else {
+
                                 // Fallback: Legacy/Standard behavior (no channel filtering)
                                 const q = purchase.cpm.quantity || 0
                                 const td = purchase.cpm.total_data
@@ -306,13 +317,17 @@ async function fetchAndCacheMetrics(): Promise<AdOpsMetrics> {
                             // Individual formats still show their target metrics
                             let formatTd = purchase.cpm.total_data
                             let formatGoal = purchase.cpm.quantity || 0
-                            if (targetChannelId) {
-                                const channel = channels.find((ch: any) => ch.channel_id.toString() === targetChannelId)
-                                if (channel) {
-                                    if (channel.total_data) formatTd = channel.total_data
-                                    formatGoal = channel.channel_purchased_quantity || 0
+                            
+                            // If we have target channels, we try to find the one that best matches this purchase
+                            // For simplicity, we check if any of our target channels are in this purchase
+                            if (targetChannelIds.length > 0) {
+                                const firstMatch = channels.find((ch: any) => targetChannelIds.includes(ch.channel_id.toString()))
+                                if (firstMatch) {
+                                    if (firstMatch.total_data) formatTd = firstMatch.total_data
+                                    formatGoal = firstMatch.channel_purchased_quantity || 0
                                 }
                             }
+
 
                             formats.push({
                                 name: (purchase as any).format || 'CPM',
@@ -376,24 +391,32 @@ async function fetchAndCacheMetrics(): Promise<AdOpsMetrics> {
                     for (const site of result.data.sites || []) {
                         const dailyData = parseDailyData(site.data_by_date_purchase)
                         for (const entry of dailyData) {
-                            const targetChannelId = monitoringCampaign.externalChannelId
-                            
-                            // Deduplicate daily metrics if they share the same channel
-                            if (targetChannelId) {
-                                const channelKey = `${site.site_id}-${targetChannelId}-${entry.datetime}`
-                                if (processedChannelDates.has(channelKey)) continue
-                                processedChannelDates.add(channelKey)
-                            }
-
-                            const impressions = extractDayImpressions(entry.cpm, targetChannelId)
-                            const dateKey = entry.datetime || ''
-                            if (dateKey && impressions > 0) {
-                                dailyMap.set(dateKey, (dailyMap.get(dateKey) || 0) + impressions)
+                            // Deduplicate daily metrics if they share the same channel/date
+                            for (const targetId of (targetChannelIds.length > 0 ? targetChannelIds : [null])) {
+                                if (targetId) {
+                                    const channelKey = `${site.site_id}-${targetId}-${entry.datetime}`
+                                    if (processedChannelDates.has(channelKey)) continue
+                                    
+                                    const impressions = extractDayImpressions(entry.cpm, targetId)
+                                    const dateKey = entry.datetime || ''
+                                    if (dateKey && impressions > 0) {
+                                        dailyMap.set(dateKey, (dailyMap.get(dateKey) || 0) + impressions)
+                                        processedChannelDates.add(channelKey)
+                                    }
+                                } else {
+                                    // Fallback if no target channels
+                                    const impressions = extractDayImpressions(entry.cpm, null)
+                                    const dateKey = entry.datetime || ''
+                                    if (dateKey && impressions > 0) {
+                                        dailyMap.set(dateKey, (dailyMap.get(dateKey) || 0) + impressions)
+                                    }
+                                }
                             }
                         }
                     }
                     deliveredTodayFromAPI = dailyMap.get(todayStr) || 0
                 }
+
 
                 const realHistoryArr = Array.from(dailyMap.entries())
                     .map(([date, value]) => {

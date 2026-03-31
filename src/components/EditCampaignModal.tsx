@@ -35,6 +35,10 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
     const firstCampaign = campaigns[0] || {}
 
     // Shared fields (same for all formats in the PI)
+    const allChannels = campaigns.map(c => c.externalChannelId || '').filter(Boolean)
+    const uniqueChannels = Array.from(new Set(allChannels))
+    const isInitiallyGlobal = uniqueChannels.length === 1 && allChannels.length > 0
+    
     const [shared, setShared] = useState({
         agency: firstCampaign.agency || '',
         client: firstCampaign.client || '',
@@ -45,7 +49,10 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
         scheduledTimes: firstCampaign.scheduledTimes || '[]',
         manualDashboardUrl: firstCampaign.manualDashboardUrl || '',
         showOnDashboard: firstCampaign.showOnDashboard !== false, // default to true
+        useGlobalChannel: isInitiallyGlobal,
+        globalChannelId: isInitiallyGlobal ? uniqueChannels[0] : (firstCampaign.externalChannelId || ''),
     })
+
 
     // Format entries - one per campaign
     const [entries, setEntries] = useState<FormatEntry[]>(
@@ -139,7 +146,11 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                     data.append('flightEnd', entry.flightEnd)
                     data.append('externalAuthUrl', entry.externalAuthUrl)
                     data.append('externalCampaignId', entry.externalCampaignId)
-                    data.append('externalChannelId', entry.externalChannelId)
+                    
+                    // Channel logic: Global vs Individual
+                    const finalChannel = shared.useGlobalChannel ? shared.globalChannelId : entry.externalChannelId
+                    data.append('externalChannelId', finalChannel)
+                    
                     data.append('isMonitoringActive', entry.isMonitoringActive.toString())
                     data.append('manualDashboardUrl', shared.manualDashboardUrl || '')
                     data.append('isScheduled', shared.isScheduled.toString())
@@ -153,6 +164,7 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
 
                 // 3. Create new formats
                 for (const entry of entries.filter(e => e._isNew && !e._isDeleted)) {
+                    const finalChannel = shared.useGlobalChannel ? shared.globalChannelId : entry.externalChannelId
                     await addFormatToCampaign({
                         agency: shared.agency,
                         client: shared.client,
@@ -168,12 +180,16 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                         scheduledTimes: shared.scheduledTimes,
                         externalAuthUrl: entry.externalAuthUrl,
                         externalCampaignId: entry.externalCampaignId,
+                        externalChannelId: finalChannel,
                         isMonitoringActive: entry.isMonitoringActive,
                         manualDashboardUrl: shared.manualDashboardUrl || null,
                         dailyGoalThreshold: entry.dailyGoalThreshold,
                         showOnDashboard: shared.showOnDashboard,
+                        isMultiChannel: entry.isMultiChannel,
+                        allowedChannels: entry.allowedChannels,
                     } as any)
                 }
+
 
                 onSaved()
             } catch (err) {
@@ -288,6 +304,44 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                             <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white/40 after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
                         </label>
                     </div>
+
+                    {/* Channel Selection Toggle */}
+                    <div className="border-t border-white/5 pt-4 space-y-4">
+                         <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-xs font-black text-white uppercase tracking-widest">Configuração de Canais</p>
+                                <p className="text-[10px] text-white/30 font-medium">Usar um único canal para todos os formatos ou individual?</p>
+                            </div>
+                            <div className="flex p-1 rounded-xl bg-white/5 border border-white/10">
+                                <button
+                                    onClick={() => updateShared({ useGlobalChannel: true })}
+                                    className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-tighter transition-all ${shared.useGlobalChannel ? 'bg-accent text-white shadow-lg' : 'text-white/30 hover:text-white/50'}`}
+                                >
+                                    Global
+                                </button>
+                                <button
+                                    onClick={() => updateShared({ useGlobalChannel: false })}
+                                    className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-tighter transition-all ${!shared.useGlobalChannel ? 'bg-accent text-white shadow-lg' : 'text-white/30 hover:text-white/50'}`}
+                                >
+                                    Por Formato
+                                </button>
+                            </div>
+                        </div>
+
+                        {shared.useGlobalChannel && (
+                             <FieldBlock label="ID Canal 00px (Global)" icon={Layers}>
+                                <input
+                                    type="text"
+                                    value={shared.globalChannelId}
+                                    onChange={e => updateShared({ globalChannelId: e.target.value })}
+                                    className="modal-input"
+                                    placeholder="Ex: 81848"
+                                />
+                                <p className="text-[9px] text-accent/50 mt-1 uppercase font-bold tracking-tight">Este ID será aplicado a todos os formatos desta PI.</p>
+                             </FieldBlock>
+                        )}
+                    </div>
+
 
                     {/* Formats Section */}
                     <div className="border-t border-white/5 pt-4">
@@ -454,15 +508,17 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                                                                     placeholder="Ex: 6988"
                                                                 />
                                                             </FieldBlock>
-                                                            <FieldBlock label="ID Canal 00px (Referência)" icon={Layers}>
-                                                                <input
-                                                                    type="text"
-                                                                    value={entry.externalChannelId}
-                                                                    onChange={e => updateEntry(index, { externalChannelId: e.target.value })}
-                                                                    className="modal-input"
-                                                                    placeholder="Ex: 81848"
-                                                                />
-                                                            </FieldBlock>
+                                                            {!shared.useGlobalChannel && (
+                                                                <FieldBlock label="ID Canal 00px (Individual)" icon={Layers}>
+                                                                    <input
+                                                                        type="text"
+                                                                        value={entry.externalChannelId}
+                                                                        onChange={e => updateEntry(index, { externalChannelId: e.target.value })}
+                                                                        className="modal-input"
+                                                                        placeholder="Ex: 81848"
+                                                                    />
+                                                                </FieldBlock>
+                                                            )}
                                                         </div>
                                                     )}
                                                 </div>

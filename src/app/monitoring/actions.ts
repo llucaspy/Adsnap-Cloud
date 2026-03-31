@@ -106,31 +106,48 @@ export async function getLiveMetrics(campaignId: string): Promise<LiveMetricsRes
             return { success: false, error: 'Monitoramento não configurado ou inativo' }
         }
 
-        // 1. Handshake JWT -> Session Token (with 15s timeout)
-        const authResponse = await fetchWithTimeout(campaign.externalAuthUrl, {
-            method: 'GET',
-            redirect: 'follow',
-            cache: 'no-store'
-        }, FETCH_TIMEOUT_MS)
-
-        if (!authResponse.ok) {
-            const errMsg = `Handshake falhou: HTTP ${authResponse.status}`
-            await nexusLogStore.addLog(`00px: ${errMsg}`, 'API_ERROR', undefined, campaignId)
-            return { success: false, error: errMsg }
+        // 1. Handshake JWT -> Session Token
+        // First, check if the provided URL already contains a session token 's'
+        let sessionToken = null
+        try {
+            const initialUrlObj = new URL(campaign.externalAuthUrl)
+            sessionToken = initialUrlObj.searchParams.get('s')
+        } catch (e) {
+            console.error('[00px API] Malformed auth URL:', campaign.externalAuthUrl)
         }
 
-        const finalUrl = authResponse.url
-        const urlObj = new URL(finalUrl)
-        const sessionToken = urlObj.searchParams.get('s')
+        let finalUrl = campaign.externalAuthUrl
 
         if (!sessionToken) {
-            const errMsg = 'Token de sessão não encontrado na resposta 00px'
-            await nexusLogStore.addLog(`00px Auth: ${errMsg}`, 'API_ERROR', undefined, campaignId)
-            return { success: false, error: errMsg }
+            const authResponse = await fetchWithTimeout(campaign.externalAuthUrl, {
+                method: 'GET',
+                redirect: 'follow',
+                cache: 'no-store'
+            }, FETCH_TIMEOUT_MS)
+
+            if (!authResponse.ok) {
+                const errMsg = `Handshake falhou: HTTP ${authResponse.status}`
+                await nexusLogStore.addLog(`00px: ${errMsg}`, 'API_ERROR', undefined, campaignId)
+                return { success: false, error: errMsg }
+            }
+
+            finalUrl = authResponse.url
+            const urlObj = new URL(finalUrl)
+            sessionToken = urlObj.searchParams.get('s')
+
+            if (!sessionToken) {
+                const errMsg = 'Token de sessão não encontrado na resposta 00px'
+                // Log the final URL to help debug where the token went
+                await nexusLogStore.addLog(`00px Auth: ${errMsg}`, 'API_ERROR', `Final URL: ${finalUrl}`, campaignId)
+                return { success: false, error: errMsg }
+            }
         }
 
         // 2. Extract Campaign ID from URL if missing
+
+
         let externalId = campaign.externalCampaignId;
+
         if (!externalId || externalId === '') {
             const match = finalUrl.match(/\/campaign\/(\d+)/);
             if (match && match[1]) {
