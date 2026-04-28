@@ -10,37 +10,41 @@ datasource db {
 }
 
 model Campaign {
-  id              String          @id @default(cuid())
-  agency          String
-  client          String
-  campaignName    String          @default("")
-  pi              String
-  format          String
-  url             String
-  device          String          @default("desktop")
-  status          String          @default("PENDING")
-  segmentation    String          @default("PRIVADO")
-  flightStart     DateTime?
-  flightEnd       DateTime?
-  isArchived      Boolean         @default(false)
-  isScheduled     Boolean         @default(false)
-  scheduledTimes  String          @default("[]")
-  lastCaptureAt   DateTime?
-  retryCount      Int             @default(0)
-  createdAt       DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
-  externalAuthUrl     String?
-  externalCampaignId  String?
-  isMonitoringActive  Boolean         @default(false)
-  manualDashboardUrl  String?
-  dailyGoalThreshold  Int?
+  id                   String          @id @default(cuid())
+  agency               String
+  client               String
+  campaignName         String          @default("")
+  pi                   String
+  format               String
+  url                  String
+  device               String          @default("desktop")
+  status               String          @default("PENDING")
+  segmentation         String          @default("PRIVADO")
+  flightStart          DateTime?
+  flightEnd            DateTime?
+  isArchived           Boolean         @default(false)
+  isScheduled          Boolean         @default(false)
+  scheduledTimes       String          @default("[]")
+  lastCaptureAt        DateTime?
+  retryCount           Int             @default(0)
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+  externalAuthUrl      String?
+  externalCampaignId   String?
+  isMonitoringActive   Boolean         @default(false)
+  manualDashboardUrl   String?
+  dailyGoalThreshold   Int?
   lastThresholdAlertAt DateTime?
-  showOnDashboard     Boolean         @default(false)
-  isMultiChannel      Boolean         @default(false)
-  allowedChannels     String?         @default("[]")
-  externalChannelId   String?
-  captures            Capture[]
-  emailDispatches EmailDispatch[]
+  showOnDashboard      Boolean         @default(false)
+  allowedChannels      String?         @default("[]")
+  externalChannelId    String?
+  isMultiChannel       Boolean         @default(false)
+  lastDelivered        Int             @default(0)
+  lastFetchedAt        DateTime?
+  lastGoal             Int             @default(0)
+  lastViewability      Float           @default(0)
+  captures             Capture[]
+  emailDispatches      EmailDispatch[]
 }
 
 model Capture {
@@ -108,14 +112,14 @@ model EmailDispatch {
 }
 
 model DailyMetric {
-  id           String   @id @default(cuid())
-  campaignId   String
-  date         DateTime @default(now())
-  delivered    Int
-  viewability  Float
-  goal         Int
-  pacing       Float
-  createdAt    DateTime @default(now())
+  id          String   @id @default(cuid())
+  campaignId  String
+  date        DateTime @default(now())
+  delivered   Int
+  viewability Float
+  goal        Int
+  pacing      Float
+  createdAt   DateTime @default(now())
 
   @@unique([campaignId, date])
 }

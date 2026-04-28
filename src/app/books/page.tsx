@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { BackToTopButton } from '@/components/BackToTopButton'
 import { PIFolderCard } from '@/components/PIFolderCard'
 
-export const dynamic = 'force-dynamic'
+export const revalidate = 30
 
 export default async function BooksPage() {
     const captures = await prisma.capture.findMany({

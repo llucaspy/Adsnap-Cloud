@@ -7,7 +7,7 @@ import { CaptureSpotlight } from '@/components/CaptureSpotlight'
 import Link from 'next/link'
 import { ArrowRight, Box, Zap, Search } from 'lucide-react'
 
-export const dynamic = 'force-dynamic'
+export const revalidate = 30
 
 export default async function PresentationHome() {
   const today = startOfDay(new Date())
