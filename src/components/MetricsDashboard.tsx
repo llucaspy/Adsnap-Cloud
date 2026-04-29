@@ -7,16 +7,11 @@ import {
     Mail,
     Activity,
     AlertTriangle,
-    CheckCircle2,
     RefreshCw,
-    TrendingUp,
-    Clock,
-    Send,
-    Sparkles,
-    Zap
 } from 'lucide-react'
 import { getAdminMetrics } from '@/app/actions'
 import { TelegramStatusCard } from './TelegramStatusCard'
+import { NexusHealthCard } from './NexusHealthCard'
 
 export function MetricsDashboard() {
     const [metrics, setMetrics] = useState<any>(null)
@@ -50,15 +45,6 @@ export function MetricsDashboard() {
         </div>
     )
 
-    const formatTime = (date: Date) => {
-        if (!date) return 'Nunca executado'
-        return new Intl.DateTimeFormat('pt-BR', {
-            day: '2-digit',
-            month: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit'
-        }).format(new Date(date))
-    }
 
     return (
         <div className="space-y-8 animate-fade-in">
@@ -113,29 +99,13 @@ export function MetricsDashboard() {
                     description="Reset à meia-noite"
                 />
 
-                {/* Gemini AI Status */}
-                <div className="glass group rounded-[32px] p-6 border border-white/5 hover:border-white/10 transition-all flex flex-col justify-between">
-                    <div className="flex items-start justify-between">
-                        <div className="p-3 rounded-2xl bg-cyan-400/10 border border-cyan-400/20">
-                            <Sparkles className="w-5 h-5 text-cyan-400" />
-                        </div>
-                        <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase ${metrics.gemini.isActive && !metrics.gemini.isRateLimited ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : metrics.gemini.isRateLimited ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}`}>
-                            {metrics.gemini.isActive && !metrics.gemini.isRateLimited ? <CheckCircle2 size={10} /> : metrics.gemini.isRateLimited ? <Zap size={10} className="animate-pulse" /> : <AlertTriangle size={10} />}
-                            {metrics.gemini.isActive && !metrics.gemini.isRateLimited ? 'Ativo' : metrics.gemini.isRateLimited ? 'Rate Limit' : 'Erro/Inativo'}
-                        </div>
-                    </div>
-                    <div>
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-white/30 mb-1">Google Gemini AI</p>
-                        <h3 className="text-lg font-black text-white flex items-center gap-2">
-                            {metrics.gemini.isRateLimited ? (
-                                <span className="text-amber-400 text-sm">Cota Excedida (Aguarde {metrics.gemini.retryAfter || 'alguns segundos'})</span>
-                            ) : metrics.gemini.isActive ? (
-                                <><Zap size={16} className="text-cyan-400" /> {metrics.gemini.modelsAvailable} Modelos</>
-                            ) : (
-                                <span className="text-rose-400 text-sm italic">{metrics.gemini.error || 'Não configurado'}</span>
-                            )}
-                        </h3>
-                    </div>
+                {/* Nexus AI Health Card (Unified Gemini + Nexus Monitoring) */}
+                <div className="md:col-span-2 lg:col-span-1">
+                    <NexusHealthCard 
+                        data={metrics.nexus} 
+                        gemini={metrics.gemini}
+                        onRefreshRequest={fetchMetrics}
+                    />
                 </div>
             </div>
 
@@ -161,11 +131,6 @@ export function MetricsDashboard() {
 }
 
 function MetricCard({ title, value, limit, percentage, icon, color, description }: any) {
-    const colors: any = {
-        blue: 'from-blue-500/20 to-blue-600/5 border-blue-500/20 text-blue-400',
-        emerald: 'from-emerald-500/20 to-emerald-600/5 border-emerald-500/20 text-emerald-400',
-        purple: 'from-purple-500/20 to-purple-600/5 border-purple-500/20 text-purple-400'
-    }
 
     return (
         <div className="glass group rounded-[32px] p-6 border border-white/5 hover:border-white/10 transition-all flex flex-col justify-between">

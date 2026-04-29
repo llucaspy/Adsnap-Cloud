@@ -815,8 +815,8 @@ export async function getAdminMetrics() {
                     geminiStatus.modelsAvailable = modelsData.models?.length || 0
                 }
 
-                // Quick generation test to check rate limits
-                const testRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`, {
+                // Quick generation test to check rate limits - using 1.5-flash which is more stable for Free Tier
+                const testRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ contents: [{ parts: [{ text: 'OK' }] }] }),
@@ -829,7 +829,9 @@ export async function getAdminMetrics() {
                     const retryInfo = errData.error?.details?.find((d: any) => d.retryDelay)
                     geminiStatus.retryAfter = retryInfo?.retryDelay || null
                 } else if (!testRes.ok) {
-                    geminiStatus.error = `Status ${testRes.status}`
+                    const errData = await testRes.json().catch(() => ({}))
+                    geminiStatus.error = errData.error?.message || `Status ${testRes.status}`
+                    // If it's a "limit: 0" error, it's effectively a blocked model, not necessarily a global rate limit
                 }
             } catch (err) {
                 geminiStatus.error = err instanceof Error ? err.message : 'Timeout'
@@ -838,7 +840,47 @@ export async function getAdminMetrics() {
             geminiStatus.error = 'GEMINI_API_KEY não configurada'
         }
 
-        // 6. Nexus Health
+        // 6. Nexus Message Logs & Healthy (New)
+        let nexusHealth = {
+            totalMessages: 0,
+            errors24h: 0,
+            lastMessageAt: null as Date | null,
+            recentErrors: [] as any[]
+        }
+
+        try {
+            const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000)
+            
+            // Raw query to include NexusMessage table which might not be in Prisma schema yet
+            const nexusStats = await (prisma as any).$queryRawUnsafe(`
+                SELECT 
+                    COUNT(*) as total,
+                    COUNT(*) FILTER (WHERE metadata->>'error' = 'true') as errors_24h,
+                    MAX("createdAt") as last_msg
+                FROM "NexusMessage"
+                WHERE "createdAt" >= $1
+            `, yesterday) as any[]
+
+            if (nexusStats[0]) {
+                nexusHealth.totalMessages = Number(nexusStats[0].total || 0)
+                nexusHealth.errors24h = Number(nexusStats[0].errors_24h || 0)
+                nexusHealth.lastMessageAt = nexusStats[0].last_msg ? new Date(nexusStats[0].last_msg) : null
+            }
+
+            // Get last 5 actual errors
+            nexusHealth.recentErrors = await (prisma as any).$queryRawUnsafe(`
+                SELECT content, metadata, "createdAt"
+                FROM "NexusMessage"
+                WHERE metadata->>'error' = 'true'
+                ORDER BY "createdAt" DESC
+                LIMIT 5
+            `) as any[]
+
+        } catch (err) {
+            console.error('[Actions] Nexus health check failed:', err)
+        }
+
+        // 7. Storage Health
         const lastRun = settings?.storageCheckLastRun
 
         return {
@@ -863,6 +905,7 @@ export async function getAdminMetrics() {
             },
             telegram: telegramStatus,
             gemini: geminiStatus,
+            nexus: nexusHealth,
             health: {
                 lastRun: lastRun,
                 isHealthy: lastRun ? (new Date().getTime() - lastRun.getTime() < 24 * 60 * 60 * 1000) : false
@@ -871,6 +914,41 @@ export async function getAdminMetrics() {
     } catch (error) {
         console.error('[Actions] Error fetching dashboard metrics:', error)
         throw error
+    }
+}
+
+export async function testNexusConnection() {
+    try {
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+        if (!supabaseUrl) throw new Error('Supabase URL missing')
+
+        const start = Date.now()
+        const response = await fetch(`${supabaseUrl}/functions/v1/nexus-chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message: "Teste de conexão administrativa.",
+                sessionId: "admin-health-check-" + Date.now()
+            }),
+            signal: AbortSignal.timeout(30000)
+        })
+
+        const data = await response.json()
+        const duration = Date.now() - start
+
+        return {
+            success: response.ok && data.success,
+            status: response.status,
+            message: data.message || data.error || 'Sem resposta',
+            latency: duration,
+            model: data.model || 'unknown'
+        }
+    } catch (err) {
+        return {
+            success: false,
+            message: err instanceof Error ? err.message : 'Falha desconhecida',
+            latency: 0
+        }
     }
 }
 
