@@ -64,7 +64,7 @@ export function MetricsDashboard() {
             </div>
 
             {/* Metrics Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-start">
 
                 {/* Supabase Storage */}
                 <MetricCard
@@ -131,9 +131,16 @@ export function MetricsDashboard() {
 }
 
 function MetricCard({ title, value, limit, percentage, icon, color, description }: any) {
+    const colors: any = {
+        blue: 'from-blue-500/10 to-blue-600/5 border-blue-500/20 text-blue-400 bar-from-blue-500 bar-to-cyan-400',
+        emerald: 'from-emerald-500/10 to-emerald-600/5 border-emerald-500/20 text-emerald-400 bar-from-emerald-500 bar-to-teal-400',
+        purple: 'from-purple-500/10 to-purple-600/5 border-purple-500/20 text-purple-400 bar-from-purple-500 bar-to-accent'
+    }
+
+    const c = colors[color] || colors.blue
 
     return (
-        <div className="glass group rounded-[32px] p-6 border border-white/5 hover:border-white/10 transition-all flex flex-col justify-between">
+        <div className={`glass group rounded-[32px] p-6 border ${c.split(' ').find((s:string) => s.startsWith('border-'))} hover:border-white/10 transition-all flex flex-col gap-8`}>
             <div className="flex items-start justify-between">
                 <div className={`p-3 rounded-2xl bg-white/5 border border-white/10 group-hover:scale-110 transition-transform`}>
                     {icon}
@@ -151,9 +158,9 @@ function MetricCard({ title, value, limit, percentage, icon, color, description 
                 <div className="space-y-1.5">
                     <div className="flex justify-between text-[10px] font-bold">
                         <span className="text-white/40">USO ATUAL</span>
-                        <span className={`text-${color}-400`}>{percentage.toFixed(1)}%</span>
+                        <span className={c.split(' ').find((s:string) => s.startsWith('text-'))}>{percentage.toFixed(1)}%</span>
                     </div>
-                    <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden p-[2px] border border-white/5 bg-linear-to-r from-accent/20 to-transparent">
+                    <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden p-[2px] border border-white/5">
                         <div
                             className={`h-full bg-linear-to-r ${color === 'blue' ? 'from-blue-500 to-cyan-400' : color === 'emerald' ? 'from-emerald-500 to-teal-400' : 'from-purple-500 to-accent'} transition-all duration-1000`}
                             style={{ width: `${Math.min(percentage, 100)}%` }}

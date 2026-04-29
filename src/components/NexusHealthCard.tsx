@@ -54,45 +54,45 @@ export function NexusHealthCard({ data, gemini, onRefreshRequest }: NexusHealthC
         : (gemini.isRateLimited || data.errors24h > 0) ? 'warning' : 'critical'
 
     return (
-        <div className="glass group rounded-[32px] overflow-hidden border border-white/5 hover:border-white/10 transition-all">
+        <div className="glass group rounded-[32px] overflow-hidden border border-white/5 hover:border-white/10 transition-all flex flex-col h-full">
             {/* Header Section */}
-            <div className={`p-6 border-b border-white/5 bg-linear-to-br ${
+            <div className={`p-4 border-b border-white/5 bg-linear-to-br ${
                 status === 'healthy' ? 'from-emerald-500/10 to-teal-500/5' : 
                 status === 'warning' ? 'from-amber-500/10 to-orange-500/5' : 
                 'from-rose-500/10 to-red-500/5'
             }`}>
-                <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                        <div className={`p-3 rounded-2xl ${
+                <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2.5">
+                        <div className={`p-2 rounded-xl ${
                             status === 'healthy' ? 'bg-emerald-500/20 text-emerald-400' :
                             status === 'warning' ? 'bg-amber-500/20 text-amber-400' :
                             'bg-rose-500/20 text-rose-400'
                         }`}>
-                            <Brain size={24} className={status === 'healthy' ? 'animate-pulse' : ''} />
+                            <Brain size={18} className={status === 'healthy' ? 'animate-pulse' : ''} />
                         </div>
                         <div>
-                            <h3 className="text-xl font-black text-white tracking-tighter uppercase">Nexus AI Core</h3>
-                            <p className="text-[10px] font-bold text-white/40 tracking-widest uppercase">Saúde Neural do Sistema</p>
+                            <h3 className="text-sm font-black text-white tracking-tighter uppercase leading-none">Nexus AI Core</h3>
+                            <p className="text-[8px] font-bold text-white/30 tracking-widest uppercase mt-1">Status do Sistema</p>
                         </div>
                     </div>
-                    <div className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[10px] font-black uppercase border shrink-0 ${
+                    <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[8px] font-black uppercase border shrink-0 ${
                         status === 'healthy' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
                         status === 'warning' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
                         'bg-rose-500/10 text-rose-400 border-rose-500/20'
                     }`}>
-                        {status === 'healthy' ? <CheckCircle2 size={12} /> : status === 'warning' ? <ShieldAlert size={12} /> : <XCircle size={12} />}
-                        {status === 'healthy' ? 'Operacional' : status === 'warning' ? 'Degradado' : 'Crítico'}
+                        {status === 'healthy' ? <CheckCircle2 size={10} /> : status === 'warning' ? <ShieldAlert size={10} /> : <XCircle size={10} />}
+                        {status === 'healthy' ? 'OK' : status === 'warning' ? 'ATENÇÃO' : 'CRÍTICO'}
                     </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-white/5 rounded-2xl p-3 border border-white/5">
-                        <p className="text-[10px] font-bold text-white/30 mb-1">MENSAGENS (24H)</p>
-                        <p className="text-2xl font-black text-white">{data.totalMessages}</p>
+                <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-white/5 rounded-xl p-2 border border-white/5">
+                        <p className="text-[8px] font-bold text-white/30 mb-0.5">MENSAGENS</p>
+                        <p className="text-lg font-black text-white">{data.totalMessages}</p>
                     </div>
-                    <div className="bg-white/5 rounded-2xl p-3 border border-white/5">
-                        <p className="text-[10px] font-bold text-white/30 mb-1">ERROS (24H)</p>
-                        <p className={`text-2xl font-black ${data.errors24h > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                    <div className="bg-white/5 rounded-xl p-2 border border-white/5">
+                        <p className="text-[8px] font-bold text-white/30 mb-0.5">ERROS (24H)</p>
+                        <p className={`text-lg font-black ${data.errors24h > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
                             {data.errors24h}
                         </p>
                     </div>
@@ -100,7 +100,7 @@ export function NexusHealthCard({ data, gemini, onRefreshRequest }: NexusHealthC
             </div>
 
             {/* AI Status Detail */}
-            <div className="p-6 space-y-6">
+            <div className="p-4 space-y-4 flex-1">
                 <div>
                     <div className="flex items-center justify-between mb-3 text-[10px] font-black text-white/30 uppercase tracking-widest">
                         <span>Status Gemini API</span>
@@ -137,17 +137,13 @@ export function NexusHealthCard({ data, gemini, onRefreshRequest }: NexusHealthC
 
                 {/* Recent Errors Section */}
                 {data.recentErrors.length > 0 && (
-                    <div className="animate-fade-in-up">
-                        <h4 className="text-[10px] font-black text-white/30 uppercase tracking-widest mb-3 flex items-center gap-2">
-                             <AlertCircle size={12} /> Últimos Erros Logados
+                    <div>
+                        <h4 className="text-[8px] font-black text-white/20 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                             <AlertCircle size={10} /> Logs recentes
                         </h4>
-                        <div className="space-y-2">
-                            {data.recentErrors.map((err, i) => (
-                                <div key={i} className="text-xs p-3 rounded-xl bg-rose-500/5 border border-rose-500/10 text-white/60 font-mono overflow-hidden">
-                                    <div className="flex justify-between items-center mb-1">
-                                        <span className="text-[10px] text-rose-400/60">{new Date(err.createdAt).toLocaleTimeString()}</span>
-                                        <span className="text-[10px] font-black text-white/20 uppercase">{err.metadata?.model || 'none'}</span>
-                                    </div>
+                        <div className="space-y-1.5">
+                            {data.recentErrors.slice(0, 2).map((err, i) => (
+                                <div key={i} className="text-[10px] p-2 rounded-lg bg-rose-500/5 border border-rose-500/10 text-white/50 font-mono">
                                     <p className="truncate">{err.content?.replace(/⚠️ Erro: /g, '')}</p>
                                 </div>
                             ))}
@@ -156,16 +152,16 @@ export function NexusHealthCard({ data, gemini, onRefreshRequest }: NexusHealthC
                 )}
 
                 {/* Actions Section */}
-                <div className="pt-2">
+                <div className="pt-2 mt-auto">
                     <button
                         onClick={handleTest}
                         disabled={testing}
-                        className={`w-full py-4 px-6 rounded-2xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50 ${
-                            testing ? 'bg-white/5 text-white/30' : 'bg-accent text-white hover:bg-accent/80'
+                        className={`w-full py-2.5 px-4 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50 ${
+                            testing ? 'bg-white/5 text-white/30' : 'bg-accent text-white hover:bg-accent/80 shadow-lg shadow-accent/10'
                         }`}
                     >
-                        {testing ? <RefreshCw className="animate-spin" size={16} /> : <Zap size={16} />}
-                        {testing ? 'Diagnosticando...' : 'Testar Conexão Nexus'}
+                        {testing ? <RefreshCw className="animate-spin" size={12} /> : <Zap size={12} />}
+                        {testing ? 'Diagnosticando...' : 'Testar Conexão'}
                     </button>
 
                     {testResult && (
