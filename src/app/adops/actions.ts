@@ -2,6 +2,7 @@
 
 import prisma from '@/lib/prisma'
 import { getLiveMetrics, type LiveMetricsResult } from '@/app/monitoring/actions'
+import { nexusLogStore } from '@/lib/nexusLogStore'
 import { differenceInCalendarDays, startOfDay } from 'date-fns'
 
 // ---------------------------------------------------------------------------
@@ -26,23 +27,10 @@ interface DailyEntry {
     cpm: DailyCpmData | string
 }
 
-export interface AdOpsMetrics {
-    total: number
-    onTrackCount: number
-    healthScore: number
-    atRiskCount: number
-    globalGoal: number
-    globalDelivered: number
-    globalToday: number
-    globalProjected: number
-    avgViewability: number
-    isSyncing?: boolean
-    campaigns: any[]
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+const isDev = process.env.NODE_ENV === 'development'
 
 /** Get today's date string in dd/MM/yyyy format, Brazil timezone */
 function getTodayBrazil(): string {
@@ -71,31 +59,20 @@ function parseDailyData(raw: unknown): DailyEntry[] {
 }
 
 /** Extract impressions from a cpm data object (handles both direct and nested channels) */
-function extractDayImpressions(cpmRaw: DailyCpmData | string | undefined, targetChannelId?: string | null): number {
+function extractDayImpressions(cpmRaw: DailyCpmData | string | undefined): number {
     if (!cpmRaw) return 0
 
     const cpm: DailyCpmData = typeof cpmRaw === 'string' 
         ? (() => { try { return JSON.parse(cpmRaw) } catch { return {} } })()
         : cpmRaw
 
-    // 1. If targetChannelId is provided, look ONLY for that channel
-    if (targetChannelId && cpm.total_data_purchase_type_channels && typeof cpm.total_data_purchase_type_channels === 'object') {
-        const ch = cpm.total_data_purchase_type_channels[targetChannelId]
-        if (ch && typeof ch.impressions === 'number') {
-            return ch.impressions
-        }
-        // If target exists but has no data, return 0 (don't fallback to total)
-        return 0
-    }
-
-    // 2. Direct impressions field (fallback/original behavior if no target)
+    // 1. Direct impressions field (preferred)
     if (typeof cpm.impressions === 'number' && cpm.impressions > 0) {
         return cpm.impressions
     }
 
-    // 3. Fallback: Sum from nested channels ONLY if no targetChannelId was specified
-    // (This keeps legacy behavior for ads not using specific channel tracking)
-    if (!targetChannelId && cpm.total_data_purchase_type_channels && typeof cpm.total_data_purchase_type_channels === 'object') {
+    // 2. Sum from nested channels
+    if (cpm.total_data_purchase_type_channels && typeof cpm.total_data_purchase_type_channels === 'object') {
         let sum = 0
         for (const ch of Object.values(cpm.total_data_purchase_type_channels)) {
             if (ch && typeof ch.impressions === 'number') {
@@ -111,118 +88,23 @@ function extractDayImpressions(cpmRaw: DailyCpmData | string | undefined, target
 // ---------------------------------------------------------------------------
 // Main Export
 // ---------------------------------------------------------------------------
-let metricsCache: { data: AdOpsMetrics, timestamp: number } | null = null
-const CACHE_TTL = 2 * 60 * 1000 // 2 minutes
-let isRefreshing = false
-let currentRefreshPromise: Promise<AdOpsMetrics> | null = null
-
-export async function getAggregatedAdOpsMetrics(): Promise<AdOpsMetrics> {
-    // 1. Return fresh cache if available
-
-    if (metricsCache && (Date.now() - metricsCache.timestamp < CACHE_TTL)) {
-        return metricsCache.data
-    }
-
-    // 2. If refresh is already in progress, wait for it if no cache exists
-    if (isRefreshing && currentRefreshPromise) {
-        try {
-            return await currentRefreshPromise
-        } catch (err) {
-            console.error('[BI Cache] Joined refresh failed, returning empty state:', err)
-            return getEmptyState()
-        }
-    }
-
-    // 3. Stale cache refresh in background
-    if (metricsCache) {
-        if (!isRefreshing) {
-            console.log('[BI Cache] Returning stale metrics, triggering background refresh...')
-            currentRefreshPromise = fetchAndCacheMetrics()
-            currentRefreshPromise.catch(err => {
-                console.error('[BI Cache] Background refresh failed:', err)
-            }).finally(() => {
-                isRefreshing = false
-                currentRefreshPromise = null
-            })
-        }
-        return metricsCache.data
-    }
-
-    // 4. No cache at all: Fetch synchronously with timeout
-    console.log('[BI Cache] No cache found, performing initial fetch...')
+export async function getAggregatedAdOpsMetrics() {
     try {
-        currentRefreshPromise = fetchAndCacheMetrics()
-        const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Initial Fetch Timeout')), 18000)
-        )
-        
-        if (currentRefreshPromise) {
-            return await Promise.race([currentRefreshPromise, timeoutPromise]) as AdOpsMetrics
-        }
-        return getEmptyState()
-    } catch {
-        console.warn('[BI Cache] Initial fetch timed out or failed, returning empty state')
-        return getEmptyState()
-    }
-}
-
-function getEmptyState(): AdOpsMetrics {
-    return {
-        total: 0,
-        onTrackCount: 0,
-        healthScore: 0,
-        atRiskCount: 0,
-        globalGoal: 100,
-        globalDelivered: 0,
-        globalToday: 0,
-        globalProjected: 0,
-        avgViewability: 0,
-        campaigns: [],
-        isSyncing: true
-    }
-}
-
-/**
- * Core logic to fetch, process and cache metrics
- */
-async function fetchAndCacheMetrics(): Promise<AdOpsMetrics> {
-    if (isRefreshing && !currentRefreshPromise) {
-         return (metricsCache?.data || getEmptyState()) as AdOpsMetrics
-    }
-    isRefreshing = true
-    
-    try {
-        const thresholdDate = new Date()
-        thresholdDate.setHours(thresholdDate.getHours() - 48)
-
         const campaigns = await prisma.campaign.findMany({
             where: {
                 isArchived: false,
-                showOnDashboard: true,
-                OR: [
-                    { flightEnd: null },
-                    { flightEnd: { gte: thresholdDate } }
-                ]
+                externalAuthUrl: { not: "" }
             }
         })
 
-
         if (campaigns.length === 0) {
-            const emptyResult: AdOpsMetrics = {
+            return {
                 total: 0,
                 onTrackCount: 0,
                 healthScore: 100,
                 atRiskCount: 0,
-                globalGoal: 0,
-                globalDelivered: 0,
-                globalToday: 0,
-                globalProjected: 0,
-                avgViewability: 0,
                 campaigns: []
             }
-            metricsCache = { data: emptyResult, timestamp: Date.now() }
-            isRefreshing = false
-            return emptyResult
         }
 
         // Group by PI
@@ -237,186 +119,152 @@ async function fetchAndCacheMetrics(): Promise<AdOpsMetrics> {
             Array.from(groupedMap.entries()).map(async ([pi, group]) => {
                 const monitoringCampaign = group.find(c => c.isMonitoringActive) || group[0]
                 const main = group[0]
-                const manualDashboardUrl = group.find(c => (c as any).manualDashboardUrl)?.manualDashboardUrl || null
+                const manualDashboardUrl = (group as any[]).find(c => c.manualDashboardUrl)?.manualDashboardUrl || null
 
+                // Fetch real metrics
                 const result: LiveMetricsResult = await getLiveMetrics(monitoringCampaign.id)
                 const apiAvailable = result.success && !!result.data
 
-                // BI Agent History
+                // BI Agent History (fallback source — may not exist if migration is pending)
                 let metricHistory: { date: Date; delivered: number }[] = []
                 try {
-                    const prismaAny = prisma as any
-                    if (prismaAny.dailyMetric) {
-                        metricHistory = await prismaAny.dailyMetric.findMany({
+                    if ((prisma as any).dailyMetric) {
+                        metricHistory = await (prisma as any).dailyMetric.findMany({
                             where: { campaignId: pi },
                             orderBy: { date: 'desc' },
                             take: 7
                         })
                     }
-                } catch { /* skip */ }
+                } catch {
+                    // Model not yet migrated — silently skip
+                }
 
+                // -------------------------------------------------------
+                // Step 1: Extract totals from API purchases
+                // -------------------------------------------------------
                 let totalDelivered = 0
                 let totalGoal = 0
                 let avgViewability = 0
                 let metricsCount = 0
-                let formats: any[] = []
-                let fetchedAt = result.fetchedAt || null
-
-                // Collection of all target channel IDs for this PI group
-                const targetChannelIds = Array.from(new Set(group.map(c => (c as any).externalChannelId).filter(Boolean))) as string[]
-                const isMultiChannelPi = targetChannelIds.length > 1
-
+                const formats: FormatEntry[] = []
 
                 if (apiAvailable && result.data) {
                     const sites = result.data.sites || []
+
                     for (const site of sites) {
-                        const processedChannels = new Set<string>()
+                        if (!site.purchases) continue
                         const purchasesList = Array.isArray(site.purchases) ? site.purchases : [site.purchases]
-                        for (const purchase of purchasesList as any[]) {
+
+                        for (const purchase of purchasesList) {
                             if (!purchase.cpm) continue
-                            
-                            const channels = purchase.cpm.channels || []
-                            
-                            if (targetChannelIds.length > 0) {
-                                // Filter channels that belong to ANY format in this PI group
-                                const matchingChannels = channels.filter((ch: any) => targetChannelIds.includes(ch.channel_id.toString()))
-                                
-                                for (const channel of matchingChannels) {
-                                    // Deduplicate: Only count this channel once per PI site
-                                    const channelKey = `${site.site_id}-${channel.channel_id}`
-                                    if (!processedChannels.has(channelKey)) {
-                                        const td = channel.total_data
-                                        const q = channel.channel_purchased_quantity || 0
-                                        const d = td?.impressions ?? td?.valids ?? 0
-                                        const v = (td?.viewability ?? 0) * 100
-                                        
-                                        totalGoal += q
-                                        if (td) {
-                                            totalDelivered += d
-                                            avgViewability += v
-                                            metricsCount++
-                                        }
-                                        processedChannels.add(channelKey)
-                                    }
-                                }
-                            } else {
 
-                                // Fallback: Legacy/Standard behavior (no channel filtering)
-                                const q = purchase.cpm.quantity || 0
-                                const td = purchase.cpm.total_data
-                                const d = td?.impressions ?? td?.valids ?? 0
-                                const v = (td?.viewability ?? 0) * 100
-                                totalGoal += q
-                                if (td) {
-                                    totalDelivered += d
-                                    avgViewability += v
-                                    metricsCount++
-                                }
+                            const q = purchase.cpm.quantity || 0
+                            const td = purchase.cpm.total_data
+                            const d = td?.impressions ?? td?.valids ?? 0
+                            const v = (td?.viewability ?? 0) * 100
+
+                            totalGoal += q
+                            if (td) {
+                                totalDelivered += d
+                                avgViewability += v
+                                metricsCount++
                             }
-
-                            // Individual formats still show their target metrics
-                            let formatTd = purchase.cpm.total_data
-                            let formatGoal = purchase.cpm.quantity || 0
-                            
-                            // If we have target channels, we try to find the one that best matches this purchase
-                            // For simplicity, we check if any of our target channels are in this purchase
-                            if (targetChannelIds.length > 0) {
-                                const firstMatch = channels.find((ch: any) => targetChannelIds.includes(ch.channel_id.toString()))
-                                if (firstMatch) {
-                                    if (firstMatch.total_data) formatTd = firstMatch.total_data
-                                    formatGoal = firstMatch.channel_purchased_quantity || 0
-                                }
-                            }
-
 
                             formats.push({
-                                name: (purchase as any).format || 'CPM',
-                                goal: formatGoal,
-                                delivered: formatTd?.impressions ?? formatTd?.valids ?? 0,
-                                viewability: (formatTd?.viewability ?? 0) * 100,
-                                pacing: 0 // Will be calculated after
+                                name: site.site_name,
+                                goal: q,
+                                delivered: d,
+                                viewability: v,
+                                pacing: safeDivide(d, q) * 100
                             })
                         }
                     }
-                    if (metricsCount > 0) avgViewability = safeDivide(avgViewability, metricsCount)
 
-                } else if (metricsCache) {
-                    // Fallback to cache if API is down
-                    const previous = metricsCache.data.campaigns.find(c => c.id === pi)
-                    if (previous) {
-                        totalDelivered = previous.deliveredImpressions
-                        totalGoal = previous.goalImpressions
-                        avgViewability = previous.viewability
-                        formats = previous.formats || []
-                        fetchedAt = previous.fetchedAt
+                    if (metricsCount > 0) {
+                        avgViewability = safeDivide(avgViewability, metricsCount)
+                    }
+                } else {
+                    if (result.error) {
+                        await nexusLogStore.addLog(
+                            `PI ${pi}: API indisponível — ${result.error}`,
+                            'API_ERROR', undefined, monitoringCampaign.id
+                        )
                     }
                 }
 
-                if (totalGoal === 0) totalGoal = group.length * 1_000_000 
+                if (totalGoal === 0) {
+                    totalGoal = group.length * 1_000_000 
+                }
 
+                // -------------------------------------------------------
+                // Step 2: Time calculations
+                // -------------------------------------------------------
+                const MS_PER_DAY = 86400000
                 const allStarts = group.filter(c => c.flightStart).map(c => new Date(c.flightStart!).getTime())
                 const allEnds = group.filter(c => c.flightEnd).map(c => new Date(c.flightEnd!).getTime())
-                const start = allStarts.length ? Math.min(...allStarts) : Date.now() - (7 * 86400000)
-                const end = allEnds.length ? Math.max(...allEnds) : Date.now() + (30 * 86400000)
+
+                const start = allStarts.length ? Math.min(...allStarts) : Date.now() - (7 * MS_PER_DAY)
+                const end = allEnds.length ? Math.max(...allEnds) : Date.now() + (30 * MS_PER_DAY)
+
                 const s = startOfDay(new Date(start))
                 const e = startOfDay(new Date(end))
                 const n = startOfDay(new Date())
+
                 const elapsedDays = Math.max(1, differenceInCalendarDays(n, s) + 1)
                 const totalDays = Math.max(1, differenceInCalendarDays(e, s) + 1)
                 const daysLeft = Math.max(1, totalDays - elapsedDays)
+
                 const safeGoal = Math.max(1, Number(totalGoal))
                 const safeDelivered = Math.max(0, Number(totalDelivered))
 
+                // -------------------------------------------------------
+                // Step 3: KPI Calculations
+                // -------------------------------------------------------
                 const timeProgress = Math.min(100, safeDivide(elapsedDays, totalDays) * 100)
                 const deliveryProgress = safeDivide(safeDelivered, safeGoal) * 100
                 const pacing = safeDivide(safeDelivered / safeGoal, elapsedDays / totalDays, 0)
                 const pacingPercent = pacing * 100
+
                 const currentDaily = safeDivide(safeDelivered, elapsedDays)
                 const remaining = Math.max(0, safeGoal - safeDelivered)
                 const requiredDaily = safeDivide(remaining, daysLeft)
+
                 const projectedFinalValue = currentDaily * totalDays
                 const projectionPercent = safeDivide(projectedFinalValue, safeGoal) * 100
 
+                // -------------------------------------------------------
+                // Step 4: Status Classification
+                // -------------------------------------------------------
                 let status: 'on-track' | 'warning' | 'critical' | 'over' = 'on-track'
+
+                // We calculate pressure early for diagnostics
                 const isDelayedButHealthy = pacingPercent >= 95 && projectionPercent < 95
+
+                // BI Score
                 let score = 100
+                // viewability check early
                 if (avgViewability < 60) score -= (60 - avgViewability) * 0.5
 
+                // -------------------------------------------------------
+                // Step 5: Daily impressions Map
+                // -------------------------------------------------------
                 const dailyMap = new Map<string, number>()
                 let deliveredTodayFromAPI = 0
                 const todayStr = getTodayBrazil()
 
                 if (apiAvailable && result.data) {
-                    const processedChannelDates = new Set<string>()
                     for (const site of result.data.sites || []) {
                         const dailyData = parseDailyData(site.data_by_date_purchase)
                         for (const entry of dailyData) {
-                            // Deduplicate daily metrics if they share the same channel/date
-                            for (const targetId of (targetChannelIds.length > 0 ? targetChannelIds : [null])) {
-                                if (targetId) {
-                                    const channelKey = `${site.site_id}-${targetId}-${entry.datetime}`
-                                    if (processedChannelDates.has(channelKey)) continue
-                                    
-                                    const impressions = extractDayImpressions(entry.cpm, targetId)
-                                    const dateKey = entry.datetime || ''
-                                    if (dateKey && impressions > 0) {
-                                        dailyMap.set(dateKey, (dailyMap.get(dateKey) || 0) + impressions)
-                                        processedChannelDates.add(channelKey)
-                                    }
-                                } else {
-                                    // Fallback if no target channels
-                                    const impressions = extractDayImpressions(entry.cpm, null)
-                                    const dateKey = entry.datetime || ''
-                                    if (dateKey && impressions > 0) {
-                                        dailyMap.set(dateKey, (dailyMap.get(dateKey) || 0) + impressions)
-                                    }
-                                }
+                            const impressions = extractDayImpressions(entry.cpm)
+                            const dateKey = entry.datetime || ''
+                            if (dateKey && impressions > 0) {
+                                dailyMap.set(dateKey, (dailyMap.get(dateKey) || 0) + impressions)
                             }
                         }
                     }
                     deliveredTodayFromAPI = dailyMap.get(todayStr) || 0
                 }
-
 
                 const realHistoryArr = Array.from(dailyMap.entries())
                     .map(([date, value]) => {
@@ -425,13 +273,24 @@ async function fetchAndCacheMetrics(): Promise<AdOpsMetrics> {
                     })
                     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 
+                // -------------------------------------------------------
+                // Step 6: Diagnostics & Recommendations (Unified Pressure)
+                // -------------------------------------------------------
                 const last3Days = realHistoryArr.slice(-3)
-                const recentDailyAvg = last3Days.length > 0 ? last3Days.reduce((sum, h) => sum + h.value, 0) / last3Days.length : currentDaily
+                const recentDailyAvg = last3Days.length > 0
+                    ? last3Days.reduce((sum: number, h: { value: number }) => sum + h.value, 0) / last3Days.length
+                    : currentDaily
+                
                 const recalcPressure = safeDivide(requiredDaily, Math.max(1, recentDailyAvg), 1)
 
-                if (projectionPercent < 85 || recalcPressure > 1.3) status = 'critical'
-                else if (projectionPercent < 95 || recalcPressure > 1.15) status = 'warning'
-                else if (pacingPercent >= 105) status = 'over'
+                // Re-evaluate status based on recalcPressure if needed, but original status uses long-term
+                if (projectionPercent < 85 || recalcPressure > 1.3) {
+                    status = 'critical'
+                } else if (projectionPercent < 95 || recalcPressure > 1.15) {
+                    status = 'warning'
+                } else if (pacingPercent >= 105) {
+                    status = 'over'
+                }
 
                 if (status === 'critical') score = 40
                 else if (status === 'warning') score = 75
@@ -439,19 +298,37 @@ async function fetchAndCacheMetrics(): Promise<AdOpsMetrics> {
                 score = Math.max(0, Math.min(100, Math.round(score)))
 
                 const diagnostics: string[] = []
-                if (isDelayedButHealthy) diagnostics.push('⚠️ Risco Oculto: Pacing OK mas projeção baixa')
+                const smartAlert = isDelayedButHealthy ? '⚠️ Risco Oculto: Pacing OK mas projeção baixa' : null
+                if (smartAlert) diagnostics.push(smartAlert)
                 if (recalcPressure > 1.2) diagnostics.push(`Pressão de entrega ALTA (${recalcPressure.toFixed(2)}x)`)
                 if (avgViewability < 60) diagnostics.push(`Viewability baixa (${avgViewability.toFixed(0)}%)`)
-                if (!apiAvailable) diagnostics.push('⚠️ API Indisponível (Dados em cache)')
+                if (!apiAvailable) diagnostics.push('⚠️ API 00px indisponível — dados podem estar desatualizados')
 
                 const recommendations: string[] = []
-                if (recalcPressure > 1.1) recommendations.push(`Acelerar entrega em ${((recalcPressure - 1) * 100).toFixed(0)}%`)
-                if (avgViewability < 55) recommendations.push("Otimizar inventário")
+                if (recalcPressure > 1.1) recommendations.push(`Necessário acelerar entrega em ${((recalcPressure - 1) * 100).toFixed(0)}%`)
+                if (avgViewability < 55) recommendations.push("Otimizar inventário / whitelist")
+                if (daysLeft < 3 && projectionPercent < 98) recommendations.push("Aceleração máxima imediata")
 
+                // Trend & History
                 const yesterdayVal = realHistoryArr.length >= 2 ? realHistoryArr[realHistoryArr.length - 2].value : 0
-                const realTrend = deliveredTodayFromAPI > yesterdayVal ? 'up' : deliveredTodayFromAPI < yesterdayVal ? 'down' : 'neutral'
-                const finalHistory = realHistoryArr.length > 0 ? realHistoryArr.slice(-7).map(h => ({ date: h.date, value: h.value })) : metricHistory.map(h => ({ date: h.date.toISOString(), value: h.delivered }))
+                const realTrend: 'up' | 'down' | 'neutral' = realHistoryArr.length >= 1
+                    ? (deliveredTodayFromAPI > yesterdayVal ? 'up' : deliveredTodayFromAPI < yesterdayVal ? 'down' : 'neutral')
+                    : 'neutral'
 
+                const finalHistory = realHistoryArr.length > 0
+                    ? realHistoryArr.slice(-7).map(h => ({ date: h.date, value: h.value }))
+                    : metricHistory.map((h: { date: Date; delivered: number }) => ({ date: h.date.toISOString(), value: h.delivered }))
+
+                const finalDeliveredToday = apiAvailable ? deliveredTodayFromAPI : Math.max(0, currentDaily)
+
+                // Dev-only debug log
+                if (isDev) {
+                    console.log(`[BI] PI ${pi}: delivered=${safeDelivered} goal=${safeGoal} proj=${projectionPercent.toFixed(1)}% status=${status}`)
+                }
+
+                // -------------------------------------------------------
+                // Step 7: Return campaign object
+                // -------------------------------------------------------
                 return {
                     id: pi,
                     name: main.campaignName || pi,
@@ -468,8 +345,13 @@ async function fetchAndCacheMetrics(): Promise<AdOpsMetrics> {
                     pi,
                     manualDashboardUrl,
                     apiAvailable,
-                    fetchedAt,
-                    projection: { completion: projectedFinalValue, completionPercent: projectionPercent, total: projectedFinalValue, dailyRate: currentDaily },
+                    fetchedAt: result.fetchedAt || null,
+                    projection: {
+                        completion: projectedFinalValue,
+                        completionPercent: projectionPercent,
+                        total: projectedFinalValue,
+                        dailyRate: currentDaily
+                    },
                     timeProgress,
                     deliveryProgress,
                     requiredDaily: Math.max(0, requiredDaily),
@@ -477,41 +359,55 @@ async function fetchAndCacheMetrics(): Promise<AdOpsMetrics> {
                     pressure: recalcPressure,
                     isDelayedButHealthy,
                     diagnostics,
+                    smartAlert,
                     score,
-                    bi: { trend: realTrend, deliveredToday: apiAvailable ? deliveredTodayFromAPI : Math.max(0, currentDaily), recommendations, history: finalHistory }
+                    bi: {
+                        trend: realTrend,
+                        deliveredToday: finalDeliveredToday,
+                        recommendations,
+                        history: finalHistory
+                    }
                 }
             })
         )
+
+        // Calculate globals for NexusBrain
+        let globalGoal = 0
+        let globalDelivered = 0
+        let globalToday = 0
+        let globalProjected = 0
+        let totalViewability = 0
+        let hasMetrics = 0
+
+        formattedCampaigns.forEach(c => {
+            globalGoal += c.goalImpressions
+            globalDelivered += c.deliveredImpressions
+            globalToday += c.bi.deliveredToday
+            globalProjected += c.projection.total
+            if (c.apiAvailable) {
+                totalViewability += c.viewability
+                hasMetrics++
+            }
+        })
 
         const onTrackCount = formattedCampaigns.filter(c => c.status === 'on-track' || c.status === 'over').length
         const total = formattedCampaigns.length
         const healthScore = total > 0 ? Math.round(safeDivide(onTrackCount, total) * 100) : 100
         const atRiskCount = formattedCampaigns.filter(c => c.status === 'critical' || c.status === 'warning').length
 
-        // BI Aggregations
-        const globalGoal = formattedCampaigns.reduce((sum, c) => sum + c.goalImpressions, 0)
-        const globalDelivered = formattedCampaigns.reduce((sum, c) => sum + c.deliveredImpressions, 0)
-        const globalToday = formattedCampaigns.reduce((sum, c) => sum + (c.bi?.deliveredToday || 0), 0)
-        const globalProjected = formattedCampaigns.reduce((sum, c) => sum + (c.projection?.total || 0), 0)
-        const avgViewability = total > 0 ? formattedCampaigns.reduce((sum, c) => sum + c.viewability, 0) / total : 0
-
-        const result = { 
-            total, 
-            onTrackCount, 
-            healthScore, 
-            atRiskCount, 
+        return {
+            total,
+            onTrackCount,
+            healthScore,
+            atRiskCount,
             globalGoal,
             globalDelivered,
             globalToday,
             globalProjected,
-            avgViewability,
-            campaigns: formattedCampaigns 
+            avgViewability: safeDivide(totalViewability, hasMetrics),
+            campaigns: formattedCampaigns
         }
-        metricsCache = { data: result, timestamp: Date.now() }
-        isRefreshing = false
-        return result
     } catch (error) {
-        isRefreshing = false
         console.error('Failed to get aggregated metrics:', error)
         throw error
     }

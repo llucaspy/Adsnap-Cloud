@@ -12,6 +12,7 @@ import { MermaidChart, NexusDataChart } from './NexusChatComponents'
 
 import { NexusSmallCore } from './NexusCore'
 import * as brain from '../lib/nexusBrain'
+import { supabaseBrowser } from '../lib/supabaseBrowser'
 
 // Define the Message type properly
 export type Message = {
@@ -30,16 +31,29 @@ interface ParsedCampaign {
     [key: string]: unknown
 }
 
+// Generate or retrieve a persistent session ID
+function getSessionId(): string {
+    if (typeof window === 'undefined') return 'default'
+    let sid = localStorage.getItem('nexus-session-id')
+    if (!sid) {
+        sid = crypto.randomUUID()
+        localStorage.setItem('nexus-session-id', sid)
+    }
+    return sid
+}
+
 export function NexusChat() {
     const [isOpen, setIsOpen] = useState(false)
     const [input, setInput] = useState('')
     const [messages, setMessages] = useState<Message[]>([
-        { role: 'assistant', content: 'Nexus inicializado. Estou pronto para processar suas demandas.' }
+        { role: 'assistant', content: 'Nexus Neural Core v2 inicializado. Memória persistente ativa. Como posso ajudar?' }
     ])
     const [isTyping, setIsTyping] = useState(false)
     const scrollRef = useRef<HTMLDivElement>(null)
     const chatRef = useRef<HTMLDivElement>(null)
     const toggleRef = useRef<HTMLButtonElement>(null)
+    const sessionIdRef = useRef<string>('default')
+    const realtimeChannelRef = useRef<ReturnType<typeof supabaseBrowser.channel> | null>(null)
 
     const [isGlobalPolling, setIsGlobalPolling] = useState(false)
     const hasShownFinalMessage = useRef(false)
@@ -52,6 +66,72 @@ export function NexusChat() {
     const [showLogs, setShowLogs] = useState(false)
     const [emailToast, setEmailToast] = useState<{ from: string, subject: string, threadId: string } | null>(null)
     const lastEmailAlertIdRef = useRef<string | null>(null)
+
+    // Initialize session ID and load history
+    useEffect(() => {
+        sessionIdRef.current = getSessionId()
+        
+        // Load conversation history
+        const loadHistory = async () => {
+            try {
+                const res = await fetch(`/api/nexus/chat?sessionId=${sessionIdRef.current}`)
+                const data = await res.json()
+                if (data.success && data.messages?.length > 0) {
+                    const historyMsgs: Message[] = data.messages.map((m: any) => ({
+                        role: m.role as 'user' | 'assistant',
+                        content: m.content,
+                    }))
+                    setMessages([
+                        { role: 'assistant', content: 'Nexus Neural Core v2 inicializado. Memória persistente ativa. Como posso ajudar?' },
+                        ...historyMsgs
+                    ])
+                }
+            } catch (err) {
+                console.error('[Nexus] Failed to load history:', err)
+            }
+        }
+        loadHistory()
+    }, [])
+
+    // Supabase Realtime subscription for instant message delivery
+    useEffect(() => {
+        const channel = supabaseBrowser
+            .channel('nexus-messages')
+            .on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'NexusMessage',
+                    filter: `sessionId=eq.${sessionIdRef.current}`,
+                },
+                (payload) => {
+                    const newMsg = payload.new as any
+                    // Only process assistant messages (user msgs are added locally)
+                    if (newMsg.role === 'assistant') {
+                        console.log('[Nexus Realtime] Assistant message received!')
+                        setMessages(prev => {
+                            // Avoid duplicates (in case HTTP response also adds it)
+                            if (prev.some(m => m.content === newMsg.content && m.role === 'assistant')) {
+                                return prev
+                            }
+                            return [...prev, {
+                                role: 'assistant' as const,
+                                content: newMsg.content,
+                            }]
+                        })
+                        setIsTyping(false)
+                    }
+                }
+            )
+            .subscribe()
+
+        realtimeChannelRef.current = channel
+
+        return () => {
+            supabaseBrowser.removeChannel(channel)
+        }
+    }, [])
     
     // Click outside to close
     useEffect(() => {
@@ -182,81 +262,137 @@ export function NexusChat() {
         setMessages(prev => [...prev, { role: 'user', content: userMsg }])
         setIsTyping(true)
 
-        console.log('[Nexus UI] handleSend iniciado:', userMsg)
+        console.log('[Nexus UI] handleSend v2 iniciado:', userMsg)
 
-        const cleanup = () => {
-            console.log('[Nexus UI] Cleanup - resetando isTyping')
-            setIsTyping(false)
-        }
+        const cleanup = () => setIsTyping(false)
+        const safetyTimer = setTimeout(cleanup, 30000)
 
-        const safetyTimer = setTimeout(cleanup, 20000)
+        // Check if this is an operational command that needs the legacy system
+        const text = userMsg.toLowerCase()
+        const isLegacyAction = (
+            (text.includes('print') && (text.includes('tudo') || text.includes('todas'))) ||
+            (text.includes('capturar') && text.includes('tudo')) ||
+            text.includes('cadastr') ||
+            (text.includes('parar') && text.includes('captura')) ||
+            (text.includes('baixar') || text.includes('download')) ||
+            (text.includes('apagar') || text.includes('deletar') || text.includes('limpar')) ||
+            text.includes('arquivar') || text.includes('restaurar')
+        )
 
         try {
-            console.log('[Nexus UI] Chamando processNexusCommand:', userMsg)
-            
-            const timeoutPromise = new Promise<any>((_, reject) => 
-                setTimeout(() => reject(new Error('Timeout')), 20000)
-            )
-            
-            const response = await Promise.race([
-                processNexusCommand(userMsg),
-                timeoutPromise
-            ])
-            
-            clearTimeout(safetyTimer)
-            console.log('[Nexus UI] Resposta recebida:', JSON.stringify(response))
+            if (isLegacyAction) {
+                // Use the legacy processNexusCommand for actions that need server-side execution
+                console.log('[Nexus UI] Legacy action detected, using processNexusCommand')
+                const response = await Promise.race([
+                    processNexusCommand(userMsg),
+                    new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 20000))
+                ])
+                
+                clearTimeout(safetyTimer)
+                if (!response) {
+                    setMessages(prev => [...prev, { role: 'assistant', content: '⚠️ O núcleo neural não respondeu.', success: false }])
+                    cleanup()
+                    return
+                }
 
-            if (!response) {
+                if (response.actionPerformed === 'REGISTRATION_PREVIEW' && response.data) {
+                    setPendingCampaigns(response.data)
+                    setShowPreview(true)
+                }
+                if (response.actionPerformed === 'DELETE_WIZARD' && response.data) {
+                    setDeleteData(response.data as any[])
+                    setShowDeleteWizard(true)
+                }
+                if (response.actionPerformed === 'DOWNLOAD_ZIP' && response.data?.date) {
+                    window.location.href = `/api/books/download?date=${response.data.date}`
+                }
+
                 setMessages(prev => [...prev, {
                     role: 'assistant',
-                    content: '⚠️ O núcleo neural não respondeu. Tente novamente.',
-                    success: false
+                    content: response.message || 'Resposta vazia do Nexus.',
+                    type: response.actionPerformed ? 'action' : 'status',
+                    success: response.success,
+                    data: response.data
                 }])
-                cleanup()
-                return
-            }
 
-            if (response.actionPerformed === 'REGISTRATION_PREVIEW' && response.data) {
-                setPendingCampaigns(response.data)
-                setShowPreview(true)
-            }
+                if (response.actionPerformed === 'CAPTURE_ALL' && response.success) {
+                    hasShownFinalMessage.current = false
+                    setIsGlobalPolling(true)
+                }
+            } else {
+                // Use the new Edge Function for conversational AI
+                console.log('[Nexus UI] Using Edge Function AI Core')
+                const response = await fetch('/api/nexus/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: userMsg,
+                        sessionId: sessionIdRef.current,
+                    }),
+                })
 
-            if (response.actionPerformed === 'DELETE_WIZARD' && response.data) {
-                setDeleteData(response.data as any[])
-                setShowDeleteWizard(true)
-            }
+                clearTimeout(safetyTimer)
+                const data = await response.json()
 
-            if (response.actionPerformed === 'DOWNLOAD_ZIP' && response.data?.date) {
-                window.location.href = `/api/books/download?date=${response.data.date}`
-            }
-
-            setMessages(prev => [...prev, {
-                role: 'assistant',
-                content: response.message || 'Resposta vazia do Nexus.',
-                type: response.actionPerformed ? 'action' : 'status',
-                success: response.success,
-                data: response.data
-            }])
-
-            if (response.actionPerformed === 'CAPTURE_ALL' && response.success) {
-                hasShownFinalMessage.current = false
-                setIsGlobalPolling(true)
+                if (data.success && data.message) {
+                    // Add the response (Realtime may also deliver it, dedup logic handles that)
+                    setMessages(prev => {
+                        if (prev.some(m => m.content === data.message && m.role === 'assistant')) return prev
+                        return [...prev, { role: 'assistant', content: data.message }]
+                    })
+                } else {
+                    setMessages(prev => [...prev, {
+                        role: 'assistant',
+                        content: data.error || '⚠️ Erro de comunicação com o Nexus AI.',
+                        success: false
+                    }])
+                }
             }
         } catch (error) {
             clearTimeout(safetyTimer)
             console.error('[Nexus UI] Erro:', error)
-            setMessages(prev => [...prev, { 
-                role: 'assistant', 
-                content: error instanceof Error && error.message === 'Timeout' 
-                    ? '⏳ O servidor está demorando demais. Tente novamente.' 
-                    : '⚠️ Erro de comunicação com o Nexus. Tente novamente.', 
-                success: false 
+            setMessages(prev => [...prev, {
+                role: 'assistant',
+                content: error instanceof Error && error.message === 'Timeout'
+                    ? '⏳ O servidor está demorando demais. Tente novamente.'
+                    : '⚠️ Erro de comunicação com o Nexus. Tente novamente.',
+                success: false
             }])
         } finally {
             clearTimeout(safetyTimer)
             cleanup()
         }
     }
+    const handleNewSession = () => {
+        const newId = crypto.randomUUID()
+        localStorage.setItem('nexus-session-id', newId)
+        sessionIdRef.current = newId
+        setMessages([{ role: 'assistant', content: 'Nova sessão iniciada. Memória limpa. Como posso ajudar?' }])
+        // Re-subscribe to new session
+        if (realtimeChannelRef.current) {
+            supabaseBrowser.removeChannel(realtimeChannelRef.current)
+        }
+        const channel = supabaseBrowser
+            .channel('nexus-messages-new')
+            .on('postgres_changes', {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'NexusMessage',
+                filter: `sessionId=eq.${newId}`,
+            }, (payload) => {
+                const newMsg = payload.new as any
+                if (newMsg.role === 'assistant') {
+                    setMessages(prev => {
+                        if (prev.some(m => m.content === newMsg.content && m.role === 'assistant')) return prev
+                        return [...prev, { role: 'assistant' as const, content: newMsg.content }]
+                    })
+                    setIsTyping(false)
+                }
+            })
+            .subscribe()
+        realtimeChannelRef.current = channel
+    }
+
     const quickActions = [
         { icon: Camera, label: "Tirar Print Geral", cmd: "Capturar tudo" },
         { icon: Download, label: "Baixar Prints de Hoje", cmd: "Baixar todos os prints de hoje" },
@@ -356,7 +492,7 @@ export function NexusChat() {
                         </div>
                         <div className="flex flex-col">
                             <h2 className="text-sm font-medium tracking-tight bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent">
-                                Nexus AI Core
+                                Nexus AI Core v2
                             </h2>
                             <div className="flex items-center gap-2">
                                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -373,7 +509,7 @@ export function NexusChat() {
                             {showLogs ? 'View Chat' : 'System Logs'}
                         </button>
                         <button
-                            onClick={() => setMessages([messages[0]])}
+                            onClick={handleNewSession}
                             className="w-10 h-10 rounded-xl bg-white/5 hover:bg-red-500/10 text-white/20 hover:text-red-400 transition-all border border-white/10 flex items-center justify-center"
                             title="Clear History"
                         >

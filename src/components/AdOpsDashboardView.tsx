@@ -370,6 +370,25 @@ const STATUS_STYLES: Record<string, { text: string, bg: string, border: string, 
     'over': { text: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100', label: 'OVER', ring: 'ring-blue-500/20', shadow: 'hover:shadow-blue-500/10', glow: 'bg-blue-500' }
 }
 
+// Circular SVG progress ring for projection
+function ProjectionRing({ percent, size = 56, stroke = 4, status }: { percent: number, size?: number, stroke?: number, status: string }) {
+    const radius = (size - stroke) / 2
+    const circumference = 2 * Math.PI * radius
+    const offset = circumference - (Math.min(percent, 100) / 100) * circumference
+    const color = status === 'critical' ? '#e11d48' : status === 'warning' ? '#f97316' : status === 'over' ? '#3b82f6' : '#10b981'
+    return (
+        <div className="relative" style={{ width: size, height: size }}>
+            <svg width={size} height={size} className="-rotate-90">
+                <circle cx={size/2} cy={size/2} r={radius} fill="none" stroke="currentColor" strokeWidth={stroke} className="text-zinc-100" />
+                <circle cx={size/2} cy={size/2} r={radius} fill="none" stroke={color} strokeWidth={stroke} strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round" className="transition-all duration-1000" />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-[11px] font-black text-zinc-900 tabular-nums leading-none">{percent.toFixed(0)}%</span>
+            </div>
+        </div>
+    )
+}
+
 function CampaignRefCard({ campaign, index }: { campaign: Campaign, index: number }) {
     const [expanded, setExpanded] = useState(false)
     const mounted = useSyncExternalStore(() => () => {}, () => true, () => false)
@@ -477,59 +496,43 @@ function CampaignRefCard({ campaign, index }: { campaign: Campaign, index: numbe
 
             <div className={`relative z-10 transition-all duration-700 ${expanded ? 'p-8 space-y-8 bg-linear-to-b from-white/90 to-zinc-50/90 backdrop-blur-xl' : 'p-6 space-y-6'}`}>
                 {/* Decorative background glow */}
-                <div className={`absolute -right-20 -top-20 w-40 h-40 rounded-full blur-[100px] opacity-0 group-hover:opacity-20 transition-opacity duration-1000 ${glow}`} />
-                
-                {/* Header row */}
+                <div className={`absolute -right-20 -top-20 w-40 h-40 rounded-full blur-[100px] opacity-0 group-hover:opacity-20 transition-opacity duration-1000 ${glow}`} />                {/* Header row */}
                 <div className="flex items-start justify-between gap-6 relative z-10">
                     <div className="min-w-0 flex-1">
-                        <div className="text-3xl font-black text-zinc-900 tracking-tighter truncate uppercase leading-none mb-3 group-hover:text-zinc-950 transition-colors duration-500 group-hover:tracking-normal drop-shadow-sm">{campaign.name}</div>
-                        <div className="flex items-center gap-3">
-                             <div className={`h-2.5 w-2.5 rounded-full ${glow} shadow-[0_0_15px_rgba(0,0,0,0.1)] group-hover:animate-ping`} />
-                             <div className="text-xs font-black text-zinc-400 truncate uppercase tracking-[0.35em] group-hover:text-zinc-500 transition-colors">
-                                {campaign.advertiser} • PI {campaign.pi}
+                        <div className="flex items-center gap-3 mb-3">
+                            <div className={`h-3 w-3 rounded-full ${glow} shadow-[0_0_12px_rgba(0,0,0,0.15)] ${campaign.status === 'critical' ? 'animate-pulse' : ''}`} />
+                            <div className="text-2xl font-black text-zinc-900 tracking-tight truncate uppercase leading-none group-hover:text-zinc-950 transition-colors duration-500">{campaign.name}</div>
+                            <div className={`px-3 py-1 rounded-xl text-[9px] font-black tracking-[0.2em] border ${bg} ${text} ${border}`}>
+                                {label}
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                             <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-[0.2em]">
+                                {campaign.advertiser}
                              </div>
-                             {campaign.projection && (
-                                <div className={`px-2 py-0.5 rounded-md text-[9px] font-black border ${campaign.projection.completionPercent < 95 ? 'bg-rose-500/10 border-rose-500/20 text-rose-500' : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500'}`}>
-                                    PROJEÇÃO: {campaign.projection.completionPercent.toFixed(1)}%
-                                </div>
-                             )}
-                             <div className={`px-2 py-0.5 rounded-md text-[9px] font-black border ${campaign.score < 80 ? 'bg-rose-500/10 border-rose-500/20 text-rose-500' : 'bg-indigo-500/10 border-indigo-500/20 text-indigo-500'}`}>
-                                BI SCORE: {campaign.score}/100
+                             <span className="text-zinc-200">•</span>
+                             <div className={`px-2 py-0.5 rounded-lg text-[9px] font-black border ${campaign.score >= 80 ? 'bg-indigo-50 border-indigo-100 text-indigo-600' : 'bg-rose-50 border-rose-100 text-rose-600'}`}>
+                                 SCORE {campaign.score}
                              </div>
                              {campaign.apiAvailable === false && (
-                                <div className="px-2 py-0.5 rounded-md text-[9px] font-black bg-rose-500 text-white animate-pulse">
-                                    🔌 API OFF
-                                </div>
+                                <div className="px-2 py-0.5 rounded-lg text-[9px] font-black bg-rose-500 text-white animate-pulse">🔌 OFF</div>
                              )}
                              {campaign.fetchedAt && (
-                                <div className="text-[9px] font-bold text-zinc-400 uppercase tracking-tighter">
-                                    Atualizado: {formatLastUpdate(campaign.fetchedAt)}
+                                <div className="text-[9px] font-medium text-zinc-300 tabular-nums">
+                                    ⏱ {formatLastUpdate(campaign.fetchedAt)}
                                 </div>
                              )}
                         </div>
                     </div>
-                    <div className="flex items-center gap-4 shrink-0">
+                    <div className="flex items-center gap-3 shrink-0">
                         {campaign.manualDashboardUrl && (
-                            <a 
-                                href={campaign.manualDashboardUrl as string}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 text-[10px] font-black uppercase tracking-widest hover:bg-indigo-500/20 transition-all"
-                            >
-                                <Layout size={12} />
-                                Dashboard
+                            <a href={campaign.manualDashboardUrl as string} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-50 border border-zinc-200 text-zinc-500 text-[9px] font-black uppercase tracking-wider hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition-all">
+                                <Layout size={11} /> Dashboard
                             </a>
                         )}
-                        <div className="flex items-center gap-2">
-                            <div className={`px-5 py-2.5 rounded-2xl text-[10px] font-black tracking-[0.25em] border backdrop-blur-sm transition-all duration-500 shadow-sm group-hover:shadow-md ${bg} ${text} ${border}`}>
-                                {label}
-                            </div>
-                            <div className="px-4 py-2.5 rounded-2xl bg-zinc-900 text-zinc-50 text-[10px] font-black uppercase tracking-widest border border-zinc-800 shadow-xl group-hover:bg-emerald-600 transition-colors duration-500">
-                                Projeção: {campaign.projection.completionPercent.toFixed(1)}%
-                            </div>
-                        </div>
-                        <div className="w-10 h-10 rounded-full bg-zinc-50 flex items-center justify-center border border-zinc-100 group-hover:bg-zinc-900 group-hover:text-white transition-all duration-500">
-                            <ChevronDown className={`w-5 h-5 transition-transform duration-700 cubic-bezier(0.4, 0, 0.2, 1) ${expanded ? 'rotate-180' : ''}`} />
+                        <ProjectionRing percent={campaign.projection.completionPercent} status={campaign.status} />
+                        <div className="w-8 h-8 rounded-full bg-zinc-50 flex items-center justify-center border border-zinc-100 group-hover:bg-zinc-900 group-hover:text-white transition-all duration-500">
+                            <ChevronDown className={`w-4 h-4 transition-transform duration-700 ${expanded ? 'rotate-180' : ''}`} />
                         </div>
                     </div>
                 </div>

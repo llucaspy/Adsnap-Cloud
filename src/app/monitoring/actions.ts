@@ -7,7 +7,7 @@ import { nexusLogStore } from '@/lib/nexusLogStore'
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-const FETCH_TIMEOUT_MS = 90_000 // 90 seconds (1min 30s) as requested by user
+const FETCH_TIMEOUT_MS = 15_000 // 15 seconds
 
 // ---------------------------------------------------------------------------
 // Types for 00px GraphQL API responses
@@ -18,17 +18,9 @@ export interface CpmTotalData {
     viewability: number
 }
 
-export interface ChannelData {
-    channel_id: number
-    channel_descr: string
-    channel_purchased_quantity: number
-    total_data: CpmTotalData | Record<string, never>
-}
-
 export interface CpmPurchase {
     quantity: number
-    total_data?: CpmTotalData | null
-    channels?: unknown // JSON scalar representing ChannelData[]
+    total_data: CpmTotalData
 }
 
 export interface SitePurchases {
@@ -36,10 +28,9 @@ export interface SitePurchases {
 }
 
 export interface SiteData {
-    site_id: number
     site_name: string
     purchases: SitePurchases | SitePurchases[]
-    data_by_date_purchase: unknown // JSON scalar representing DailyEntry[]
+    data_by_date_purchase: unknown // JSON scalar — parsed at runtime
 }
 
 export interface CampaignResponse {
@@ -106,48 +97,31 @@ export async function getLiveMetrics(campaignId: string): Promise<LiveMetricsRes
             return { success: false, error: 'Monitoramento não configurado ou inativo' }
         }
 
-        // 1. Handshake JWT -> Session Token
-        // First, check if the provided URL already contains a session token 's'
-        let sessionToken = null
-        try {
-            const initialUrlObj = new URL(campaign.externalAuthUrl)
-            sessionToken = initialUrlObj.searchParams.get('s')
-        } catch (e) {
-            console.error('[00px API] Malformed auth URL:', campaign.externalAuthUrl)
+        // 1. Handshake JWT -> Session Token (with 15s timeout)
+        const authResponse = await fetchWithTimeout(campaign.externalAuthUrl, {
+            method: 'GET',
+            redirect: 'follow',
+            cache: 'no-store'
+        }, FETCH_TIMEOUT_MS)
+
+        if (!authResponse.ok) {
+            const errMsg = `Handshake falhou: HTTP ${authResponse.status}`
+            await nexusLogStore.addLog(`00px: ${errMsg}`, 'API_ERROR', undefined, campaignId)
+            return { success: false, error: errMsg }
         }
 
-        let finalUrl = campaign.externalAuthUrl
+        const finalUrl = authResponse.url
+        const urlObj = new URL(finalUrl)
+        const sessionToken = urlObj.searchParams.get('s')
 
         if (!sessionToken) {
-            const authResponse = await fetchWithTimeout(campaign.externalAuthUrl, {
-                method: 'GET',
-                redirect: 'follow',
-                cache: 'no-store'
-            }, FETCH_TIMEOUT_MS)
-
-            if (!authResponse.ok) {
-                const errMsg = `Handshake falhou: HTTP ${authResponse.status}`
-                await nexusLogStore.addLog(`00px: ${errMsg}`, 'API_ERROR', undefined, campaignId)
-                return { success: false, error: errMsg }
-            }
-
-            finalUrl = authResponse.url
-            const urlObj = new URL(finalUrl)
-            sessionToken = urlObj.searchParams.get('s')
-
-            if (!sessionToken) {
-                const errMsg = 'Token de sessão não encontrado na resposta 00px'
-                // Log the final URL to help debug where the token went
-                await nexusLogStore.addLog(`00px Auth: ${errMsg}`, 'API_ERROR', `Final URL: ${finalUrl}`, campaignId)
-                return { success: false, error: errMsg }
-            }
+            const errMsg = 'Token de sessão não encontrado na resposta 00px'
+            await nexusLogStore.addLog(`00px Auth: ${errMsg}`, 'API_ERROR', undefined, campaignId)
+            return { success: false, error: errMsg }
         }
 
         // 2. Extract Campaign ID from URL if missing
-
-
         let externalId = campaign.externalCampaignId;
-
         if (!externalId || externalId === '') {
             const match = finalUrl.match(/\/campaign\/(\d+)/);
             if (match && match[1]) {
@@ -167,14 +141,13 @@ export async function getLiveMetrics(campaignId: string): Promise<LiveMetricsRes
 
         // 3. GraphQL Query (with 15s timeout)
         const campaignIdInt = parseInt(externalId)
-        const filterJson = { "campaigns.campaign_id": campaignIdInt }
+        const filterJson = JSON.stringify({ "campaigns.campaign_id": campaignIdInt })
         const graphqlUrl = `https://graphql.00px.com.br/graphql/?s=${sessionToken}`
 
         const query = `
             query {
-              campaign(filter: ${JSON.stringify(JSON.stringify(filterJson))}) {
+              campaign(filter: ${JSON.stringify(filterJson)}) {
                 sites {
-                  site_id
                   site_name
                   purchases {
                     cpm {
@@ -184,7 +157,6 @@ export async function getLiveMetrics(campaignId: string): Promise<LiveMetricsRes
                         valids
                         viewability
                       }
-                      channels
                     }
                   }
                   data_by_date_purchase(campaign_id: ${campaignIdInt})
@@ -231,7 +203,7 @@ export async function getLiveMetrics(campaignId: string): Promise<LiveMetricsRes
     } catch (error) {
         const isTimeout = error instanceof DOMException && error.name === 'AbortError'
         const errMsg = isTimeout
-            ? 'Timeout: API 00px não respondeu em 90s'
+            ? 'Timeout: API 00px não respondeu em 15s'
             : (error instanceof Error ? error.message : 'Erro desconhecido')
 
         await nexusLogStore.addLog(`00px Fatal: ${errMsg}`, 'API_ERROR', undefined, campaignId)
