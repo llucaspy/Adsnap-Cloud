@@ -37,7 +37,7 @@ export default function RootLayout({
         <ScrollEffects />
         <Sidebar />
         <main className="flex-1 overflow-auto" style={{ background: 'var(--bg-primary)' }}>
-          <div className="max-w-[1600px] mx-auto p-8 lg:p-12">
+          <div className="max-w-[1600px] mx-auto p-4 md:p-12">
             {children}
           </div>
         </main>

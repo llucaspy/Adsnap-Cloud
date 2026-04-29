@@ -43,7 +43,7 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
                         </div>
                     </div>
                     <h1
-                        className="text-5xl font-extrabold tracking-tight"
+                        className="text-3xl md:text-5xl font-extrabold tracking-tight"
                         style={{ fontFamily: 'var(--font-display)' }}
                     >
                         <span className="text-gradient">Central de</span>
