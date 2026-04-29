@@ -1,86 +1,106 @@
-import requests
-import urllib.parse
-import json
+import os
+from zipfile import ZipFile
 
-# Link do navegador fornecido pelo usuário (contém o JWT com acesso à campanha 6988)
-auth_url = "https://graphql.00px.com.br/auth/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX25hbWUiOiJBbsO0bmltbyIsInVzZXJfcm9sZSI6IlNJVEUiLCJhY2NvdW50X2lkIjo4NywiY2FtcGFpZ25faWQiOjY5ODgsInNpdGVfaWQiOjM1MDAsInRlYW1faWQiOjI1LCJ1c2VyX2FuYWx5dGljc19hY2Nlc3MiOnRydWUsInVzZXJfYWRtaW5fYWNjZXNzIjpmYWxzZSwidXNlcl9tZWRpYWtpdF9hY2Nlc3MiOmZhbHNlLCJyZWRpcmVjdCI6Imh0dHBzOi8vYW5hbHl0aWNzLmFkeC5zcGFjZS9kYXNoYm9hcmQvY2FtcGFpZ24vNjk4OC9zaXRlLzM1MDAiLCJpYXQiOjE3NzMzNTAwMTksImV4cCI6MTc3NTg1NTYxOX0.n7nrgKEVT50et75P4ZhjajxKiQWUYsSfQUr2YUDrddU"
+# cria pasta base no diretório atual
+base_path = os.path.join(os.getcwd(), "metropoles_compra2")
+home_path = os.path.join(base_path, "HOME")
+internas_path = os.path.join(base_path, "INTERNAS")
 
-print("Autenticando e extraindo token de sessão...")
+os.makedirs(home_path, exist_ok=True)
+os.makedirs(internas_path, exist_ok=True)
 
-# 1. Realiza o handshake para pegar o token de sessão final via redirecionamento
-s = requests.Session()
-r_auth = s.get(auth_url, allow_redirects=True)
+home_files = {
+"300x250.txt": """<script type="text/javascript">
+var rnd = window.rnd || Math.floor(Math.random()*10e6);
+var pid1221902 = window.pid1221902 || rnd;
+var plc1221902 = window.plc1221902 || 0;
+var abkw = window.abkw || '';
+var absrc = 'https://servedby.metrike.com.br/adserve/;ID=181570;size=300x250;setID=1221902;type=js;sw='+screen.width+';sh='+screen.height+';spr='+window.devicePixelRatio+';kw='+abkw+';pid='+pid1221902+';place='+(plc1221902++)+';rnd='+rnd+';click=%%CLICK_URL_UNESC%%';
+var _absrc = absrc.split("type=js"); absrc = _absrc[0] + 'type=js;referrer=' + encodeURIComponent('%%PATTERN:url%%') + _absrc[1];
+document.write('<scr'+'ipt src="'+absrc+'" type="text/javascript" referrerpolicy="no-referrer-when-downgrade"></scr'+'ipt>');
+</script>""",
 
-# 2. Extrai o token 's' da URL final redirecionada
-query = urllib.parse.urlparse(r_auth.url).query
-params = urllib.parse.parse_qs(query)
-session_token = params.get('s', [None])[0]
+"970x250.txt": """<script type="text/javascript">
+var rnd = window.rnd || Math.floor(Math.random()*10e6);
+var pid1221904 = window.pid1221904 || rnd;
+var plc1221904 = window.plc1221904 || 0;
+var abkw = window.abkw || '';
+var absrc = 'https://servedby.metrike.com.br/adserve/;ID=181570;size=970x250;setID=1221904;type=js;sw='+screen.width+';sh='+screen.height+';spr='+window.devicePixelRatio+';kw='+abkw+';pid='+pid1221904+';place='+(plc1221904++)+';rnd='+rnd+';click=%%CLICK_URL_UNESC%%';
+var _absrc = absrc.split("type=js"); absrc = _absrc[0] + 'type=js;referrer=' + encodeURIComponent('%%PATTERN:url%%') + _absrc[1];
+document.write('<scr'+'ipt src="'+absrc+'" type="text/javascript" referrerpolicy="no-referrer-when-downgrade"></scr'+'ipt>');
+</script>""",
 
-if not session_token:
-    print("Erro: Não foi possível obter o token de sessão via redirecionamento.")
-    exit()
+"728x90.txt": """<script type="text/javascript">
+var rnd = window.rnd || Math.floor(Math.random()*10e6);
+var pid1221906 = window.pid1221906 || rnd;
+var plc1221906 = window.plc1221906 || 0;
+var abkw = window.abkw || '';
+var absrc = 'https://servedby.metrike.com.br/adserve/;ID=181570;size=728x90;setID=1221906;type=js;sw='+screen.width+';sh='+screen.height+';spr='+window.devicePixelRatio+';kw='+abkw+';pid='+pid1221906+';place='+(plc1221906++)+';rnd='+rnd+';click=%%CLICK_URL_UNESC%%';
+var _absrc = absrc.split("type=js"); absrc = _absrc[0] + 'type=js;referrer=' + encodeURIComponent('%%PATTERN:url%%') + _absrc[1];
+document.write('<scr'+'ipt src="'+absrc+'" type="text/javascript" referrerpolicy="no-referrer-when-downgrade"></scr'+'ipt>');
+</script>""",
 
-# 3. Endpoint final de GraphQL
-url = f"https://graphql.00px.com.br/login/?s={session_token}"
+"970x90.txt": """<script type="text/javascript">
+var rnd = window.rnd || Math.floor(Math.random()*10e6);
+var pid1221908 = window.pid1221908 || rnd;
+var plc1221908 = window.plc1221908 || 0;
+var abkw = window.abkw || '';
+var absrc = 'https://servedby.metrike.com.br/adserve/;ID=181570;size=970x90;setID=1221908;type=js;sw='+screen.width+';sh='+screen.height+';spr='+window.devicePixelRatio+';kw='+abkw+';pid='+pid1221908+';place='+(plc1221908++)+';rnd='+rnd+';click=%%CLICK_URL_UNESC%%';
+var _absrc = absrc.split("type=js"); absrc = _absrc[0] + 'type=js;referrer=' + encodeURIComponent('%%PATTERN:url%%') + _absrc[1];
+document.write('<scr'+'ipt src="'+absrc+'" type="text/javascript" referrerpolicy="no-referrer-when-downgrade"></scr'+'ipt>');
+</script>""",
 
-# 4. Define a query com o filtro específico para a campanha 6988
-# O filtro precisa ser uma string JSON para evitar ambiguidade no SQL da API
-filter_json = json.dumps({"campaigns.campaign_id": 6988})
+"300x600.txt": """<script type="text/javascript">
+var rnd = window.rnd || Math.floor(Math.random()*10e6);
+var pid1221910 = window.pid1221910 || rnd;
+var plc1221910 = window.plc1221910 || 0;
+var abkw = window.abkw || '';
+var absrc = 'https://servedby.metrike.com.br/adserve/;ID=181570;size=300x600;setID=1221910;type=js;sw='+screen.width+';sh='+screen.height+';spr='+window.devicePixelRatio+';kw='+abkw+';pid='+pid1221910+';place='+(plc1221910++)+';rnd='+rnd+';click=%%CLICK_URL_UNESC%%';
+var _absrc = absrc.split("type=js"); absrc = _absrc[0] + 'type=js;referrer=' + encodeURIComponent('%%PATTERN:url%%') + _absrc[1];
+document.write('<scr'+'ipt src="'+absrc+'" type="text/javascript" referrerpolicy="no-referrer-when-downgrade"></scr'+'ipt>');
+</script>""",
 
-payload = {
-    "query": f"""
-    query {{
-      campaign(filter: {json.dumps(filter_json)}) {{
-        sites {{
-          site_name
-          purchases {{
-            cpm {{
-              quantity
-              total_data {{
-                impressions
-                valids
-                viewability
-              }}
-            }}
-          }}
-        }}
-      }}
-    }}
-    """
+"320x100.txt": """<script type="text/javascript">
+var rnd = window.rnd || Math.floor(Math.random()*10e6);
+var pid1221912 = window.pid1221912 || rnd;
+var plc1221912 = window.plc1221912 || 0;
+var abkw = window.abkw || '';
+var absrc = 'https://servedby.metrike.com.br/adserve/;ID=181570;size=320x100;setID=1221912;type=js;sw='+screen.width+';sh='+screen.height+';spr='+window.devicePixelRatio+';kw='+abkw+';pid='+pid1221912+';place='+(plc1221912++)+';rnd='+rnd+';click=%%CLICK_URL_UNESC%%';
+var _absrc = absrc.split("type=js"); absrc = _absrc[0] + 'type=js;referrer=' + encodeURIComponent('%%PATTERN:url%%') + _absrc[1];
+document.write('<scr'+'ipt src="'+absrc+'" type="text/javascript" referrerpolicy="no-referrer-when-downgrade"></scr'+'ipt>');
+</script>"""
 }
 
-# 5. Executa a query
-r = s.post(url, json=payload)
-data = r.json()
+internas_files = {
+"300x250.txt": """<script type="text/javascript">
+var rnd = window.rnd || Math.floor(Math.random()*10e6);
+var pid1221903 = window.pid1221903 || rnd;
+var plc1221903 = window.plc1221903 || 0;
+var abkw = window.abkw || '';
+var absrc = 'https://servedby.metrike.com.br/adserve/;ID=181570;size=300x250;setID=1221903;type=js;sw='+screen.width+';sh='+screen.height+';spr='+window.devicePixelRatio+';kw='+abkw+';pid='+pid1221903+';place='+(plc1221903++)+';rnd='+rnd+';click=%%CLICK_URL_UNESC%%';
+var _absrc = absrc.split("type=js"); absrc = _absrc[0] + 'type=js;referrer=' + encodeURIComponent('%%PATTERN:url%%') + _absrc[1];
+document.write('<scr'+'ipt src="'+absrc+'" type="text/javascript" referrerpolicy="no-referrer-when-downgrade"></scr'+'ipt>');
+</script>"""
+# (mantém os outros iguais ao seu script — pode colar direto)
+}
 
-# valida erro da API
-if "errors" in data:
-    print("Erro na API:", data["errors"])
-    exit()
+# escreve arquivos
+for name, content in home_files.items():
+    with open(os.path.join(home_path, name), "w", encoding="utf-8") as f:
+        f.write(content)
 
-# 6. Processa e exibe os resultados
-campaign_data = data.get("data", {}).get("campaign")
-if not campaign_data:
-    print("Nenhuma campanha encontrada com esse filtro.")
-    exit()
+for name, content in internas_files.items():
+    with open(os.path.join(internas_path, name), "w", encoding="utf-8") as f:
+        f.write(content)
 
-for site in campaign_data["sites"]:
-    name = site.get("site_name", "Desconhecido")
-    cpm = site.get("purchases", {}).get("cpm", {})
-    total = cpm.get("total_data") or {}
+# cria zip na pasta atual
+zip_path = os.path.join(os.getcwd(), "metropoles_compra2.zip")
 
-    contratado = cpm.get("quantity", 0)
-    entregue = total.get("valids", 0) or 0
-    viewability = total.get("viewability", 0) or 0
-    impressions = total.get("impressions", 0) or 0
+with ZipFile(zip_path, 'w') as zipf:
+    for root, dirs, files in os.walk(base_path):
+        for file in files:
+            full_path = os.path.join(root, file)
+            arcname = os.path.relpath(full_path, base_path)
+            zipf.write(full_path, arcname)
 
-    ritmo = (entregue / contratado) if contratado else 0
-    faltam = max(0, contratado - entregue)
-
-    print(f"\n📍 {name}")
-    print(f"Contratado: {contratado:,}".replace(",", "."))
-    print(f"Entregue (Valids): {entregue:,}".replace(",", "."))
-    print(f"Impressões Totais: {impressions:,}".replace(",", "."))
-    print(f"Ritmo de Entrega: {ritmo:.2%}")
-    print(f"Faltam: {faltam:,}".replace(",", "."))
-    print(f"Viewability: {viewability:.2%}")
+print(f"ZIP gerado em: {zip_path}")

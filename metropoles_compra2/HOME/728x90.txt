@@ -1,0 +1,9 @@
+<script type="text/javascript">
+var rnd = window.rnd || Math.floor(Math.random()*10e6);
+var pid1221906 = window.pid1221906 || rnd;
+var plc1221906 = window.plc1221906 || 0;
+var abkw = window.abkw || '';
+var absrc = 'https://servedby.metrike.com.br/adserve/;ID=181570;size=728x90;setID=1221906;type=js;sw='+screen.width+';sh='+screen.height+';spr='+window.devicePixelRatio+';kw='+abkw+';pid='+pid1221906+';place='+(plc1221906++)+';rnd='+rnd+';click=%%CLICK_URL_UNESC%%';
+var _absrc = absrc.split("type=js"); absrc = _absrc[0] + 'type=js;referrer=' + encodeURIComponent('%%PATTERN:url%%') + _absrc[1];
+document.write('<scr'+'ipt src="'+absrc+'" type="text/javascript" referrerpolicy="no-referrer-when-downgrade"></scr'+'ipt>');
+</script>

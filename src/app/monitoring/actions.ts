@@ -167,12 +167,12 @@ export async function getLiveMetrics(campaignId: string): Promise<LiveMetricsRes
 
         // 3. GraphQL Query (with 15s timeout)
         const campaignIdInt = parseInt(externalId)
-        const filterJson = JSON.stringify({ "campaigns.campaign_id": campaignIdInt })
+        const filterJson = { "campaigns.campaign_id": campaignIdInt }
         const graphqlUrl = `https://graphql.00px.com.br/graphql/?s=${sessionToken}`
 
         const query = `
             query {
-              campaign(filter: ${JSON.stringify(filterJson)}) {
+              campaign(filter: ${JSON.stringify(JSON.stringify(filterJson))}) {
                 sites {
                   site_id
                   site_name
