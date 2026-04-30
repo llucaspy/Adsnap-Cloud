@@ -20,7 +20,11 @@ export type Message = {
     content: string
     type?: 'status' | 'action'
     success?: boolean
-    data?: unknown
+    data?: any
+    command?: {
+        type: string
+        data: any
+    }
 }
 
 // Minimal type for campaign to avoid any
@@ -335,10 +339,37 @@ export function NexusChat() {
                 const data = await response.json()
 
                 if (data.success && data.message) {
-                    // Add the response (Realtime may also deliver it, dedup logic handles that)
+                    let aiMsg = data.message
+                    let aiCommand = data.command
+
+                    // Handle potential JSON string in message (defense against raw model outputs)
+                    if (typeof aiMsg === 'string' && aiMsg.trim().startsWith('{')) {
+                        try {
+                            const parsed = JSON.parse(aiMsg)
+                            aiMsg = parsed.message || aiMsg
+                            aiCommand = parsed.command || aiCommand
+                        } catch { /* not JSON */ }
+                    }
+
+                    // EXECUTE COMMAND IF PRESENT
+                    if (aiCommand && aiCommand.type === 'capture') {
+                        const { campaignId } = aiCommand.data
+                        if (campaignId) {
+                            console.log('[Nexus UI] Executing AI Command: capture', campaignId)
+                            const { runCapture } = await import('@/app/actions')
+                            await runCapture(campaignId)
+                        }
+                    }
+
+                    // Add the response
                     setMessages(prev => {
-                        if (prev.some(m => m.content === data.message && m.role === 'assistant')) return prev
-                        return [...prev, { role: 'assistant', content: data.message }]
+                        if (prev.some(m => m.content === aiMsg && m.role === 'assistant')) return prev
+                        return [...prev, { 
+                            role: 'assistant', 
+                            content: aiMsg,
+                            command: aiCommand,
+                            type: aiCommand ? 'action' : 'status'
+                        }]
                     })
                 } else {
                     setMessages(prev => [...prev, {
@@ -609,6 +640,27 @@ export function NexusChat() {
                                                 {/* Specialized Data Visualizer */}
                                                 {(msg.data as any)?.chartData && (
                                                     <NexusDataChart chartData={(msg.data as any).chartData} />
+                                                )}
+
+                                                {/* AI Command Feedback Bubble */}
+                                                {msg.command && (
+                                                    <div className="mt-4 p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center gap-3 animate-in fade-in zoom-in duration-500 bg-gradient-to-r from-indigo-500/10 to-transparent">
+                                                        <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center shadow-[0_0_20px_rgba(99,102,241,0.4)]">
+                                                            <Zap size={14} className="text-white animate-pulse" />
+                                                        </div>
+                                                        <div className="flex-1">
+                                                            <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest leading-none mb-1">Nexus System Action</p>
+                                                            <p className="text-[12px] text-white font-bold">
+                                                                {msg.command.type === 'capture' 
+                                                                    ? `🚀 Enfileirando captura: PI ${msg.command.data.pi || '???'} (${msg.command.data.format || 'Filtro Automático'})`
+                                                                    : `⚡ Executando: ${msg.command.type}`
+                                                                }
+                                                            </p>
+                                                        </div>
+                                                        <div className="text-[9px] font-black text-emerald-400 uppercase tracking-widest px-2 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-md">
+                                                            Enviado
+                                                        </div>
+                                                    </div>
                                                 )}
                                             </div>
                                         )}
