@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { Send, Zap, X, Mail, Trash2, Camera, Download, Search, Eye } from 'lucide-react'
+import { useSession } from '@/lib/useSession'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -50,10 +51,11 @@ export function NexusChat() {
     const [isOpen, setIsOpen] = useState(false)
     const [input, setInput] = useState('')
     const [messages, setMessages] = useState<Message[]>([
-        { role: 'assistant', content: 'Nexus Neural Core v2 inicializado. Memória persistente ativa. Como posso ajudar?' }
+        { role: 'assistant', content: 'Nexus Neural Core v3 inicializado. Memória persistente ativa. Como posso ajudar?' }
     ])
     const [isTyping, setIsTyping] = useState(false)
     const scrollRef = useRef<HTMLDivElement>(null)
+    const session = useSession()
     const chatRef = useRef<HTMLDivElement>(null)
     const toggleRef = useRef<HTMLButtonElement>(null)
     const sessionIdRef = useRef<string>('default')
@@ -269,7 +271,7 @@ export function NexusChat() {
         console.log('[Nexus UI] handleSend v2 iniciado:', userMsg)
 
         const cleanup = () => setIsTyping(false)
-        const safetyTimer = setTimeout(cleanup, 30000)
+        const safetyTimer = setTimeout(cleanup, 55000) // 55s: 6 modelos × 8s cada + margem
 
         // Check if this is an operational command that needs the legacy system
         const text = userMsg.toLowerCase()
@@ -324,14 +326,17 @@ export function NexusChat() {
                     setIsGlobalPolling(true)
                 }
             } else {
-                // Use the new Edge Function for conversational AI
-                console.log('[Nexus UI] Using Edge Function AI Core')
-                const response = await fetch('/api/nexus/chat', {
+                // Call Supabase Edge Function DIRECTLY (bypasses Vercel 10s timeout)
+                console.log('[Nexus UI] Using Edge Function AI Core (direct)')
+                const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+                const response = await fetch(`${supabaseUrl}/functions/v1/nexus-chat`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         message: userMsg,
                         sessionId: sessionIdRef.current,
+                        callerRole: session?.role || 'guest',
+                        callerEmail: session?.email || 'anonymous',
                     }),
                 })
 
