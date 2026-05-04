@@ -2,21 +2,26 @@
 
 import prisma from '@/lib/prisma'
 
+export interface TemplateCapture {
+    screenshotUrl: string
+    captureDate: string  // YYYY-MM-DD
+}
+
 export interface TemplateInfo {
     campaignId: string
     format: string
     device: string
-    screenshotUrl: string
-    captureDate: string
+    latestScreenshot: string
+    /** Todas as capturas disponíveis, indexadas por data (YYYY-MM-DD) */
+    capturesByDate: Record<string, string>  // date -> screenshotUrl
 }
 
 /**
- * Busca todos os templates de PI 000 (Modelo de prints) com suas capturas mais recentes.
- * Agrupa por campaign (formato) para o wizard de seleção.
+ * Busca TODAS as capturas de PI 000, agrupadas por campanha e por data.
+ * Isso permite que a montagem use o print do dia correto.
  */
 export async function getMontagemTemplates(): Promise<{
     templates: TemplateInfo[]
-    grouped: Record<string, TemplateInfo[]>
 }> {
     const campaigns = await prisma.campaign.findMany({
         where: { pi: '000' },
@@ -31,28 +36,31 @@ export async function getMontagemTemplates(): Promise<{
                     createdAt: true,
                 },
                 orderBy: { createdAt: 'desc' },
-                take: 1, // Último capture por campanha
             }
         }
     })
 
     const templates: TemplateInfo[] = campaigns
         .filter(c => c.captures.length > 0)
-        .map(c => ({
-            campaignId: c.id,
-            format: c.format,
-            device: c.device || 'desktop',
-            screenshotUrl: c.captures[0].screenshotPath,
-            captureDate: c.captures[0].createdAt.toISOString().split('T')[0],
-        }))
+        .map(c => {
+            // Agrupar capturas por data (YYYY-MM-DD)
+            // Se houver múltiplas capturas no mesmo dia, usar a mais recente
+            const capturesByDate: Record<string, string> = {}
+            for (const cap of c.captures) {
+                const dateStr = cap.createdAt.toISOString().split('T')[0]
+                if (!capturesByDate[dateStr]) {
+                    capturesByDate[dateStr] = cap.screenshotPath
+                }
+            }
 
-    // Agrupar por device
-    const grouped: Record<string, TemplateInfo[]> = {}
-    for (const t of templates) {
-        const key = t.device
-        if (!grouped[key]) grouped[key] = []
-        grouped[key].push(t)
-    }
+            return {
+                campaignId: c.id,
+                format: c.format,
+                device: c.device || 'desktop',
+                latestScreenshot: c.captures[0].screenshotPath,
+                capturesByDate,
+            }
+        })
 
-    return { templates, grouped }
+    return { templates }
 }

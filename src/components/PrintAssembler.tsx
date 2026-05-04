@@ -1,14 +1,11 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Upload, Download, Layers, Calendar, Image as ImageIcon, ChevronRight, ChevronLeft, Crosshair, Check, X, Loader2, ZoomIn, ZoomOut } from 'lucide-react'
+import { Upload, Download, ChevronRight, ChevronLeft, Check, Loader2 } from 'lucide-react'
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import { getMontagemTemplates, type TemplateInfo } from '@/app/montagem/actions'
 
-// ============================================================
-//  TIPOS
-// ============================================================
 interface Position {
     x: number
     y: number
@@ -21,38 +18,26 @@ interface TemplateWithPosition {
     position: Position | null
 }
 
-// ============================================================
-//  COMPONENTE PRINCIPAL
-// ============================================================
 export default function PrintAssembler() {
-    // STATE - Wizard
     const [step, setStep] = useState(1)
-
-    // STATE - Step 1: Templates
     const [templates, setTemplates] = useState<TemplateInfo[]>([])
     const [selectedTemplates, setSelectedTemplates] = useState<TemplateWithPosition[]>([])
     const [loading, setLoading] = useState(true)
-
-    // STATE - Step 2: Período
     const [dateStart, setDateStart] = useState('')
     const [dateEnd, setDateEnd] = useState('')
-
-    // STATE - Step 3: Criativo
     const [creativeFile, setCreativeFile] = useState<File | null>(null)
     const [creativePreview, setCreativePreview] = useState<string | null>(null)
-
-    // STATE - Step 4: Posicionamento + Geração
     const [currentTemplateIdx, setCurrentTemplateIdx] = useState(0)
     const [isProcessing, setIsProcessing] = useState(false)
     const [progress, setProgress] = useState(0)
+    const [progressText, setProgressText] = useState('')
     const [isDragging, setIsDragging] = useState(false)
     const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null)
+    const [missingDays, setMissingDays] = useState<Record<string, string[]>>({})
 
-    // REFS
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const creativeInputRef = useRef<HTMLInputElement>(null)
 
-    // Carregar templates ao montar
     useEffect(() => {
         async function load() {
             try {
@@ -67,20 +52,43 @@ export default function PrintAssembler() {
         load()
     }, [])
 
-    // ============================================================
-    //  CANVAS: Desenhar template + posição do criativo
-    // ============================================================
+    // Gerar lista de dias do range
+    const getDaysInRange = (): string[] => {
+        if (!dateStart || !dateEnd) return []
+        const days: string[] = []
+        const current = new Date(dateStart + 'T12:00:00')
+        const end = new Date(dateEnd + 'T12:00:00')
+        while (current <= end) {
+            days.push(current.toISOString().split('T')[0])
+            current.setDate(current.getDate() + 1)
+        }
+        return days
+    }
+
+    // Verificar dias disponíveis ao avançar para step 2
+    useEffect(() => {
+        if (step === 2 && dateStart && dateEnd && selectedTemplates.length > 0) {
+            const days = getDaysInRange()
+            const missing: Record<string, string[]> = {}
+            for (const t of selectedTemplates) {
+                const missingForTemplate = days.filter(d => !t.template.capturesByDate[d])
+                if (missingForTemplate.length > 0) {
+                    missing[t.template.campaignId] = missingForTemplate
+                }
+            }
+            setMissingDays(missing)
+        }
+    }, [step, dateStart, dateEnd, selectedTemplates])
+
+    // Canvas drawing
     const drawCanvas = useCallback(async () => {
         const canvas = canvasRef.current
         if (!canvas || selectedTemplates.length === 0) return
-
         const current = selectedTemplates[currentTemplateIdx]
         if (!current) return
-
         const ctx = canvas.getContext('2d')
         if (!ctx) return
 
-        // Carregar template
         const img = new window.Image()
         img.crossOrigin = 'anonymous'
         img.onload = () => {
@@ -88,15 +96,12 @@ export default function PrintAssembler() {
             canvas.height = img.height
             ctx.drawImage(img, 0, 0)
 
-            // Se há posição definida, desenhar o criativo
             if (current.position && creativePreview) {
                 const creative = new window.Image()
                 creative.crossOrigin = 'anonymous'
                 creative.onload = () => {
                     const p = current.position!
                     ctx.drawImage(creative, p.x, p.y, p.width, p.height)
-
-                    // Borda indicativa
                     ctx.strokeStyle = '#00ff88'
                     ctx.lineWidth = 2
                     ctx.setLineDash([5, 5])
@@ -105,7 +110,6 @@ export default function PrintAssembler() {
                 }
                 creative.src = creativePreview
             } else if (current.position) {
-                // Posição definida mas sem criativo — mostrar área
                 const p = current.position
                 ctx.fillStyle = 'rgba(0, 255, 136, 0.15)'
                 ctx.fillRect(p.x, p.y, p.width, p.height)
@@ -117,16 +121,14 @@ export default function PrintAssembler() {
                 ctx.fillText(`${p.width}x${p.height}`, p.x + 4, p.y + 18)
             }
         }
-        img.src = current.template.screenshotUrl
+        img.src = current.template.latestScreenshot
     }, [selectedTemplates, currentTemplateIdx, creativePreview])
 
     useEffect(() => {
         if (step === 4) drawCanvas()
     }, [step, currentTemplateIdx, selectedTemplates, drawCanvas])
 
-    // ============================================================
-    //  CANVAS: Mouse handlers para posicionamento
-    // ============================================================
+    // Mouse handlers para posicionamento
     const getCanvasCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
         const canvas = canvasRef.current
         if (!canvas) return { x: 0, y: 0 }
@@ -140,21 +142,19 @@ export default function PrintAssembler() {
     }
 
     const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-        const coords = getCanvasCoords(e)
-        setDragStart(coords)
+        setDragStart(getCanvasCoords(e))
         setIsDragging(true)
     }
 
     const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
         if (!isDragging || !dragStart) return
         const coords = getCanvasCoords(e)
-        const pos: Position = {
+        updateCurrentPosition({
             x: Math.min(dragStart.x, coords.x),
             y: Math.min(dragStart.y, coords.y),
             width: Math.abs(coords.x - dragStart.x),
             height: Math.abs(coords.y - dragStart.y),
-        }
-        updateCurrentPosition(pos)
+        })
     }
 
     const handleMouseUp = () => {
@@ -170,9 +170,6 @@ export default function PrintAssembler() {
         })
     }
 
-    // ============================================================
-    //  TOGGLE template selection (Step 1)
-    // ============================================================
     const toggleTemplate = (t: TemplateInfo) => {
         setSelectedTemplates(prev => {
             const exists = prev.find(s => s.template.campaignId === t.campaignId)
@@ -183,9 +180,6 @@ export default function PrintAssembler() {
 
     const isSelected = (t: TemplateInfo) => selectedTemplates.some(s => s.template.campaignId === t.campaignId)
 
-    // ============================================================
-    //  CREATIVE upload (Step 3)
-    // ============================================================
     const handleCreativeUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
         if (!file) return
@@ -196,7 +190,7 @@ export default function PrintAssembler() {
     }
 
     // ============================================================
-    //  GERAR MONTAGEM + ZIP (Step 4)
+    //  GERAR ZIP — Usa o print ESPECÍFICO de cada dia
     // ============================================================
     const generateZip = async () => {
         if (!creativePreview || selectedTemplates.length === 0) return
@@ -204,19 +198,19 @@ export default function PrintAssembler() {
         setProgress(0)
 
         const zip = new JSZip()
-        const start = new Date(dateStart)
-        const end = new Date(dateEnd)
-        const days: string[] = []
+        const days = getDaysInRange()
 
-        // Gerar lista de dias
-        const current = new Date(start)
-        while (current <= end) {
-            days.push(current.toISOString().split('T')[0])
-            current.setDate(current.getDate() + 1)
-        }
-
-        const totalImages = selectedTemplates.length * days.length
+        let totalImages = 0
         let processed = 0
+        let skipped = 0
+
+        // Contar total de imagens possíveis
+        for (const tmplWithPos of selectedTemplates) {
+            if (!tmplWithPos.position) continue
+            for (const day of days) {
+                if (tmplWithPos.template.capturesByDate[day]) totalImages++
+            }
+        }
 
         for (const tmplWithPos of selectedTemplates) {
             if (!tmplWithPos.position) continue
@@ -225,27 +219,39 @@ export default function PrintAssembler() {
             const folder = zip.folder(folderName)!
 
             for (const day of days) {
+                // USAR O PRINT DO DIA ESPECÍFICO
+                const screenshotUrl = tmplWithPos.template.capturesByDate[day]
+
+                if (!screenshotUrl) {
+                    skipped++
+                    setProgressText(`⚠️ Dia ${day}: sem print disponível para este template`)
+                    continue
+                }
+
                 try {
+                    setProgressText(`Processando ${day} (${tmplWithPos.template.device})...`)
                     const blob = await renderOverlay(
-                        tmplWithPos.template.screenshotUrl,
+                        screenshotUrl,  // Print do dia correto!
                         creativePreview,
                         tmplWithPos.position
                     )
                     folder.file(`montagem_${day}.png`, blob)
                 } catch (err) {
-                    console.error(`Erro ao processar ${day}:`, err)
+                    console.error(`Erro ${day}:`, err)
+                    skipped++
                 }
                 processed++
                 setProgress(Math.round((processed / totalImages) * 100))
             }
         }
 
+        setProgressText(`Gerando ZIP... (${processed} montagens, ${skipped} dias sem print)`)
         const content = await zip.generateAsync({ type: 'blob' })
         saveAs(content, `montagem_${dateStart}_a_${dateEnd}.zip`)
         setIsProcessing(false)
+        setProgressText(`✅ Concluído! ${processed} montagens geradas.${skipped > 0 ? ` ${skipped} dias sem print disponível.` : ''}`)
     }
 
-    // Renderizar overlay em Canvas offscreen
     const renderOverlay = (templateUrl: string, creativeDataUrl: string, pos: Position): Promise<Blob> => {
         return new Promise((resolve, reject) => {
             const templateImg = new window.Image()
@@ -272,9 +278,6 @@ export default function PrintAssembler() {
         })
     }
 
-    // ============================================================
-    //  VALIDAÇÃO
-    // ============================================================
     const canAdvance = () => {
         switch (step) {
             case 1: return selectedTemplates.length > 0
@@ -285,24 +288,28 @@ export default function PrintAssembler() {
         }
     }
 
-    // ============================================================
-    //  RENDER
-    // ============================================================
-    const stepTitles = [
-        'Selecionar Templates',
-        'Período',
-        'Upload do Criativo',
-        'Posicionar & Gerar',
-    ]
+    const stepTitles = ['Templates', 'Período', 'Criativo', 'Posicionar & Gerar']
+
+    // Contagem de dias disponíveis
+    const availableDaysCount = () => {
+        const days = getDaysInRange()
+        if (days.length === 0 || selectedTemplates.length === 0) return { total: 0, available: 0 }
+        let available = 0
+        for (const t of selectedTemplates) {
+            for (const d of days) {
+                if (t.template.capturesByDate[d]) available++
+            }
+        }
+        return { total: days.length * selectedTemplates.length, available }
+    }
 
     return (
         <div className="min-h-screen bg-[#0a0a0f] text-white p-6">
-            {/* HEADER */}
             <div className="max-w-6xl mx-auto">
                 <h1 className="text-2xl font-bold mb-1 bg-gradient-to-r from-[#00ff88] to-[#00cc6a] bg-clip-text text-transparent">
                     Montagem Automática
                 </h1>
-                <p className="text-white/40 text-sm mb-6">Sobreponha criativos nos templates e gere montagens em lote</p>
+                <p className="text-white/40 text-sm mb-6">Sobreponha criativos nos templates PI 000 — cada dia usa seu próprio print</p>
 
                 {/* STEPPER */}
                 <div className="flex items-center gap-2 mb-8">
@@ -323,13 +330,13 @@ export default function PrintAssembler() {
                     ))}
                 </div>
 
-                {/* ============= STEP 1: SELECIONAR TEMPLATES ============= */}
+                {/* STEP 1: Templates */}
                 {step === 1 && (
                     <div>
                         <h2 className="text-lg font-semibold mb-4">Selecione os templates de PI 000</h2>
                         {loading ? (
                             <div className="flex items-center gap-2 text-white/40">
-                                <Loader2 size={16} className="animate-spin" /> Carregando templates...
+                                <Loader2 size={16} className="animate-spin" /> Carregando...
                             </div>
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -344,7 +351,7 @@ export default function PrintAssembler() {
                                         }`}
                                     >
                                         <img
-                                            src={t.screenshotUrl}
+                                            src={t.latestScreenshot}
                                             alt={`Template ${t.format.substring(0, 8)}`}
                                             className="w-full h-48 object-cover object-top"
                                             crossOrigin="anonymous"
@@ -355,7 +362,7 @@ export default function PrintAssembler() {
                                                     {t.device === 'mobile' ? '📱 Mobile' : '🖥️ Desktop'}
                                                 </span>
                                                 <span className="text-[10px] text-white/40">
-                                                    {t.format.substring(0, 8)}...
+                                                    {Object.keys(t.capturesByDate).length} dia(s) disponível(is)
                                                 </span>
                                             </div>
                                         </div>
@@ -374,48 +381,53 @@ export default function PrintAssembler() {
                     </div>
                 )}
 
-                {/* ============= STEP 2: PERÍODO ============= */}
+                {/* STEP 2: Período */}
                 {step === 2 && (
                     <div>
                         <h2 className="text-lg font-semibold mb-4">Defina o período da montagem</h2>
                         <div className="flex flex-col sm:flex-row gap-4 max-w-md">
                             <div className="flex-1">
                                 <label className="text-xs text-white/40 mb-1 block">Data Início</label>
-                                <input
-                                    type="date"
-                                    value={dateStart}
-                                    onChange={e => setDateStart(e.target.value)}
-                                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#00ff88]/50"
-                                />
+                                <input type="date" value={dateStart} onChange={e => setDateStart(e.target.value)}
+                                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#00ff88]/50" />
                             </div>
                             <div className="flex-1">
                                 <label className="text-xs text-white/40 mb-1 block">Data Fim</label>
-                                <input
-                                    type="date"
-                                    value={dateEnd}
-                                    onChange={e => setDateEnd(e.target.value)}
-                                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#00ff88]/50"
-                                />
+                                <input type="date" value={dateEnd} onChange={e => setDateEnd(e.target.value)}
+                                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#00ff88]/50" />
                             </div>
                         </div>
-                        {dateStart && dateEnd && dateStart <= dateEnd && (
-                            <p className="text-sm text-white/40 mt-3">
-                                📅 {Math.ceil((new Date(dateEnd).getTime() - new Date(dateStart).getTime()) / 86400000) + 1} dia(s) × {selectedTemplates.length} template(s) = <span className="text-[#00ff88]">{(Math.ceil((new Date(dateEnd).getTime() - new Date(dateStart).getTime()) / 86400000) + 1) * selectedTemplates.length} montagem(s)</span>
-                            </p>
-                        )}
+                        {dateStart && dateEnd && dateStart <= dateEnd && (() => {
+                            const { total, available } = availableDaysCount()
+                            const days = getDaysInRange()
+                            return (
+                                <div className="mt-4 space-y-2">
+                                    <p className="text-sm text-white/40">
+                                        📅 {days.length} dia(s) × {selectedTemplates.length} template(s) = <span className="text-[#00ff88]">{available} montagem(s) disponíveis</span>
+                                        {total !== available && <span className="text-yellow-400/80"> ({total - available} dias sem print)</span>}
+                                    </p>
+                                    {Object.keys(missingDays).length > 0 && (
+                                        <div className="bg-yellow-400/5 border border-yellow-400/20 rounded-lg p-3 text-xs">
+                                            <p className="text-yellow-400 font-medium mb-1">⚠️ Dias sem print disponível (serão pulados):</p>
+                                            {Object.entries(missingDays).map(([campId, days]) => (
+                                                <p key={campId} className="text-yellow-400/60">
+                                                    Template {campId.substring(0, 8)}: {days.join(', ')}
+                                                </p>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )
+                        })()}
                     </div>
                 )}
 
-                {/* ============= STEP 3: CRIATIVO ============= */}
+                {/* STEP 3: Criativo */}
                 {step === 3 && (
                     <div>
                         <h2 className="text-lg font-semibold mb-4">Upload do Criativo</h2>
-                        <p className="text-sm text-white/40 mb-4">Arraste ou selecione a imagem do banner que será sobreposta nos templates</p>
-
-                        <div
-                            onClick={() => creativeInputRef.current?.click()}
-                            className="border-2 border-dashed border-white/10 hover:border-[#00ff88]/30 rounded-xl p-8 text-center cursor-pointer transition-all"
-                        >
+                        <div onClick={() => creativeInputRef.current?.click()}
+                            className="border-2 border-dashed border-white/10 hover:border-[#00ff88]/30 rounded-xl p-8 text-center cursor-pointer transition-all">
                             {creativePreview ? (
                                 <div className="flex flex-col items-center gap-4">
                                     <img src={creativePreview} alt="Criativo" className="max-h-48 rounded-lg" />
@@ -430,56 +442,39 @@ export default function PrintAssembler() {
                                 </div>
                             )}
                         </div>
-                        <input
-                            ref={creativeInputRef}
-                            type="file"
-                            accept="image/*"
-                            onChange={handleCreativeUpload}
-                            className="hidden"
-                        />
+                        <input ref={creativeInputRef} type="file" accept="image/*" onChange={handleCreativeUpload} className="hidden" />
                     </div>
                 )}
 
-                {/* ============= STEP 4: POSICIONAR & GERAR ============= */}
+                {/* STEP 4: Posicionar & Gerar */}
                 {step === 4 && (
                     <div>
                         <h2 className="text-lg font-semibold mb-2">Posicione o criativo em cada template</h2>
                         <p className="text-sm text-white/40 mb-4">
-                            Clique e arraste sobre a área marcada para definir onde o criativo será colocado.
-                            Template {currentTemplateIdx + 1} de {selectedTemplates.length}
+                            Clique e arraste sobre a área marcada. Cada dia usará o print <strong>daquele dia específico</strong> do PI 000.
                         </p>
 
-                        {/* Template navigation */}
                         <div className="flex items-center gap-3 mb-4">
-                            <button
-                                onClick={() => setCurrentTemplateIdx(Math.max(0, currentTemplateIdx - 1))}
+                            <button onClick={() => setCurrentTemplateIdx(Math.max(0, currentTemplateIdx - 1))}
                                 disabled={currentTemplateIdx === 0}
-                                className="p-2 rounded-lg bg-white/5 disabled:opacity-30 hover:bg-white/10"
-                            >
+                                className="p-2 rounded-lg bg-white/5 disabled:opacity-30 hover:bg-white/10">
                                 <ChevronLeft size={16} />
                             </button>
                             <div className="flex gap-2">
                                 {selectedTemplates.map((t, i) => (
-                                    <button
-                                        key={i}
-                                        onClick={() => setCurrentTemplateIdx(i)}
+                                    <button key={i} onClick={() => setCurrentTemplateIdx(i)}
                                         className={`w-8 h-8 rounded-lg text-xs font-medium transition-all ${
-                                            i === currentTemplateIdx
-                                                ? 'bg-[#00ff88] text-black'
-                                                : t.position
-                                                    ? 'bg-[#00ff88]/20 text-[#00ff88]'
+                                            i === currentTemplateIdx ? 'bg-[#00ff88] text-black'
+                                                : t.position ? 'bg-[#00ff88]/20 text-[#00ff88]'
                                                     : 'bg-white/5 text-white/40'
-                                        }`}
-                                    >
+                                        }`}>
                                         {i + 1}
                                     </button>
                                 ))}
                             </div>
-                            <button
-                                onClick={() => setCurrentTemplateIdx(Math.min(selectedTemplates.length - 1, currentTemplateIdx + 1))}
+                            <button onClick={() => setCurrentTemplateIdx(Math.min(selectedTemplates.length - 1, currentTemplateIdx + 1))}
                                 disabled={currentTemplateIdx >= selectedTemplates.length - 1}
-                                className="p-2 rounded-lg bg-white/5 disabled:opacity-30 hover:bg-white/10"
-                            >
+                                className="p-2 rounded-lg bg-white/5 disabled:opacity-30 hover:bg-white/10">
                                 <ChevronRight size={16} />
                             </button>
                             <span className="text-xs text-white/30 ml-2">
@@ -488,62 +483,54 @@ export default function PrintAssembler() {
                             </span>
                         </div>
 
-                        {/* Canvas */}
                         <div className="relative bg-white/5 rounded-xl overflow-auto max-h-[600px] border border-white/10">
-                            <canvas
-                                ref={canvasRef}
+                            <canvas ref={canvasRef}
                                 onMouseDown={handleMouseDown}
                                 onMouseMove={handleMouseMove}
                                 onMouseUp={handleMouseUp}
                                 onMouseLeave={handleMouseUp}
                                 className="max-w-full cursor-crosshair"
-                                style={{ display: 'block', margin: '0 auto' }}
-                            />
+                                style={{ display: 'block', margin: '0 auto' }} />
                         </div>
 
-                        {/* Gerar ZIP */}
                         {canAdvance() && (
                             <div className="mt-6">
                                 {isProcessing ? (
-                                    <div className="flex items-center gap-3">
-                                        <Loader2 size={16} className="animate-spin text-[#00ff88]" />
-                                        <div className="flex-1 bg-white/5 rounded-full h-2 overflow-hidden">
-                                            <div
-                                                className="bg-gradient-to-r from-[#00ff88] to-[#00cc6a] h-full transition-all"
-                                                style={{ width: `${progress}%` }}
-                                            />
+                                    <div className="space-y-2">
+                                        <div className="flex items-center gap-3">
+                                            <Loader2 size={16} className="animate-spin text-[#00ff88]" />
+                                            <div className="flex-1 bg-white/5 rounded-full h-2 overflow-hidden">
+                                                <div className="bg-gradient-to-r from-[#00ff88] to-[#00cc6a] h-full transition-all"
+                                                    style={{ width: `${progress}%` }} />
+                                            </div>
+                                            <span className="text-sm text-white/40">{progress}%</span>
                                         </div>
-                                        <span className="text-sm text-white/40">{progress}%</span>
+                                        <p className="text-xs text-white/30">{progressText}</p>
                                     </div>
                                 ) : (
-                                    <button
-                                        onClick={generateZip}
-                                        className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-[#00ff88] to-[#00cc6a] text-black font-semibold rounded-xl hover:brightness-110 transition-all"
-                                    >
-                                        <Download size={18} />
-                                        Gerar Montagem & Download ZIP
-                                    </button>
+                                    <div className="space-y-2">
+                                        <button onClick={generateZip}
+                                            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-[#00ff88] to-[#00cc6a] text-black font-semibold rounded-xl hover:brightness-110 transition-all">
+                                            <Download size={18} />
+                                            Gerar Montagem & Download ZIP
+                                        </button>
+                                        {progressText && <p className="text-xs text-[#00ff88]/80">{progressText}</p>}
+                                    </div>
                                 )}
                             </div>
                         )}
                     </div>
                 )}
 
-                {/* ============= NAVIGATION BUTTONS ============= */}
+                {/* NAV BUTTONS */}
                 {step < 4 && (
                     <div className="flex items-center justify-between mt-8 pt-6 border-t border-white/5">
-                        <button
-                            onClick={() => setStep(Math.max(1, step - 1))}
-                            disabled={step === 1}
-                            className="flex items-center gap-1 px-4 py-2 text-sm text-white/40 hover:text-white disabled:opacity-30"
-                        >
+                        <button onClick={() => setStep(Math.max(1, step - 1))} disabled={step === 1}
+                            className="flex items-center gap-1 px-4 py-2 text-sm text-white/40 hover:text-white disabled:opacity-30">
                             <ChevronLeft size={16} /> Voltar
                         </button>
-                        <button
-                            onClick={() => setStep(Math.min(4, step + 1))}
-                            disabled={!canAdvance()}
-                            className="flex items-center gap-1 px-5 py-2 text-sm font-medium bg-[#00ff88] text-black rounded-lg hover:brightness-110 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-                        >
+                        <button onClick={() => setStep(Math.min(4, step + 1))} disabled={!canAdvance()}
+                            className="flex items-center gap-1 px-5 py-2 text-sm font-medium bg-[#00ff88] text-black rounded-lg hover:brightness-110 disabled:opacity-30 disabled:cursor-not-allowed transition-all">
                             Avançar <ChevronRight size={16} />
                         </button>
                     </div>
