@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Upload, Download, ChevronRight, ChevronLeft, Check, Loader2 } from 'lucide-react'
+import { Upload, Download, ChevronRight, ChevronLeft, Check, Loader2, Plus, Trash2 } from 'lucide-react'
 import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import { getMontagemTemplates, type TemplateInfo } from '@/app/montagem/actions'
@@ -18,6 +18,14 @@ interface TemplateWithPosition {
     position: Position | null
 }
 
+interface CreativeEntry {
+    id: string
+    file: File
+    preview: string
+    dateStart: string
+    dateEnd: string
+}
+
 export default function PrintAssembler() {
     const [step, setStep] = useState(1)
     const [templates, setTemplates] = useState<TemplateInfo[]>([])
@@ -25,8 +33,10 @@ export default function PrintAssembler() {
     const [loading, setLoading] = useState(true)
     const [dateStart, setDateStart] = useState('')
     const [dateEnd, setDateEnd] = useState('')
-    const [creativeFile, setCreativeFile] = useState<File | null>(null)
-    const [creativePreview, setCreativePreview] = useState<string | null>(null)
+
+    // Múltiplos criativos com sub-períodos
+    const [creatives, setCreatives] = useState<CreativeEntry[]>([])
+
     const [currentTemplateIdx, setCurrentTemplateIdx] = useState(0)
     const [isProcessing, setIsProcessing] = useState(false)
     const [progress, setProgress] = useState(0)
@@ -36,7 +46,8 @@ export default function PrintAssembler() {
     const [missingDays, setMissingDays] = useState<Record<string, string[]>>({})
 
     const canvasRef = useRef<HTMLCanvasElement>(null)
-    const creativeInputRef = useRef<HTMLInputElement>(null)
+    const fileInputRef = useRef<HTMLInputElement>(null)
+    const [pendingCreativeIdx, setPendingCreativeIdx] = useState<number | null>(null)
 
     useEffect(() => {
         async function load() {
@@ -52,20 +63,20 @@ export default function PrintAssembler() {
         load()
     }, [])
 
-    // Gerar lista de dias do range
-    const getDaysInRange = (): string[] => {
-        if (!dateStart || !dateEnd) return []
+    const getDaysInRange = (start?: string, end?: string): string[] => {
+        const s = start || dateStart
+        const e = end || dateEnd
+        if (!s || !e) return []
         const days: string[] = []
-        const current = new Date(dateStart + 'T12:00:00')
-        const end = new Date(dateEnd + 'T12:00:00')
-        while (current <= end) {
+        const current = new Date(s + 'T12:00:00')
+        const endDate = new Date(e + 'T12:00:00')
+        while (current <= endDate) {
             days.push(current.toISOString().split('T')[0])
             current.setDate(current.getDate() + 1)
         }
         return days
     }
 
-    // Verificar dias disponíveis ao avançar para step 2
     useEffect(() => {
         if (step === 2 && dateStart && dateEnd && selectedTemplates.length > 0) {
             const days = getDaysInRange()
@@ -80,7 +91,17 @@ export default function PrintAssembler() {
         }
     }, [step, dateStart, dateEnd, selectedTemplates])
 
-    // Canvas drawing
+    // Buscar o criativo correto para um dia específico
+    const getCreativeForDay = (day: string): CreativeEntry | null => {
+        for (const c of creatives) {
+            if (c.dateStart <= day && day <= c.dateEnd) return c
+        }
+        return null
+    }
+
+    // Canvas: preview do primeiro criativo disponível
+    const firstCreativePreview = creatives.length > 0 ? creatives[0].preview : null
+
     const drawCanvas = useCallback(async () => {
         const canvas = canvasRef.current
         if (!canvas || selectedTemplates.length === 0) return
@@ -96,7 +117,7 @@ export default function PrintAssembler() {
             canvas.height = img.height
             ctx.drawImage(img, 0, 0)
 
-            if (current.position && creativePreview) {
+            if (current.position && firstCreativePreview) {
                 const creative = new window.Image()
                 creative.crossOrigin = 'anonymous'
                 creative.onload = () => {
@@ -108,7 +129,7 @@ export default function PrintAssembler() {
                     ctx.strokeRect(p.x, p.y, p.width, p.height)
                     ctx.setLineDash([])
                 }
-                creative.src = creativePreview
+                creative.src = firstCreativePreview
             } else if (current.position) {
                 const p = current.position
                 ctx.fillStyle = 'rgba(0, 255, 136, 0.15)'
@@ -122,13 +143,12 @@ export default function PrintAssembler() {
             }
         }
         img.src = current.template.latestScreenshot
-    }, [selectedTemplates, currentTemplateIdx, creativePreview])
+    }, [selectedTemplates, currentTemplateIdx, firstCreativePreview])
 
     useEffect(() => {
         if (step === 4) drawCanvas()
     }, [step, currentTemplateIdx, selectedTemplates, drawCanvas])
 
-    // Mouse handlers para posicionamento
     const getCanvasCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
         const canvas = canvasRef.current
         if (!canvas) return { x: 0, y: 0 }
@@ -180,20 +200,63 @@ export default function PrintAssembler() {
 
     const isSelected = (t: TemplateInfo) => selectedTemplates.some(s => s.template.campaignId === t.campaignId)
 
-    const handleCreativeUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // ============================================================
+    //  CRIATIVOS — Múltiplos com sub-períodos
+    // ============================================================
+    const addCreativeSlot = () => {
+        setCreatives(prev => [...prev, {
+            id: crypto.randomUUID(),
+            file: null as any,
+            preview: '',
+            dateStart: dateStart,
+            dateEnd: dateEnd,
+        }])
+    }
+
+    const removeCreative = (id: string) => {
+        setCreatives(prev => prev.filter(c => c.id !== id))
+    }
+
+    const updateCreativeDates = (id: string, field: 'dateStart' | 'dateEnd', value: string) => {
+        setCreatives(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c))
+    }
+
+    const handleCreativeFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
-        if (!file) return
-        setCreativeFile(file)
+        if (!file || pendingCreativeIdx === null) return
+
         const reader = new FileReader()
-        reader.onload = (ev) => setCreativePreview(ev.target?.result as string)
+        reader.onload = (ev) => {
+            const preview = ev.target?.result as string
+            setCreatives(prev => {
+                const next = [...prev]
+                next[pendingCreativeIdx] = { ...next[pendingCreativeIdx], file, preview }
+                return next
+            })
+        }
         reader.readAsDataURL(file)
+        setPendingCreativeIdx(null)
+        // Reset input
+        if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+
+    const triggerFileUpload = (idx: number) => {
+        setPendingCreativeIdx(idx)
+        fileInputRef.current?.click()
+    }
+
+    // Cobertura dos dias
+    const getCoverage = () => {
+        const days = getDaysInRange()
+        const covered = days.filter(d => getCreativeForDay(d) !== null)
+        return { total: days.length, covered: covered.length, uncovered: days.length - covered.length }
     }
 
     // ============================================================
-    //  GERAR ZIP — Usa o print ESPECÍFICO de cada dia
+    //  GERAR ZIP — Usa print do dia + criativo do dia
     // ============================================================
     const generateZip = async () => {
-        if (!creativePreview || selectedTemplates.length === 0) return
+        if (creatives.length === 0 || selectedTemplates.length === 0) return
         setIsProcessing(true)
         setProgress(0)
 
@@ -204,11 +267,10 @@ export default function PrintAssembler() {
         let processed = 0
         let skipped = 0
 
-        // Contar total de imagens possíveis
         for (const tmplWithPos of selectedTemplates) {
             if (!tmplWithPos.position) continue
             for (const day of days) {
-                if (tmplWithPos.template.capturesByDate[day]) totalImages++
+                if (tmplWithPos.template.capturesByDate[day] && getCreativeForDay(day)) totalImages++
             }
         }
 
@@ -219,20 +281,24 @@ export default function PrintAssembler() {
             const folder = zip.folder(folderName)!
 
             for (const day of days) {
-                // USAR O PRINT DO DIA ESPECÍFICO
                 const screenshotUrl = tmplWithPos.template.capturesByDate[day]
+                const creative = getCreativeForDay(day)
 
                 if (!screenshotUrl) {
                     skipped++
-                    setProgressText(`⚠️ Dia ${day}: sem print disponível para este template`)
+                    continue
+                }
+                if (!creative) {
+                    skipped++
+                    setProgressText(`⚠️ Dia ${day}: sem criativo atribuído`)
                     continue
                 }
 
                 try {
                     setProgressText(`Processando ${day} (${tmplWithPos.template.device})...`)
                     const blob = await renderOverlay(
-                        screenshotUrl,  // Print do dia correto!
-                        creativePreview,
+                        screenshotUrl,
+                        creative.preview,
                         tmplWithPos.position
                     )
                     folder.file(`montagem_${day}.png`, blob)
@@ -245,11 +311,11 @@ export default function PrintAssembler() {
             }
         }
 
-        setProgressText(`Gerando ZIP... (${processed} montagens, ${skipped} dias sem print)`)
+        setProgressText(`Gerando ZIP...`)
         const content = await zip.generateAsync({ type: 'blob' })
         saveAs(content, `montagem_${dateStart}_a_${dateEnd}.zip`)
         setIsProcessing(false)
-        setProgressText(`✅ Concluído! ${processed} montagens geradas.${skipped > 0 ? ` ${skipped} dias sem print disponível.` : ''}`)
+        setProgressText(`✅ ${processed} montagens geradas.${skipped > 0 ? ` ${skipped} pulados.` : ''}`)
     }
 
     const renderOverlay = (templateUrl: string, creativeDataUrl: string, pos: Position): Promise<Blob> => {
@@ -282,15 +348,14 @@ export default function PrintAssembler() {
         switch (step) {
             case 1: return selectedTemplates.length > 0
             case 2: return dateStart && dateEnd && dateStart <= dateEnd
-            case 3: return !!creativeFile
+            case 3: return creatives.length > 0 && creatives.every(c => c.preview && c.dateStart && c.dateEnd)
             case 4: return selectedTemplates.every(t => t.position !== null)
             default: return false
         }
     }
 
-    const stepTitles = ['Templates', 'Período', 'Criativo', 'Posicionar & Gerar']
+    const stepTitles = ['Templates', 'Período', 'Criativos', 'Posicionar & Gerar']
 
-    // Contagem de dias disponíveis
     const availableDaysCount = () => {
         const days = getDaysInRange()
         if (days.length === 0 || selectedTemplates.length === 0) return { total: 0, available: 0 }
@@ -303,13 +368,16 @@ export default function PrintAssembler() {
         return { total: days.length * selectedTemplates.length, available }
     }
 
+    // Cores por criativo (para timeline visual)
+    const creativeColors = ['#00ff88', '#00aaff', '#ff6b6b', '#ffd93d', '#c084fc', '#f97316']
+
     return (
         <div className="min-h-screen bg-[#0a0a0f] text-white p-6">
             <div className="max-w-6xl mx-auto">
                 <h1 className="text-2xl font-bold mb-1 bg-gradient-to-r from-[#00ff88] to-[#00cc6a] bg-clip-text text-transparent">
                     Montagem Automática
                 </h1>
-                <p className="text-white/40 text-sm mb-6">Sobreponha criativos nos templates PI 000 — cada dia usa seu próprio print</p>
+                <p className="text-white/40 text-sm mb-6">Múltiplos criativos com sub-períodos — cada dia usa seu print + criativo correto</p>
 
                 {/* STEPPER */}
                 <div className="flex items-center gap-2 mb-8">
@@ -341,28 +409,19 @@ export default function PrintAssembler() {
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                 {templates.map(t => (
-                                    <div
-                                        key={t.campaignId}
-                                        onClick={() => toggleTemplate(t)}
+                                    <div key={t.campaignId} onClick={() => toggleTemplate(t)}
                                         className={`relative cursor-pointer rounded-xl overflow-hidden border-2 transition-all ${
-                                            isSelected(t)
-                                                ? 'border-[#00ff88] ring-2 ring-[#00ff88]/20'
-                                                : 'border-white/10 hover:border-white/20'
-                                        }`}
-                                    >
-                                        <img
-                                            src={t.latestScreenshot}
-                                            alt={`Template ${t.format.substring(0, 8)}`}
-                                            className="w-full h-48 object-cover object-top"
-                                            crossOrigin="anonymous"
-                                        />
+                                            isSelected(t) ? 'border-[#00ff88] ring-2 ring-[#00ff88]/20' : 'border-white/10 hover:border-white/20'
+                                        }`}>
+                                        <img src={t.latestScreenshot} alt={`Template ${t.format.substring(0, 8)}`}
+                                            className="w-full h-48 object-cover object-top" crossOrigin="anonymous" />
                                         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-3">
                                             <div className="flex items-center justify-between">
                                                 <span className="text-xs font-medium px-2 py-0.5 rounded bg-white/10">
                                                     {t.device === 'mobile' ? '📱 Mobile' : '🖥️ Desktop'}
                                                 </span>
                                                 <span className="text-[10px] text-white/40">
-                                                    {Object.keys(t.capturesByDate).length} dia(s) disponível(is)
+                                                    {Object.keys(t.capturesByDate).length} dia(s)
                                                 </span>
                                             </div>
                                         </div>
@@ -376,7 +435,7 @@ export default function PrintAssembler() {
                             </div>
                         )}
                         {selectedTemplates.length > 0 && (
-                            <p className="text-sm text-[#00ff88]/60 mt-3">{selectedTemplates.length} template(s) selecionado(s)</p>
+                            <p className="text-sm text-[#00ff88]/60 mt-3">{selectedTemplates.length} template(s)</p>
                         )}
                     </div>
                 )}
@@ -384,7 +443,7 @@ export default function PrintAssembler() {
                 {/* STEP 2: Período */}
                 {step === 2 && (
                     <div>
-                        <h2 className="text-lg font-semibold mb-4">Defina o período da montagem</h2>
+                        <h2 className="text-lg font-semibold mb-4">Defina o período geral</h2>
                         <div className="flex flex-col sm:flex-row gap-4 max-w-md">
                             <div className="flex-1">
                                 <label className="text-xs text-white/40 mb-1 block">Data Início</label>
@@ -403,12 +462,12 @@ export default function PrintAssembler() {
                             return (
                                 <div className="mt-4 space-y-2">
                                     <p className="text-sm text-white/40">
-                                        📅 {days.length} dia(s) × {selectedTemplates.length} template(s) = <span className="text-[#00ff88]">{available} montagem(s) disponíveis</span>
-                                        {total !== available && <span className="text-yellow-400/80"> ({total - available} dias sem print)</span>}
+                                        📅 {days.length} dia(s) × {selectedTemplates.length} template(s) = <span className="text-[#00ff88]">{available} montagem(s)</span>
+                                        {total !== available && <span className="text-yellow-400/80"> ({total - available} sem print)</span>}
                                     </p>
                                     {Object.keys(missingDays).length > 0 && (
                                         <div className="bg-yellow-400/5 border border-yellow-400/20 rounded-lg p-3 text-xs">
-                                            <p className="text-yellow-400 font-medium mb-1">⚠️ Dias sem print disponível (serão pulados):</p>
+                                            <p className="text-yellow-400 font-medium mb-1">⚠️ Dias sem print (serão pulados):</p>
                                             {Object.entries(missingDays).map(([campId, days]) => (
                                                 <p key={campId} className="text-yellow-400/60">
                                                     Template {campId.substring(0, 8)}: {days.join(', ')}
@@ -422,27 +481,122 @@ export default function PrintAssembler() {
                     </div>
                 )}
 
-                {/* STEP 3: Criativo */}
+                {/* STEP 3: MÚLTIPLOS CRIATIVOS */}
                 {step === 3 && (
                     <div>
-                        <h2 className="text-lg font-semibold mb-4">Upload do Criativo</h2>
-                        <div onClick={() => creativeInputRef.current?.click()}
-                            className="border-2 border-dashed border-white/10 hover:border-[#00ff88]/30 rounded-xl p-8 text-center cursor-pointer transition-all">
-                            {creativePreview ? (
-                                <div className="flex flex-col items-center gap-4">
-                                    <img src={creativePreview} alt="Criativo" className="max-h-48 rounded-lg" />
-                                    <p className="text-sm text-[#00ff88]">{creativeFile?.name}</p>
-                                    <p className="text-xs text-white/30">Clique para trocar</p>
+                        <h2 className="text-lg font-semibold mb-2">Criativos por período</h2>
+                        <p className="text-sm text-white/40 mb-4">
+                            Adicione um ou mais criativos. Cada um será usado nos dias do seu sub-período.
+                        </p>
+
+                        <input ref={fileInputRef} type="file" accept="image/*" onChange={handleCreativeFileChange} className="hidden" />
+
+                        {/* Lista de criativos */}
+                        <div className="space-y-4 mb-4">
+                            {creatives.map((c, idx) => (
+                                <div key={c.id}
+                                    className="bg-white/[0.03] border border-white/10 rounded-xl p-4 relative"
+                                    style={{ borderLeftColor: creativeColors[idx % creativeColors.length], borderLeftWidth: 3 }}>
+
+                                    {/* Remove */}
+                                    <button onClick={() => removeCreative(c.id)}
+                                        className="absolute top-3 right-3 text-white/20 hover:text-red-400 transition-colors">
+                                        <Trash2 size={14} />
+                                    </button>
+
+                                    <div className="flex items-start gap-4">
+                                        {/* Thumbnail + upload */}
+                                        <div
+                                            onClick={() => triggerFileUpload(idx)}
+                                            className="w-24 h-24 rounded-lg border border-dashed border-white/10 hover:border-[#00ff88]/30 flex items-center justify-center cursor-pointer flex-shrink-0 overflow-hidden transition-all"
+                                        >
+                                            {c.preview ? (
+                                                <img src={c.preview} alt="Criativo" className="w-full h-full object-contain" />
+                                            ) : (
+                                                <div className="text-center text-white/20">
+                                                    <Upload size={16} className="mx-auto mb-1" />
+                                                    <span className="text-[10px]">Upload</span>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Datas */}
+                                        <div className="flex-1 space-y-2">
+                                            <p className="text-xs font-medium" style={{ color: creativeColors[idx % creativeColors.length] }}>
+                                                Criativo {idx + 1} {c.file?.name ? `— ${c.file.name}` : ''}
+                                            </p>
+                                            <div className="flex gap-3">
+                                                <div className="flex-1">
+                                                    <label className="text-[10px] text-white/30 block">De</label>
+                                                    <input type="date" value={c.dateStart}
+                                                        min={dateStart} max={dateEnd}
+                                                        onChange={e => updateCreativeDates(c.id, 'dateStart', e.target.value)}
+                                                        className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-xs focus:outline-none focus:border-[#00ff88]/50" />
+                                                </div>
+                                                <div className="flex-1">
+                                                    <label className="text-[10px] text-white/30 block">Até</label>
+                                                    <input type="date" value={c.dateEnd}
+                                                        min={dateStart} max={dateEnd}
+                                                        onChange={e => updateCreativeDates(c.id, 'dateEnd', e.target.value)}
+                                                        className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-xs focus:outline-none focus:border-[#00ff88]/50" />
+                                                </div>
+                                            </div>
+                                            <p className="text-[10px] text-white/20">
+                                                {c.dateStart && c.dateEnd ? `${getDaysInRange(c.dateStart, c.dateEnd).length} dia(s)` : 'Selecione as datas'}
+                                            </p>
+                                        </div>
+                                    </div>
                                 </div>
-                            ) : (
-                                <div className="flex flex-col items-center gap-2 text-white/30">
-                                    <Upload size={32} />
-                                    <p className="text-sm">Clique para selecionar o criativo</p>
-                                    <p className="text-xs">PNG, JPG, WebP</p>
-                                </div>
-                            )}
+                            ))}
                         </div>
-                        <input ref={creativeInputRef} type="file" accept="image/*" onChange={handleCreativeUpload} className="hidden" />
+
+                        {/* Add button */}
+                        <button onClick={addCreativeSlot}
+                            className="flex items-center gap-2 px-4 py-2.5 border border-dashed border-white/10 hover:border-[#00ff88]/30 rounded-xl text-sm text-white/40 hover:text-[#00ff88] transition-all w-full justify-center">
+                            <Plus size={16} />
+                            Adicionar Criativo
+                        </button>
+
+                        {/* Cobertura visual */}
+                        {creatives.length > 0 && dateStart && dateEnd && (() => {
+                            const { total, covered, uncovered } = getCoverage()
+                            const days = getDaysInRange()
+                            return (
+                                <div className="mt-6 space-y-3">
+                                    <p className="text-xs text-white/40">
+                                        Cobertura: <span className="text-[#00ff88]">{covered}/{total} dias</span>
+                                        {uncovered > 0 && <span className="text-yellow-400"> ({uncovered} sem criativo)</span>}
+                                    </p>
+                                    {/* Timeline visual */}
+                                    <div className="flex gap-0.5 flex-wrap">
+                                        {days.map(d => {
+                                            const creative = getCreativeForDay(d)
+                                            const creativeIdx = creative ? creatives.findIndex(c => c.id === creative.id) : -1
+                                            const color = creativeIdx >= 0 ? creativeColors[creativeIdx % creativeColors.length] : undefined
+                                            return (
+                                                <div key={d} title={`${d}${creative ? ` — Criativo ${creativeIdx + 1}` : ' — Sem criativo'}`}
+                                                    className="w-4 h-4 rounded-sm text-[6px] flex items-center justify-center cursor-default"
+                                                    style={{
+                                                        backgroundColor: color ? `${color}33` : 'rgba(255,255,255,0.05)',
+                                                        border: `1px solid ${color || 'rgba(255,255,255,0.1)'}`,
+                                                        color: color || 'rgba(255,255,255,0.2)',
+                                                    }}>
+                                                    {d.split('-')[2]}
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                    <div className="flex gap-3 flex-wrap">
+                                        {creatives.map((c, i) => (
+                                            <div key={c.id} className="flex items-center gap-1 text-[10px]">
+                                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: creativeColors[i % creativeColors.length] }} />
+                                                <span style={{ color: creativeColors[i % creativeColors.length] }}>Criativo {i + 1}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )
+                        })()}
                     </div>
                 )}
 
@@ -451,7 +605,7 @@ export default function PrintAssembler() {
                     <div>
                         <h2 className="text-lg font-semibold mb-2">Posicione o criativo em cada template</h2>
                         <p className="text-sm text-white/40 mb-4">
-                            Clique e arraste sobre a área marcada. Cada dia usará o print <strong>daquele dia específico</strong> do PI 000.
+                            Clique e arraste sobre a área marcada. A posição é a mesma para todos os criativos neste template.
                         </p>
 
                         <div className="flex items-center gap-3 mb-4">
@@ -479,7 +633,7 @@ export default function PrintAssembler() {
                             </button>
                             <span className="text-xs text-white/30 ml-2">
                                 {selectedTemplates[currentTemplateIdx]?.template.device === 'mobile' ? '📱' : '🖥️'}
-                                {' '}{selectedTemplates[currentTemplateIdx]?.position ? '✅ Posicionado' : '⚠️ Arraste para posicionar'}
+                                {' '}{selectedTemplates[currentTemplateIdx]?.position ? '✅ Posicionado' : '⚠️ Arraste'}
                             </span>
                         </div>
 
