@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { Send, Zap, X, Mail, Trash2, Camera, Download, Search } from 'lucide-react'
+import { Send, Zap, X, Mail, Trash2, Camera, Download, Search, Eye } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -361,6 +361,31 @@ export function NexusChat() {
                         }
                     }
 
+                    if (aiCommand && aiCommand.type === 'audit') {
+                        const { campaignId } = aiCommand.data
+                        if (campaignId) {
+                            console.log('[Nexus UI] Executing AI Command: audit', campaignId)
+                            const { getLatestCaptureId, runVisionAudit } = await import('@/app/actions')
+                            const captureId = await getLatestCaptureId(campaignId)
+                            if (captureId) {
+                                const result = await runVisionAudit(captureId)
+                                if (result.score) {
+                                    setMessages(prev => [...prev, {
+                                        role: 'assistant',
+                                        content: `🔍 **Resultado da Auditoria Visual:**\nNota: **${result.score}/100**\nDiagnóstico: *${result.diagnostic}*`,
+                                        type: 'status'
+                                    }])
+                                }
+                            } else {
+                                setMessages(prev => [...prev, {
+                                    role: 'assistant',
+                                    content: '⚠️ Não encontrei nenhum print recente para auditar nesta campanha.',
+                                    type: 'status'
+                                }])
+                            }
+                        }
+                    }
+
                     // Add the response
                     setMessages(prev => {
                         if (prev.some(m => m.content === aiMsg && m.role === 'assistant')) return prev
@@ -426,6 +451,7 @@ export function NexusChat() {
 
     const quickActions = [
         { icon: Camera, label: "Tirar Print Geral", cmd: "Capturar tudo" },
+        { icon: Eye, label: "Auditoria Visual (Vision)", cmd: "Nexus, audite o último print da campanha mais ativa" },
         { icon: Download, label: "Baixar Prints de Hoje", cmd: "Baixar todos os prints de hoje" },
         { icon: Search, label: "Status do Sistema", cmd: "Como estão as campanhas?" }
     ]

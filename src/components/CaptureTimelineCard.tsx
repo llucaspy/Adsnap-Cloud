@@ -1,10 +1,10 @@
 'use client'
 
 import React, { useTransition, useState } from 'react'
-import { Clock, Trash2, Link as LinkIcon, ExternalLink, Loader2 } from 'lucide-react'
+import { Clock, Trash2, Link as LinkIcon, ExternalLink, Loader2, Eye, Gauge, ShieldCheck, AlertCircle } from 'lucide-react'
 import { format } from 'date-fns'
 import Link from 'next/link'
-import { deleteCapture } from '@/app/actions'
+import { deleteCapture, runVisionAudit } from '@/app/actions'
 
 interface CaptureTimelineCardProps {
     capture: any
@@ -12,7 +12,9 @@ interface CaptureTimelineCardProps {
 
 export function CaptureTimelineCard({ capture }: CaptureTimelineCardProps) {
     const [isPending, startTransition] = useTransition()
+    const [isAuditing, setIsAuditing] = useState(false)
     const [showConfirm, setShowConfirm] = useState(false)
+    const [auditResult, setAuditResult] = useState<any>(null)
 
     const handleDelete = () => {
         startTransition(async () => {
@@ -23,6 +25,24 @@ export function CaptureTimelineCard({ capture }: CaptureTimelineCardProps) {
         })
     }
 
+    const handleAudit = async () => {
+        setIsAuditing(true)
+        try {
+            const result = await runVisionAudit(capture.id)
+            if (result.success) {
+                setAuditResult(result)
+            } else {
+                alert(`Erro na auditoria: ${result.error}`)
+            }
+        } finally {
+            setIsAuditing(false)
+        }
+    }
+
+    const score = auditResult?.score ?? capture.aiScore
+    const diagnostic = auditResult?.diagnostic ?? capture.aiDiagnostic
+    const status = auditResult?.status ?? capture.aiAuditStatus
+
     return (
         <div className="group relative bg-white/[0.03] border border-white/8 rounded-[2rem] overflow-hidden transition-all duration-500 hover:border-white/25 hover:shadow-[0_20px_50px_rgba(0,0,0,0.7)] hover:translate-y-[-4px]">
             {/* Hover Glow Effect */}
@@ -30,6 +50,20 @@ export function CaptureTimelineCard({ capture }: CaptureTimelineCardProps) {
 
             {/* Top Toolbar (Overlay) */}
             <div className="absolute top-4 right-4 z-20 flex gap-2 opacity-0 group-hover:opacity-100 transition-all translate-y-[-10px] group-hover:translate-y-0">
+                {/* Vision Audit Button */}
+                <button
+                    onClick={handleAudit}
+                    disabled={isAuditing}
+                    className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shadow-xl backdrop-blur-md border ${
+                        status === 'SUCCESS' 
+                        ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
+                        : 'bg-white/10 border-white/10 text-white hover:bg-accent hover:text-white'
+                    }`}
+                    title="Auditar com Nexus Vision"
+                >
+                    {isAuditing ? <Loader2 size={18} className="animate-spin" /> : <Eye size={18} />}
+                </button>
+
                 {!showConfirm ? (
                     <button
                         onClick={() => setShowConfirm(true)}
@@ -66,11 +100,23 @@ export function CaptureTimelineCard({ capture }: CaptureTimelineCardProps) {
                 />
 
                 {/* Status Indicator Chip */}
-                <div className="absolute top-4 left-4 z-10">
-                    <div className="px-3 py-1 rounded-lg bg-black/40 backdrop-blur-md border border-white/10 flex items-center gap-2">
+                <div className="absolute top-4 left-4 z-10 flex flex-col gap-2">
+                    <div className="px-3 py-1 rounded-lg bg-black/40 backdrop-blur-md border border-white/10 flex items-center gap-2 w-fit">
                         <div className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
-                        <span className="text-[8px] font-black text-white/80 uppercase tracking-widest">Verificado</span>
+                        <span className="text-[8px] font-black text-white/80 uppercase tracking-widest">Capturado</span>
                     </div>
+
+                    {/* AI Score Badge */}
+                    {score !== null && score !== undefined && (
+                        <div className={`px-3 py-1 rounded-lg backdrop-blur-md border flex items-center gap-2 w-fit animate-in fade-in slide-in-from-left-4 ${
+                            score >= 80 ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400' : 
+                            score >= 50 ? 'bg-amber-500/20 border-amber-500/30 text-amber-400' : 
+                            'bg-red-500/20 border-red-500/30 text-red-400'
+                        }`}>
+                            <Gauge size={10} />
+                            <span className="text-[8px] font-black uppercase tracking-widest">Nexus Audit: {score}%</span>
+                        </div>
+                    )}
                 </div>
 
                 {/* Deleting Overlay */}
@@ -116,16 +162,23 @@ export function CaptureTimelineCard({ capture }: CaptureTimelineCardProps) {
                     <h3 className="font-black text-white/90 text-sm tracking-tight line-clamp-1 group-hover:text-accent transition-colors">
                         {capture.campaign.client}
                     </h3>
-                    <p className="text-[10px] text-white/20 font-black uppercase tracking-widest truncate">
-                        {capture.campaign.campaignName}
-                    </p>
+                    {diagnostic ? (
+                        <p className="text-[10px] text-emerald-400/80 font-medium leading-relaxed italic">
+                            &quot; {diagnostic} &quot;
+                        </p>
+                    ) : (
+                        <p className="text-[10px] text-white/20 font-black uppercase tracking-widest truncate">
+                            {capture.campaign.campaignName}
+                        </p>
+                    )}
                 </div>
 
                 {/* Decorative bits */}
                 <div className="pt-2 flex items-center gap-2">
                     <div className="h-px flex-1 bg-gradient-to-r from-white/10 to-transparent" />
-                    <div className="w-1 h-1 rounded-full bg-white/10" />
-                    <div className="w-1 h-1 rounded-full bg-white/5" />
+                    <div className="w-1.5 h-1.5 rounded-full border border-white/10 flex items-center justify-center">
+                         <div className={`w-0.5 h-0.5 rounded-full ${status === 'SUCCESS' ? 'bg-emerald-500' : 'bg-white/20'}`} />
+                    </div>
                 </div>
             </div>
         </div>

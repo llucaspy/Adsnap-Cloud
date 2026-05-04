@@ -917,6 +917,43 @@ export async function getAdminMetrics() {
     }
 }
 
+export async function runVisionAudit(captureId: string) {
+    console.log(`[Nexus Vision] Iniciando auditoria para: ${captureId}`);
+    try {
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+        const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+        const response = await fetch(`${supabaseUrl}/functions/v1/nexus-vision`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${anonKey}`
+            },
+            body: JSON.stringify({ captureId })
+        });
+
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error('[Nexus Vision Action Error]', error);
+        return { success: false, error: String(error) };
+    }
+}
+
+export async function getLatestCaptureId(campaignId: string) {
+    try {
+        const capture = await prisma.capture.findFirst({
+            where: { campaignId, status: 'SUCCESS' },
+            orderBy: { createdAt: 'desc' },
+            select: { id: true }
+        });
+        return capture?.id || null;
+    } catch (error) {
+        console.error('[Actions] Failed to get latest capture:', error);
+        return null;
+    }
+}
+
 export async function testNexusConnection() {
     try {
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
