@@ -460,7 +460,7 @@ export function NexusChat() {
         <>
             {/* Email Toast Notification */}
             {emailToast && (
-                <div className="fixed top-6 right-6 z-[10000] animate-in slide-in-from-top-4 fade-in duration-500 max-w-sm">
+                <div className="fixed top-6 right-6 z-10000 animate-in slide-in-from-top-4 fade-in duration-500 max-w-sm">
                     <div className="bg-black/95 border border-white/20 rounded-2xl p-4 shadow-[0_20px_60px_rgba(0,0,0,0.8)] backdrop-blur-xl">
                         <div className="flex items-start gap-3">
                             <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center shrink-0">

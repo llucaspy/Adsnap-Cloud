@@ -12,6 +12,12 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'message and sessionId are required' }, { status: 400 })
         }
 
+        // Get authenticated user info
+        const { getSession } = await import('@/lib/auth')
+        const session = await getSession()
+        const callerRole = session?.role || 'guest'
+        const callerEmail = session?.email || 'anonymous'
+
         // Invoke the Edge Function
         const edgeFnUrl = `${SUPABASE_URL}/functions/v1/nexus-chat`
         
@@ -21,7 +27,12 @@ export async function POST(req: Request) {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
             },
-            body: JSON.stringify({ message, sessionId }),
+            body: JSON.stringify({ 
+                message, 
+                sessionId, 
+                callerRole, 
+                callerEmail 
+            }),
         })
 
         const data = await response.json()
