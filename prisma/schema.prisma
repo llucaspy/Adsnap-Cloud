@@ -116,6 +116,16 @@ model EmailDispatch {
   campaign     Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 }
 
+model NexusMessage {
+  id          String   @id @default(cuid())
+  role        String
+  content     String
+  metadata    Json?    @default("{}")
+  sessionId   String   @default("default")
+  isProcessed Boolean? @default(false)
+  createdAt   DateTime @default(now())
+}
+
 model DailyMetric {
   id          String   @id @default(cuid())
   campaignId  String
