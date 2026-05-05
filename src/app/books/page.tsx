@@ -1,10 +1,11 @@
 import prisma from '@/lib/prisma'
-import { Library, Download, Clock, Calendar, FolderOpen } from 'lucide-react'
+import { Library, Download, Calendar, FolderOpen } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import Link from 'next/link'
 import { BackToTopButton } from '@/components/BackToTopButton'
 import { PIFolderCard } from '@/components/PIFolderCard'
+import { ActiveCampaigns } from '@/components/ActiveCampaigns'
 
 export const revalidate = 30
 
@@ -95,6 +96,9 @@ export default async function BooksPage() {
 
             {/* Divider */}
             <div className="h-px bg-gradient-to-r from-white/10 via-white/5 to-transparent mb-10" />
+
+            {/* ── ACTIVE CAMPAIGNS (QUICK ACCESS) ──────────────── */}
+            <ActiveCampaigns />
 
             {/* ── STICKY DATE NAV ───────────────────────────────── */}
             {timeline.length > 1 && (

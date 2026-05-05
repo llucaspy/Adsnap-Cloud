@@ -6,12 +6,7 @@ import JSZip from 'jszip'
 import { saveAs } from 'file-saver'
 import { getMontagemTemplates, type TemplateInfo } from '@/app/montagem/actions'
 
-interface Position {
-    x: number
-    y: number
-    width: number
-    height: number
-}
+interface Position { x: number; y: number; width: number; height: number }
 
 interface TemplateWithPosition {
     template: TemplateInfo
@@ -20,10 +15,16 @@ interface TemplateWithPosition {
 
 interface CreativeEntry {
     id: string
-    file: File
+    file: File | null
     preview: string
     dateStart: string
     dateEnd: string
+}
+
+// Criativos organizados por template (campaignId)
+interface TemplateCreatives {
+    campaignId: string
+    creatives: CreativeEntry[]
 }
 
 export default function PrintAssembler() {
@@ -34,8 +35,9 @@ export default function PrintAssembler() {
     const [dateStart, setDateStart] = useState('')
     const [dateEnd, setDateEnd] = useState('')
 
-    // Múltiplos criativos com sub-períodos
-    const [creatives, setCreatives] = useState<CreativeEntry[]>([])
+    // Criativos por template
+    const [templateCreatives, setTemplateCreatives] = useState<TemplateCreatives[]>([])
+    const [expandedTemplate, setExpandedTemplate] = useState<string | null>(null)
 
     const [currentTemplateIdx, setCurrentTemplateIdx] = useState(0)
     const [isProcessing, setIsProcessing] = useState(false)
@@ -47,7 +49,7 @@ export default function PrintAssembler() {
 
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const fileInputRef = useRef<HTMLInputElement>(null)
-    const [pendingCreativeIdx, setPendingCreativeIdx] = useState<number | null>(null)
+    const [pendingUpload, setPendingUpload] = useState<{ campaignId: string; creativeIdx: number } | null>(null)
 
     useEffect(() => {
         async function load() {
@@ -62,6 +64,18 @@ export default function PrintAssembler() {
         }
         load()
     }, [])
+
+    // Sincronizar templateCreatives quando selectedTemplates mudam
+    useEffect(() => {
+        setTemplateCreatives(prev => {
+            const next: TemplateCreatives[] = []
+            for (const st of selectedTemplates) {
+                const existing = prev.find(tc => tc.campaignId === st.template.campaignId)
+                next.push(existing || { campaignId: st.template.campaignId, creatives: [] })
+            }
+            return next
+        })
+    }, [selectedTemplates])
 
     const getDaysInRange = (start?: string, end?: string): string[] => {
         const s = start || dateStart
@@ -91,17 +105,17 @@ export default function PrintAssembler() {
         }
     }, [step, dateStart, dateEnd, selectedTemplates])
 
-    // Buscar o criativo correto para um dia específico
-    const getCreativeForDay = (day: string): CreativeEntry | null => {
-        for (const c of creatives) {
-            if (c.dateStart <= day && day <= c.dateEnd) return c
+    // Buscar criativo para um dia de um template específico
+    const getCreativeForDay = (campaignId: string, day: string): CreativeEntry | null => {
+        const tc = templateCreatives.find(t => t.campaignId === campaignId)
+        if (!tc) return null
+        for (const c of tc.creatives) {
+            if (c.preview && c.dateStart <= day && day <= c.dateEnd) return c
         }
         return null
     }
 
-    // Canvas: preview do primeiro criativo disponível
-    const firstCreativePreview = creatives.length > 0 ? creatives[0].preview : null
-
+    // Canvas preview
     const drawCanvas = useCallback(async () => {
         const canvas = canvasRef.current
         if (!canvas || selectedTemplates.length === 0) return
@@ -110,6 +124,9 @@ export default function PrintAssembler() {
         const ctx = canvas.getContext('2d')
         if (!ctx) return
 
+        const tc = templateCreatives.find(t => t.campaignId === current.template.campaignId)
+        const firstPreview = tc?.creatives.find(c => c.preview)?.preview || null
+
         const img = new window.Image()
         img.crossOrigin = 'anonymous'
         img.onload = () => {
@@ -117,7 +134,7 @@ export default function PrintAssembler() {
             canvas.height = img.height
             ctx.drawImage(img, 0, 0)
 
-            if (current.position && firstCreativePreview) {
+            if (current.position && firstPreview) {
                 const creative = new window.Image()
                 creative.crossOrigin = 'anonymous'
                 creative.onload = () => {
@@ -129,7 +146,7 @@ export default function PrintAssembler() {
                     ctx.strokeRect(p.x, p.y, p.width, p.height)
                     ctx.setLineDash([])
                 }
-                creative.src = firstCreativePreview
+                creative.src = firstPreview
             } else if (current.position) {
                 const p = current.position
                 ctx.fillStyle = 'rgba(0, 255, 136, 0.15)'
@@ -143,7 +160,7 @@ export default function PrintAssembler() {
             }
         }
         img.src = current.template.latestScreenshot
-    }, [selectedTemplates, currentTemplateIdx, firstCreativePreview])
+    }, [selectedTemplates, currentTemplateIdx, templateCreatives])
 
     useEffect(() => {
         if (step === 4) drawCanvas()
@@ -153,11 +170,9 @@ export default function PrintAssembler() {
         const canvas = canvasRef.current
         if (!canvas) return { x: 0, y: 0 }
         const rect = canvas.getBoundingClientRect()
-        const scaleX = canvas.width / rect.width
-        const scaleY = canvas.height / rect.height
         return {
-            x: Math.round((e.clientX - rect.left) * scaleX),
-            y: Math.round((e.clientY - rect.top) * scaleY),
+            x: Math.round((e.clientX - rect.left) * (canvas.width / rect.width)),
+            y: Math.round((e.clientY - rect.top) * (canvas.height / rect.height)),
         }
     }
 
@@ -170,17 +185,12 @@ export default function PrintAssembler() {
         if (!isDragging || !dragStart) return
         const coords = getCanvasCoords(e)
         updateCurrentPosition({
-            x: Math.min(dragStart.x, coords.x),
-            y: Math.min(dragStart.y, coords.y),
-            width: Math.abs(coords.x - dragStart.x),
-            height: Math.abs(coords.y - dragStart.y),
+            x: Math.min(dragStart.x, coords.x), y: Math.min(dragStart.y, coords.y),
+            width: Math.abs(coords.x - dragStart.x), height: Math.abs(coords.y - dragStart.y),
         })
     }
 
-    const handleMouseUp = () => {
-        setIsDragging(false)
-        setDragStart(null)
-    }
+    const handleMouseUp = () => { setIsDragging(false); setDragStart(null) }
 
     const updateCurrentPosition = (pos: Position) => {
         setSelectedTemplates(prev => {
@@ -200,63 +210,60 @@ export default function PrintAssembler() {
 
     const isSelected = (t: TemplateInfo) => selectedTemplates.some(s => s.template.campaignId === t.campaignId)
 
-    // ============================================================
-    //  CRIATIVOS — Múltiplos com sub-períodos
-    // ============================================================
-    const addCreativeSlot = () => {
-        setCreatives(prev => [...prev, {
-            id: crypto.randomUUID(),
-            file: null as any,
-            preview: '',
-            dateStart: dateStart,
-            dateEnd: dateEnd,
-        }])
+    // CRUD criativos por template
+    const addCreative = (campaignId: string) => {
+        setTemplateCreatives(prev => prev.map(tc =>
+            tc.campaignId === campaignId
+                ? { ...tc, creatives: [...tc.creatives, { id: crypto.randomUUID(), file: null, preview: '', dateStart, dateEnd }] }
+                : tc
+        ))
     }
 
-    const removeCreative = (id: string) => {
-        setCreatives(prev => prev.filter(c => c.id !== id))
+    const removeCreative = (campaignId: string, id: string) => {
+        setTemplateCreatives(prev => prev.map(tc =>
+            tc.campaignId === campaignId
+                ? { ...tc, creatives: tc.creatives.filter(c => c.id !== id) }
+                : tc
+        ))
     }
 
-    const updateCreativeDates = (id: string, field: 'dateStart' | 'dateEnd', value: string) => {
-        setCreatives(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c))
+    const updateCreativeDate = (campaignId: string, id: string, field: 'dateStart' | 'dateEnd', value: string) => {
+        setTemplateCreatives(prev => prev.map(tc =>
+            tc.campaignId === campaignId
+                ? { ...tc, creatives: tc.creatives.map(c => c.id === id ? { ...c, [field]: value } : c) }
+                : tc
+        ))
     }
 
     const handleCreativeFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
-        if (!file || pendingCreativeIdx === null) return
-
+        if (!file || !pendingUpload) return
         const reader = new FileReader()
         reader.onload = (ev) => {
             const preview = ev.target?.result as string
-            setCreatives(prev => {
-                const next = [...prev]
-                next[pendingCreativeIdx] = { ...next[pendingCreativeIdx], file, preview }
-                return next
-            })
+            setTemplateCreatives(prev => prev.map(tc =>
+                tc.campaignId === pendingUpload.campaignId
+                    ? {
+                        ...tc, creatives: tc.creatives.map((c, i) =>
+                            i === pendingUpload.creativeIdx ? { ...c, file, preview } : c
+                        )
+                    }
+                    : tc
+            ))
         }
         reader.readAsDataURL(file)
-        setPendingCreativeIdx(null)
-        // Reset input
+        setPendingUpload(null)
         if (fileInputRef.current) fileInputRef.current.value = ''
     }
 
-    const triggerFileUpload = (idx: number) => {
-        setPendingCreativeIdx(idx)
+    const triggerFileUpload = (campaignId: string, creativeIdx: number) => {
+        setPendingUpload({ campaignId, creativeIdx })
         fileInputRef.current?.click()
     }
 
-    // Cobertura dos dias
-    const getCoverage = () => {
-        const days = getDaysInRange()
-        const covered = days.filter(d => getCreativeForDay(d) !== null)
-        return { total: days.length, covered: covered.length, uncovered: days.length - covered.length }
-    }
-
-    // ============================================================
-    //  GERAR ZIP — Usa print do dia + criativo do dia
-    // ============================================================
+    // ZIP
     const generateZip = async () => {
-        if (creatives.length === 0 || selectedTemplates.length === 0) return
+        if (selectedTemplates.length === 0) return
         setIsProcessing(true)
         setProgress(0)
 
@@ -267,80 +274,57 @@ export default function PrintAssembler() {
         let processed = 0
         let skipped = 0
 
-        for (const tmplWithPos of selectedTemplates) {
-            if (!tmplWithPos.position) continue
+        for (const tmpl of selectedTemplates) {
+            if (!tmpl.position) continue
             for (const day of days) {
-                if (tmplWithPos.template.capturesByDate[day] && getCreativeForDay(day)) totalImages++
+                if (tmpl.template.capturesByDate[day] && getCreativeForDay(tmpl.template.campaignId, day)) totalImages++
             }
         }
+        if (totalImages === 0) { setIsProcessing(false); setProgressText('⚠️ Nenhuma montagem possível'); return }
 
-        for (const tmplWithPos of selectedTemplates) {
-            if (!tmplWithPos.position) continue
-
-            const folderName = `${tmplWithPos.template.device}_${tmplWithPos.template.format.substring(0, 8)}`
+        for (const tmpl of selectedTemplates) {
+            if (!tmpl.position) continue
+            const folderName = `${tmpl.template.device}_${tmpl.template.format.substring(0, 8)}`
             const folder = zip.folder(folderName)!
 
             for (const day of days) {
-                const screenshotUrl = tmplWithPos.template.capturesByDate[day]
-                const creative = getCreativeForDay(day)
-
-                if (!screenshotUrl) {
-                    skipped++
-                    continue
-                }
-                if (!creative) {
-                    skipped++
-                    setProgressText(`⚠️ Dia ${day}: sem criativo atribuído`)
-                    continue
-                }
+                const screenshotUrl = tmpl.template.capturesByDate[day]
+                const creative = getCreativeForDay(tmpl.template.campaignId, day)
+                if (!screenshotUrl || !creative) { skipped++; continue }
 
                 try {
-                    setProgressText(`Processando ${day} (${tmplWithPos.template.device})...`)
-                    const blob = await renderOverlay(
-                        screenshotUrl,
-                        creative.preview,
-                        tmplWithPos.position
-                    )
+                    setProgressText(`${day} — ${tmpl.template.device}`)
+                    const blob = await renderOverlay(screenshotUrl, creative.preview, tmpl.position)
                     folder.file(`montagem_${day}.png`, blob)
-                } catch (err) {
-                    console.error(`Erro ${day}:`, err)
-                    skipped++
-                }
+                } catch { skipped++ }
                 processed++
                 setProgress(Math.round((processed / totalImages) * 100))
             }
         }
 
-        setProgressText(`Gerando ZIP...`)
         const content = await zip.generateAsync({ type: 'blob' })
         saveAs(content, `montagem_${dateStart}_a_${dateEnd}.zip`)
         setIsProcessing(false)
-        setProgressText(`✅ ${processed} montagens geradas.${skipped > 0 ? ` ${skipped} pulados.` : ''}`)
+        setProgressText(`✅ ${processed} montagens. ${skipped > 0 ? `${skipped} pulados.` : ''}`)
     }
 
     const renderOverlay = (templateUrl: string, creativeDataUrl: string, pos: Position): Promise<Blob> => {
         return new Promise((resolve, reject) => {
-            const templateImg = new window.Image()
-            templateImg.crossOrigin = 'anonymous'
-            templateImg.onload = () => {
-                const creativeImg = new window.Image()
-                creativeImg.onload = () => {
-                    const offscreen = document.createElement('canvas')
-                    offscreen.width = templateImg.width
-                    offscreen.height = templateImg.height
-                    const ctx = offscreen.getContext('2d')!
-                    ctx.drawImage(templateImg, 0, 0)
-                    ctx.drawImage(creativeImg, pos.x, pos.y, pos.width, pos.height)
-                    offscreen.toBlob(blob => {
-                        if (blob) resolve(blob)
-                        else reject(new Error('Erro ao gerar blob'))
-                    }, 'image/png')
+            const tImg = new window.Image()
+            tImg.crossOrigin = 'anonymous'
+            tImg.onload = () => {
+                const cImg = new window.Image()
+                cImg.onload = () => {
+                    const c = document.createElement('canvas')
+                    c.width = tImg.width; c.height = tImg.height
+                    const ctx = c.getContext('2d')!
+                    ctx.drawImage(tImg, 0, 0)
+                    ctx.drawImage(cImg, pos.x, pos.y, pos.width, pos.height)
+                    c.toBlob(b => b ? resolve(b) : reject(new Error('blob')), 'image/png')
                 }
-                creativeImg.onerror = reject
-                creativeImg.src = creativeDataUrl
+                cImg.onerror = reject; cImg.src = creativeDataUrl
             }
-            templateImg.onerror = reject
-            templateImg.src = templateUrl
+            tImg.onerror = reject; tImg.src = templateUrl
         })
     }
 
@@ -348,27 +332,13 @@ export default function PrintAssembler() {
         switch (step) {
             case 1: return selectedTemplates.length > 0
             case 2: return dateStart && dateEnd && dateStart <= dateEnd
-            case 3: return creatives.length > 0 && creatives.every(c => c.preview && c.dateStart && c.dateEnd)
+            case 3: return templateCreatives.every(tc => tc.creatives.length > 0 && tc.creatives.every(c => c.preview && c.dateStart && c.dateEnd))
             case 4: return selectedTemplates.every(t => t.position !== null)
             default: return false
         }
     }
 
     const stepTitles = ['Templates', 'Período', 'Criativos', 'Posicionar & Gerar']
-
-    const availableDaysCount = () => {
-        const days = getDaysInRange()
-        if (days.length === 0 || selectedTemplates.length === 0) return { total: 0, available: 0 }
-        let available = 0
-        for (const t of selectedTemplates) {
-            for (const d of days) {
-                if (t.template.capturesByDate[d]) available++
-            }
-        }
-        return { total: days.length * selectedTemplates.length, available }
-    }
-
-    // Cores por criativo (para timeline visual)
     const creativeColors = ['#00ff88', '#00aaff', '#ff6b6b', '#ffd93d', '#c084fc', '#f97316']
 
     return (
@@ -377,18 +347,15 @@ export default function PrintAssembler() {
                 <h1 className="text-2xl font-bold mb-1 bg-gradient-to-r from-[#00ff88] to-[#00cc6a] bg-clip-text text-transparent">
                     Montagem Automática
                 </h1>
-                <p className="text-white/40 text-sm mb-6">Múltiplos criativos com sub-períodos — cada dia usa seu print + criativo correto</p>
+                <p className="text-white/40 text-sm mb-6">Vários formatos, vários criativos — cada formato recebe seu criativo</p>
 
                 {/* STEPPER */}
                 <div className="flex items-center gap-2 mb-8">
                     {stepTitles.map((title, i) => (
                         <div key={i} className="flex items-center gap-2">
                             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-                                step === i + 1
-                                    ? 'bg-[#00ff88]/20 text-[#00ff88] border border-[#00ff88]/30'
-                                    : step > i + 1
-                                        ? 'bg-[#00ff88]/10 text-[#00ff88]/60'
-                                        : 'bg-white/5 text-white/30'
+                                step === i + 1 ? 'bg-[#00ff88]/20 text-[#00ff88] border border-[#00ff88]/30'
+                                    : step > i + 1 ? 'bg-[#00ff88]/10 text-[#00ff88]/60' : 'bg-white/5 text-white/30'
                             }`}>
                                 {step > i + 1 ? <Check size={12} /> : <span>{i + 1}</span>}
                                 <span className="hidden sm:inline">{title}</span>
@@ -401,11 +368,10 @@ export default function PrintAssembler() {
                 {/* STEP 1: Templates */}
                 {step === 1 && (
                     <div>
-                        <h2 className="text-lg font-semibold mb-4">Selecione os templates de PI 000</h2>
+                        <h2 className="text-lg font-semibold mb-2">Selecione os formatos de PI 000</h2>
+                        <p className="text-sm text-white/40 mb-4">Selecione todos os formatos que deseja montar</p>
                         {loading ? (
-                            <div className="flex items-center gap-2 text-white/40">
-                                <Loader2 size={16} className="animate-spin" /> Carregando...
-                            </div>
+                            <div className="flex items-center gap-2 text-white/40"><Loader2 size={16} className="animate-spin" /> Carregando...</div>
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                 {templates.map(t => (
@@ -413,16 +379,14 @@ export default function PrintAssembler() {
                                         className={`relative cursor-pointer rounded-xl overflow-hidden border-2 transition-all ${
                                             isSelected(t) ? 'border-[#00ff88] ring-2 ring-[#00ff88]/20' : 'border-white/10 hover:border-white/20'
                                         }`}>
-                                        <img src={t.latestScreenshot} alt={`Template ${t.format.substring(0, 8)}`}
+                                        <img src={t.latestScreenshot} alt={`${t.format.substring(0, 8)}`}
                                             className="w-full h-48 object-cover object-top" crossOrigin="anonymous" />
                                         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-3">
                                             <div className="flex items-center justify-between">
                                                 <span className="text-xs font-medium px-2 py-0.5 rounded bg-white/10">
                                                     {t.device === 'mobile' ? '📱 Mobile' : '🖥️ Desktop'}
                                                 </span>
-                                                <span className="text-[10px] text-white/40">
-                                                    {Object.keys(t.capturesByDate).length} dia(s)
-                                                </span>
+                                                <span className="text-[10px] text-white/40">{Object.keys(t.capturesByDate).length} dia(s)</span>
                                             </div>
                                         </div>
                                         {isSelected(t) && (
@@ -435,7 +399,7 @@ export default function PrintAssembler() {
                             </div>
                         )}
                         {selectedTemplates.length > 0 && (
-                            <p className="text-sm text-[#00ff88]/60 mt-3">{selectedTemplates.length} template(s)</p>
+                            <p className="text-sm text-[#00ff88]/60 mt-3">{selectedTemplates.length} formato(s) selecionado(s)</p>
                         )}
                     </div>
                 )}
@@ -443,175 +407,135 @@ export default function PrintAssembler() {
                 {/* STEP 2: Período */}
                 {step === 2 && (
                     <div>
-                        <h2 className="text-lg font-semibold mb-4">Defina o período geral</h2>
+                        <h2 className="text-lg font-semibold mb-4">Período geral da montagem</h2>
                         <div className="flex flex-col sm:flex-row gap-4 max-w-md">
                             <div className="flex-1">
-                                <label className="text-xs text-white/40 mb-1 block">Data Início</label>
+                                <label className="text-xs text-white/40 mb-1 block">Início</label>
                                 <input type="date" value={dateStart} onChange={e => setDateStart(e.target.value)}
                                     className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#00ff88]/50" />
                             </div>
                             <div className="flex-1">
-                                <label className="text-xs text-white/40 mb-1 block">Data Fim</label>
+                                <label className="text-xs text-white/40 mb-1 block">Fim</label>
                                 <input type="date" value={dateEnd} onChange={e => setDateEnd(e.target.value)}
                                     className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#00ff88]/50" />
                             </div>
                         </div>
-                        {dateStart && dateEnd && dateStart <= dateEnd && (() => {
-                            const { total, available } = availableDaysCount()
-                            const days = getDaysInRange()
-                            return (
-                                <div className="mt-4 space-y-2">
-                                    <p className="text-sm text-white/40">
-                                        📅 {days.length} dia(s) × {selectedTemplates.length} template(s) = <span className="text-[#00ff88]">{available} montagem(s)</span>
-                                        {total !== available && <span className="text-yellow-400/80"> ({total - available} sem print)</span>}
-                                    </p>
-                                    {Object.keys(missingDays).length > 0 && (
-                                        <div className="bg-yellow-400/5 border border-yellow-400/20 rounded-lg p-3 text-xs">
-                                            <p className="text-yellow-400 font-medium mb-1">⚠️ Dias sem print (serão pulados):</p>
-                                            {Object.entries(missingDays).map(([campId, days]) => (
-                                                <p key={campId} className="text-yellow-400/60">
-                                                    Template {campId.substring(0, 8)}: {days.join(', ')}
-                                                </p>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            )
-                        })()}
+                        {dateStart && dateEnd && dateStart <= dateEnd && (
+                            <p className="text-sm text-white/40 mt-4">
+                                📅 {getDaysInRange().length} dia(s) × {selectedTemplates.length} formato(s)
+                            </p>
+                        )}
                     </div>
                 )}
 
-                {/* STEP 3: MÚLTIPLOS CRIATIVOS */}
+                {/* STEP 3: CRIATIVOS POR FORMATO */}
                 {step === 3 && (
                     <div>
-                        <h2 className="text-lg font-semibold mb-2">Criativos por período</h2>
+                        <h2 className="text-lg font-semibold mb-2">Criativos por formato</h2>
                         <p className="text-sm text-white/40 mb-4">
-                            Adicione um ou mais criativos. Cada um será usado nos dias do seu sub-período.
+                            Cada formato recebe seus próprios criativos. Adicione o criativo e defina o sub-período.
                         </p>
 
                         <input ref={fileInputRef} type="file" accept="image/*" onChange={handleCreativeFileChange} className="hidden" />
 
-                        {/* Lista de criativos */}
-                        <div className="space-y-4 mb-4">
-                            {creatives.map((c, idx) => (
-                                <div key={c.id}
-                                    className="bg-white/[0.03] border border-white/10 rounded-xl p-4 relative"
-                                    style={{ borderLeftColor: creativeColors[idx % creativeColors.length], borderLeftWidth: 3 }}>
+                        <div className="space-y-4">
+                            {selectedTemplates.map((st, stIdx) => {
+                                const tc = templateCreatives.find(t => t.campaignId === st.template.campaignId)
+                                const isExpanded = expandedTemplate === st.template.campaignId || selectedTemplates.length === 1
+                                return (
+                                    <div key={st.template.campaignId}
+                                        className="bg-white/[0.02] border border-white/10 rounded-xl overflow-hidden">
 
-                                    {/* Remove */}
-                                    <button onClick={() => removeCreative(c.id)}
-                                        className="absolute top-3 right-3 text-white/20 hover:text-red-400 transition-colors">
-                                        <Trash2 size={14} />
-                                    </button>
-
-                                    <div className="flex items-start gap-4">
-                                        {/* Thumbnail + upload */}
+                                        {/* Header do formato */}
                                         <div
-                                            onClick={() => triggerFileUpload(idx)}
-                                            className="w-24 h-24 rounded-lg border border-dashed border-white/10 hover:border-[#00ff88]/30 flex items-center justify-center cursor-pointer flex-shrink-0 overflow-hidden transition-all"
+                                            onClick={() => setExpandedTemplate(isExpanded && selectedTemplates.length > 1 ? null : st.template.campaignId)}
+                                            className="flex items-center gap-3 p-4 cursor-pointer hover:bg-white/[0.02] transition-colors"
                                         >
-                                            {c.preview ? (
-                                                <img src={c.preview} alt="Criativo" className="w-full h-full object-contain" />
-                                            ) : (
-                                                <div className="text-center text-white/20">
-                                                    <Upload size={16} className="mx-auto mb-1" />
-                                                    <span className="text-[10px]">Upload</span>
+                                            <img src={st.template.latestScreenshot} alt=""
+                                                className="w-16 h-12 rounded object-cover object-top flex-shrink-0"
+                                                crossOrigin="anonymous" />
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-sm font-medium">
+                                                        {st.template.device === 'mobile' ? '📱' : '🖥️'} Formato {stIdx + 1}
+                                                    </span>
+                                                    <span className="text-[10px] text-white/30 px-1.5 py-0.5 bg-white/5 rounded">
+                                                        {st.template.format.substring(0, 8)}
+                                                    </span>
                                                 </div>
-                                            )}
+                                                <p className="text-[10px] text-white/30">
+                                                    {tc?.creatives.length || 0} criativo(s) adicionado(s)
+                                                </p>
+                                            </div>
+                                            <ChevronRight size={14} className={`text-white/20 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
                                         </div>
 
-                                        {/* Datas */}
-                                        <div className="flex-1 space-y-2">
-                                            <p className="text-xs font-medium" style={{ color: creativeColors[idx % creativeColors.length] }}>
-                                                Criativo {idx + 1} {c.file?.name ? `— ${c.file.name}` : ''}
-                                            </p>
-                                            <div className="flex gap-3">
-                                                <div className="flex-1">
-                                                    <label className="text-[10px] text-white/30 block">De</label>
-                                                    <input type="date" value={c.dateStart}
-                                                        min={dateStart} max={dateEnd}
-                                                        onChange={e => updateCreativeDates(c.id, 'dateStart', e.target.value)}
-                                                        className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-xs focus:outline-none focus:border-[#00ff88]/50" />
-                                                </div>
-                                                <div className="flex-1">
-                                                    <label className="text-[10px] text-white/30 block">Até</label>
-                                                    <input type="date" value={c.dateEnd}
-                                                        min={dateStart} max={dateEnd}
-                                                        onChange={e => updateCreativeDates(c.id, 'dateEnd', e.target.value)}
-                                                        className="w-full bg-white/5 border border-white/10 rounded px-2 py-1 text-xs focus:outline-none focus:border-[#00ff88]/50" />
-                                                </div>
+                                        {/* Criativos do formato */}
+                                        {isExpanded && (
+                                            <div className="border-t border-white/5 p-4 space-y-3">
+                                                {tc?.creatives.map((c, cIdx) => (
+                                                    <div key={c.id}
+                                                        className="flex items-start gap-3 bg-white/[0.02] rounded-lg p-3 relative"
+                                                        style={{ borderLeft: `3px solid ${creativeColors[cIdx % creativeColors.length]}` }}>
+
+                                                        <button onClick={() => removeCreative(st.template.campaignId, c.id)}
+                                                            className="absolute top-2 right-2 text-white/15 hover:text-red-400 transition-colors">
+                                                            <Trash2 size={12} />
+                                                        </button>
+
+                                                        <div onClick={() => triggerFileUpload(st.template.campaignId, cIdx)}
+                                                            className="w-16 h-16 rounded border border-dashed border-white/10 hover:border-[#00ff88]/30 flex items-center justify-center cursor-pointer flex-shrink-0 overflow-hidden">
+                                                            {c.preview ? (
+                                                                <img src={c.preview} alt="" className="w-full h-full object-contain" />
+                                                            ) : (
+                                                                <Upload size={14} className="text-white/20" />
+                                                            )}
+                                                        </div>
+
+                                                        <div className="flex-1 space-y-1.5">
+                                                            <p className="text-[10px] font-medium" style={{ color: creativeColors[cIdx % creativeColors.length] }}>
+                                                                Criativo {cIdx + 1} {c.file?.name ? `— ${c.file.name}` : ''}
+                                                            </p>
+                                                            <div className="flex gap-2">
+                                                                <div className="flex-1">
+                                                                    <label className="text-[9px] text-white/25 block">De</label>
+                                                                    <input type="date" value={c.dateStart} min={dateStart} max={dateEnd}
+                                                                        onChange={e => updateCreativeDate(st.template.campaignId, c.id, 'dateStart', e.target.value)}
+                                                                        className="w-full bg-white/5 border border-white/10 rounded px-1.5 py-1 text-[11px] focus:outline-none focus:border-[#00ff88]/50" />
+                                                                </div>
+                                                                <div className="flex-1">
+                                                                    <label className="text-[9px] text-white/25 block">Até</label>
+                                                                    <input type="date" value={c.dateEnd} min={dateStart} max={dateEnd}
+                                                                        onChange={e => updateCreativeDate(st.template.campaignId, c.id, 'dateEnd', e.target.value)}
+                                                                        className="w-full bg-white/5 border border-white/10 rounded px-1.5 py-1 text-[11px] focus:outline-none focus:border-[#00ff88]/50" />
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+
+                                                <button onClick={() => addCreative(st.template.campaignId)}
+                                                    className="flex items-center gap-1.5 px-3 py-2 border border-dashed border-white/10 hover:border-[#00ff88]/30 rounded-lg text-xs text-white/30 hover:text-[#00ff88] transition-all w-full justify-center">
+                                                    <Plus size={14} /> Adicionar Criativo
+                                                </button>
                                             </div>
-                                            <p className="text-[10px] text-white/20">
-                                                {c.dateStart && c.dateEnd ? `${getDaysInRange(c.dateStart, c.dateEnd).length} dia(s)` : 'Selecione as datas'}
-                                            </p>
-                                        </div>
+                                        )}
                                     </div>
-                                </div>
-                            ))}
+                                )
+                            })}
                         </div>
-
-                        {/* Add button */}
-                        <button onClick={addCreativeSlot}
-                            className="flex items-center gap-2 px-4 py-2.5 border border-dashed border-white/10 hover:border-[#00ff88]/30 rounded-xl text-sm text-white/40 hover:text-[#00ff88] transition-all w-full justify-center">
-                            <Plus size={16} />
-                            Adicionar Criativo
-                        </button>
-
-                        {/* Cobertura visual */}
-                        {creatives.length > 0 && dateStart && dateEnd && (() => {
-                            const { total, covered, uncovered } = getCoverage()
-                            const days = getDaysInRange()
-                            return (
-                                <div className="mt-6 space-y-3">
-                                    <p className="text-xs text-white/40">
-                                        Cobertura: <span className="text-[#00ff88]">{covered}/{total} dias</span>
-                                        {uncovered > 0 && <span className="text-yellow-400"> ({uncovered} sem criativo)</span>}
-                                    </p>
-                                    {/* Timeline visual */}
-                                    <div className="flex gap-0.5 flex-wrap">
-                                        {days.map(d => {
-                                            const creative = getCreativeForDay(d)
-                                            const creativeIdx = creative ? creatives.findIndex(c => c.id === creative.id) : -1
-                                            const color = creativeIdx >= 0 ? creativeColors[creativeIdx % creativeColors.length] : undefined
-                                            return (
-                                                <div key={d} title={`${d}${creative ? ` — Criativo ${creativeIdx + 1}` : ' — Sem criativo'}`}
-                                                    className="w-4 h-4 rounded-sm text-[6px] flex items-center justify-center cursor-default"
-                                                    style={{
-                                                        backgroundColor: color ? `${color}33` : 'rgba(255,255,255,0.05)',
-                                                        border: `1px solid ${color || 'rgba(255,255,255,0.1)'}`,
-                                                        color: color || 'rgba(255,255,255,0.2)',
-                                                    }}>
-                                                    {d.split('-')[2]}
-                                                </div>
-                                            )
-                                        })}
-                                    </div>
-                                    <div className="flex gap-3 flex-wrap">
-                                        {creatives.map((c, i) => (
-                                            <div key={c.id} className="flex items-center gap-1 text-[10px]">
-                                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: creativeColors[i % creativeColors.length] }} />
-                                                <span style={{ color: creativeColors[i % creativeColors.length] }}>Criativo {i + 1}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )
-                        })()}
                     </div>
                 )}
 
                 {/* STEP 4: Posicionar & Gerar */}
                 {step === 4 && (
                     <div>
-                        <h2 className="text-lg font-semibold mb-2">Posicione o criativo em cada template</h2>
-                        <p className="text-sm text-white/40 mb-4">
-                            Clique e arraste sobre a área marcada. A posição é a mesma para todos os criativos neste template.
-                        </p>
+                        <h2 className="text-lg font-semibold mb-2">Posicione o criativo em cada formato</h2>
+                        <p className="text-sm text-white/40 mb-4">Clique e arraste sobre a área marcada do banner.</p>
 
                         <div className="flex items-center gap-3 mb-4">
                             <button onClick={() => setCurrentTemplateIdx(Math.max(0, currentTemplateIdx - 1))}
-                                disabled={currentTemplateIdx === 0}
-                                className="p-2 rounded-lg bg-white/5 disabled:opacity-30 hover:bg-white/10">
+                                disabled={currentTemplateIdx === 0} className="p-2 rounded-lg bg-white/5 disabled:opacity-30 hover:bg-white/10">
                                 <ChevronLeft size={16} />
                             </button>
                             <div className="flex gap-2">
@@ -619,8 +543,7 @@ export default function PrintAssembler() {
                                     <button key={i} onClick={() => setCurrentTemplateIdx(i)}
                                         className={`w-8 h-8 rounded-lg text-xs font-medium transition-all ${
                                             i === currentTemplateIdx ? 'bg-[#00ff88] text-black'
-                                                : t.position ? 'bg-[#00ff88]/20 text-[#00ff88]'
-                                                    : 'bg-white/5 text-white/40'
+                                                : t.position ? 'bg-[#00ff88]/20 text-[#00ff88]' : 'bg-white/5 text-white/40'
                                         }`}>
                                         {i + 1}
                                     </button>
@@ -633,18 +556,15 @@ export default function PrintAssembler() {
                             </button>
                             <span className="text-xs text-white/30 ml-2">
                                 {selectedTemplates[currentTemplateIdx]?.template.device === 'mobile' ? '📱' : '🖥️'}
-                                {' '}{selectedTemplates[currentTemplateIdx]?.position ? '✅ Posicionado' : '⚠️ Arraste'}
+                                {' '}{selectedTemplates[currentTemplateIdx]?.position ? '✅' : '⚠️ Arraste'}
                             </span>
                         </div>
 
                         <div className="relative bg-white/5 rounded-xl overflow-auto max-h-[600px] border border-white/10">
                             <canvas ref={canvasRef}
-                                onMouseDown={handleMouseDown}
-                                onMouseMove={handleMouseMove}
-                                onMouseUp={handleMouseUp}
-                                onMouseLeave={handleMouseUp}
-                                className="max-w-full cursor-crosshair"
-                                style={{ display: 'block', margin: '0 auto' }} />
+                                onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
+                                onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
+                                className="max-w-full cursor-crosshair" style={{ display: 'block', margin: '0 auto' }} />
                         </div>
 
                         {canAdvance() && (
@@ -654,8 +574,7 @@ export default function PrintAssembler() {
                                         <div className="flex items-center gap-3">
                                             <Loader2 size={16} className="animate-spin text-[#00ff88]" />
                                             <div className="flex-1 bg-white/5 rounded-full h-2 overflow-hidden">
-                                                <div className="bg-gradient-to-r from-[#00ff88] to-[#00cc6a] h-full transition-all"
-                                                    style={{ width: `${progress}%` }} />
+                                                <div className="bg-gradient-to-r from-[#00ff88] to-[#00cc6a] h-full transition-all" style={{ width: `${progress}%` }} />
                                             </div>
                                             <span className="text-sm text-white/40">{progress}%</span>
                                         </div>
@@ -665,8 +584,7 @@ export default function PrintAssembler() {
                                     <div className="space-y-2">
                                         <button onClick={generateZip}
                                             className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-[#00ff88] to-[#00cc6a] text-black font-semibold rounded-xl hover:brightness-110 transition-all">
-                                            <Download size={18} />
-                                            Gerar Montagem & Download ZIP
+                                            <Download size={18} /> Gerar Montagem & Download ZIP
                                         </button>
                                         {progressText && <p className="text-xs text-[#00ff88]/80">{progressText}</p>}
                                     </div>
@@ -676,7 +594,7 @@ export default function PrintAssembler() {
                     </div>
                 )}
 
-                {/* NAV BUTTONS */}
+                {/* NAV */}
                 {step < 4 && (
                     <div className="flex items-center justify-between mt-8 pt-6 border-t border-white/5">
                         <button onClick={() => setStep(Math.max(1, step - 1))} disabled={step === 1}

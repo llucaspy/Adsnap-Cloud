@@ -10,37 +10,42 @@ import { startOfDay, endOfDay, format } from 'date-fns'
 export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url)
     const dateStr = searchParams.get('date')
+    const pi = searchParams.get('pi')
 
-    if (!dateStr) {
-        return NextResponse.json({ error: 'Data não fornecida' }, { status: 400 })
+    if (!dateStr && !pi) {
+        return NextResponse.json({ error: 'Nenhum par\u00e2metro (date ou pi) fornecido' }, { status: 400 })
     }
 
     try {
-        const [year, month, day] = dateStr.split('-').map(Number)
-        const date = new Date(year, month - 1, day)
-        const start = startOfDay(date)
-        const end = endOfDay(date)
+        let whereClause: any = { campaign: { isArchived: false } }
+        let zipFilename = 'prints.zip'
+
+        if (pi) {
+            whereClause = { ...whereClause, campaign: { ...whereClause.campaign, pi } }
+            zipFilename = `campanha-PI-${pi}.zip`
+        } else if (dateStr) {
+            const [year, month, day] = dateStr.split('-').map(Number)
+            const date = new Date(year, month - 1, day)
+            const start = startOfDay(date)
+            const end = endOfDay(date)
+            whereClause = {
+                ...whereClause,
+                createdAt: { gte: start, lte: end }
+            }
+            zipFilename = `prints-${format(date, 'yyyy-MM-dd')}.zip`
+        }
 
         const [captures, settings] = await Promise.all([
             prisma.capture.findMany({
-                where: {
-                    createdAt: {
-                        gte: start,
-                        lte: end
-                    },
-                    campaign: {
-                        isArchived: false
-                    }
-                },
-                include: {
-                    campaign: true
-                }
+                where: whereClause,
+                include: { campaign: true },
+                orderBy: { createdAt: 'asc' }
             }),
             prisma.settings.findFirst()
         ])
 
         if (captures.length === 0) {
-            return NextResponse.json({ error: 'Nenhum print encontrado para esta data' }, { status: 404 })
+            return NextResponse.json({ error: 'Nenhum print encontrado' }, { status: 404 })
         }
 
         const bannerFormats = (settings as any)?.bannerFormats
@@ -75,15 +80,22 @@ export async function GET(req: NextRequest) {
                         : (campaign.format?.includes('x') ? campaign.format : 'Indefinido');
 
                     // Santitize names for folder structure
-                    const safeClient = campaign.client.replace(/[\\/:*?"<>|]/g, '').trim();
-                    const safeCampaign = campaign.campaignName.replace(/[\\/:*?"<>|]/g, '').trim();
-                    const piFolder = `PI ${campaign.pi} - ${safeClient}${safeCampaign ? ` - ${safeCampaign}` : ''}`;
+                    const safeClient = campaign.client.replace(/[\\\\/:*?\"<>|]/g, '').trim();
+                    const safeCampaign = campaign.campaignName.replace(/[\\\\/:*?\"<>|]/g, '').trim();
+                    
+                    let filePath = '';
+                    if (pi) {
+                        // If downloading by PI, organize by day first
+                        const dateFolder = format(capture.createdAt, 'yyyy-MM-dd');
+                        filePath = `${dateFolder}/${formatLabel}_${format(capture.createdAt, 'HH-mm-ss')}.png`;
+                    } else {
+                        // If downloading by date, organize by PI folder
+                        const piFolder = `PI ${campaign.pi} - ${safeClient}${safeCampaign ? ` - ${safeCampaign}` : ''}`;
+                        const timeStr = format(capture.createdAt, 'HH-mm-ss');
+                        filePath = `${piFolder}/${formatLabel}_${timeStr}.png`;
+                    }
 
-                    const timeStr = format(capture.createdAt, 'HH-mm-ss');
-                    const fileName = `${formatLabel}_${timeStr}.png`;
-
-                    // Add to PI-specific folder (JSZip requires forward slashes)
-                    zip.file(`${piFolder}/${fileName}`, fileContent);
+                    zip.file(filePath, fileContent);
                 }
             } catch (err) {
                 console.error(`[ZIP] Error processing capture ${capture.id}:`, err);
@@ -91,13 +103,12 @@ export async function GET(req: NextRequest) {
         }
 
         const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' })
-        const filename = `prints-${format(date, 'yyyy-MM-dd')}.zip`
 
         return new NextResponse(new Uint8Array(zipBuffer), {
             status: 200,
             headers: {
                 'Content-Type': 'application/zip',
-                'Content-Disposition': `attachment; filename="${filename}"`
+                'Content-Disposition': `attachment; filename=\"${zipFilename}\"`
             }
         })
 
