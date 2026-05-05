@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { getMonthlyCampaigns } from '@/app/books/actions'
-import { Download, Rocket, Flag, Loader2, ChevronRight, Hash, Calendar, Layers } from 'lucide-react'
+import { Download, Rocket, Flag, Loader2, Hash, Calendar, Layers } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
@@ -36,11 +36,11 @@ export function ActiveCampaigns() {
             {/* Header com Tabs */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-6">
                 <div>
-                    <h2 className="text-sm font-black text-white/80 uppercase tracking-[0.2em] mb-1">
-                        Campanhas do M\u00eas
+                    <h2 className="text-sm font-black text-white/80 uppercase tracking-widest mb-1">
+                        Campanhas do Mês
                     </h2>
-                    <p className="text-[10px] text-white/30 uppercase tracking-widest">
-                        Acesso r\u00e1pido aos prints das campanhas em destaque
+                    <p className="text-[10px] text-white/30 uppercase tracking-widest leading-loose">
+                        Acesso rápido aos prints das campanhas em destaque
                     </p>
                 </div>
 
@@ -71,77 +71,85 @@ export function ActiveCampaigns() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {currentList.map((campaign) => (
                         <div
-                            key={campaign.id}
-                            className="group relative bg-[#0d0d12] border border-white/8 rounded-2xl p-5 hover:border-white/20 hover:bg-white/[0.04] transition-all duration-300"
+                            key={campaign.pi}
+                            className="group relative bg-[#13131a] border border-white/10 rounded-2xl p-6 hover:border-white/20 hover:bg-[#1a1a24] transition-all duration-300 hover:shadow-2xl"
                         >
-                            <div className="flex items-start justify-between mb-4">
+                            <div className="flex items-start justify-between mb-5">
                                 <div className="min-w-0 flex-1 pr-4">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-white/5 border border-white/8 text-[8px] font-black text-white/40 uppercase tracking-tighter">
-                                            PI {campaign.pi}
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-[9px] font-black text-blue-400 uppercase tracking-wider">
+                                            <Hash size={10} />
+                                            {campaign.pi}
                                         </span>
-                                        <span className="text-[9px] font-bold text-white/20 truncate">
+                                        <span className="text-[10px] font-bold text-white/30 truncate">
                                             {campaign.agency}
                                         </span>
                                     </div>
-                                    <h3 className="text-sm font-black text-white truncate group-hover:text-[#00ff88] transition-colors">
+                                    <h3 className="text-base font-black text-white leading-tight group-hover:text-blue-300 transition-colors">
                                         {campaign.client}
                                     </h3>
-                                    <p className="text-[10px] text-white/40 truncate">
+                                    <p className="text-xs text-white/40 truncate mt-1">
                                         {campaign.campaignName || 'Sem nome'}
                                     </p>
                                 </div>
                                 <a
                                     href={`/api/books/download?pi=${campaign.pi}`}
-                                    className="h-10 w-10 flex items-center justify-center rounded-xl bg-white text-black hover:scale-110 active:scale-95 transition-all shadow-lg"
+                                    className="h-11 w-11 flex items-center justify-center rounded-2xl bg-white text-black hover:bg-blue-50 hover:scale-105 active:scale-95 transition-all shadow-lg"
                                     title="Download ZIP Completo"
                                 >
-                                    <Download size={16} />
+                                    <Download size={18} strokeWidth={2.5} />
                                 </a>
                             </div>
 
-                            <div className="space-y-3">
+                            <div className="space-y-4">
                                 {/* Details Row */}
-                                <div className="flex items-center justify-between text-[9px] font-bold uppercase tracking-widest text-white/20">
-                                    <div className="flex items-center gap-1.5">
-                                        <Calendar size={10} strokeWidth={3} />
+                                <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.1em] text-white/30">
+                                    <div className="flex items-center gap-2">
+                                        <Calendar size={12} className="text-blue-500/40" />
                                         <span>
-                                            {campaign.flightStart ? format(new Date(campaign.flightStart), "dd/MM") : '?'} \u2014 {campaign.flightEnd ? format(new Date(campaign.flightEnd), "dd/MM") : 'Ongoing'}
+                                            {campaign.flightStart ? format(new Date(campaign.flightStart), "dd MMM", { locale: ptBR }) : '?'} 
+                                            <span className="mx-1.5 opacity-30">—</span> 
+                                            {campaign.flightEnd ? format(new Date(campaign.flightEnd), "dd MMM", { locale: ptBR }) : 'Ongoing'}
                                         </span>
                                     </div>
-                                    <div className="flex items-center gap-1.5">
-                                        <Layers size={10} strokeWidth={3} />
-                                        <span>{campaign._count.captures} prints</span>
+                                    <div className="flex items-center gap-2">
+                                        <Layers size={12} className="text-blue-500/40" />
+                                        <span>{campaign.captureCount} prints</span>
                                     </div>
                                 </div>
 
-                                {/* Progress Mock/Bar if active */}
-                                {activeTab === 'active' && campaign.flightStart && campaign.flightEnd && (
-                                    <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                                {/* Progress Bar */}
+                                <div className="relative pt-2">
+                                    <div className="flex items-center justify-between text-[8px] font-black text-white/20 uppercase tracking-wider mb-1.5">
+                                        <span>{campaign.formats.length} formatos</span>
+                                        {activeTab === 'active' && <span>Em veiculação</span>}
+                                    </div>
+                                    <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
                                         <div 
-                                            className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full"
+                                            className={`h-full rounded-full transition-all duration-1000 ${
+                                                activeTab === 'active' 
+                                                ? 'bg-blue-500' 
+                                                : 'bg-white/20'
+                                            }`}
                                             style={{ 
-                                                width: `${Math.min(100, Math.max(0, 
-                                                    ((new Date().getTime() - new Date(campaign.flightStart).getTime()) / 
-                                                    (new Date(campaign.flightEnd).getTime() - new Date(campaign.flightStart).getTime())) * 100
-                                                ))}%` 
+                                                width: activeTab === 'active' && campaign.flightStart && campaign.flightEnd 
+                                                    ? `${Math.min(100, Math.max(5, 
+                                                        ((new Date().getTime() - new Date(campaign.flightStart).getTime()) / 
+                                                        (new Date(campaign.flightEnd).getTime() - new Date(campaign.flightStart).getTime())) * 100
+                                                    ))}%`
+                                                    : '100%' 
                                             }}
                                         />
                                     </div>
-                                )}
-                            </div>
-
-                            {/* Hover info decoration */}
-                            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <ChevronRight size={14} className="text-white/20" />
+                                </div>
                             </div>
                         </div>
                     ))}
                 </div>
             ) : (
-                <div className="py-12 text-center rounded-2xl bg-white/[0.015] border border-dashed border-white/8">
-                    <p className="text-[10px] font-bold text-white/20 uppercase tracking-widest">
-                        Nenhuma campanha {activeTab === 'active' ? 'ativa' : 'encerrada'} neste m\u00eas
+                <div className="py-12 text-center rounded-2xl bg-white/[0.01] border border-dashed border-white/5">
+                    <p className="text-[10px] font-bold text-white/10 uppercase tracking-widest">
+                        Nenhuma campanha {activeTab === 'active' ? 'ativa' : 'encerrada'} neste mês
                     </p>
                 </div>
             )}
