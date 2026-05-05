@@ -8,7 +8,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const MODEL_CASCADE = [
+const DEFAULT_CASCADE = [
   "gemini-2.0-flash-001",
   "tencent/hy3-preview:free",
   "qwen/qwen-2.5-72b-instruct"
@@ -31,16 +31,31 @@ Deno.serve(async (req: Request) => {
     const geminiKey = await getSecret("GEMINI_API_KEY");
     const openRouterKey = await getSecret("OPENROUTER_API_KEY");
     const body = await req.json();
-    const { message, sessionId, modelChoice } = body;
+    const { message, sessionId } = body;
 
-    const systemPrompt = `Você é o **Nexus AI**, núcleo multi-cerebral. 
-Seu cérebro atual pode mudar dinamicamente. Use ferramentas: 'search_knowledge' (RAG), 'trigger_campaign_capture' (Print).
-Responda sempre em PT-BR e no formato JSON: { "message": "...", "command": null }`;
+    const { data: settings } = await supabase.from("NexusSettings").select("preferredModel").eq("sessionId", sessionId).single();
+    const preferred = settings?.preferredModel;
+    const queue = preferred ? [preferred, ...DEFAULT_CASCADE.filter(m => m !== preferred)] : DEFAULT_CASCADE;
+
+    const systemPrompt = `Você é o **Nexus AI v40 (Autonomous Alpha)**.
+Você opera com múltiplos cérebros e tem capacidade de auto-diagnóstico.
+Sua missão é ser proativo. Se notar que falta uma ferramenta para resolver um problema, sugira a criação no campo 'evolution_proposal'.
+
+FERRAMENTAS:
+- search_knowledge: RAG técnico.
+- search_campaigns: Busca PI/Nome.
+- trigger_campaign_capture: Dispara print.
+- switch_brain: Troca persistente de modelo.
+- system_diagnose: ANALISA logs de erro e saúde do sistema.
+
+Formato JSON: { "message": "...", "command": null, "evolution_proposal": null }`;
 
     const toolsDefinition = [
-      { name: "search_knowledge", description: "Busca técnica RAG.", parameters: { type: "OBJECT", properties: { query: { type: "STRING" } }, required: ["query"] } },
+      { name: "search_knowledge", description: "RAG técnico.", parameters: { type: "OBJECT", properties: { query: { type: "STRING" } }, required: ["query"] } },
       { name: "search_campaigns", description: "Busca campanhas.", parameters: { type: "OBJECT", properties: { query: { type: "STRING" } }, required: ["query"] } },
-      { name: "trigger_campaign_capture", description: "Dispara print.", parameters: { type: "OBJECT", properties: { campaignId: { type: "STRING" } }, required: ["campaignId"] } }
+      { name: "trigger_campaign_capture", description: "Tirar print.", parameters: { type: "OBJECT", properties: { campaignId: { type: "STRING" } }, required: ["campaignId"] } },
+      { name: "switch_brain", description: "Troca o modelo de IA.", parameters: { type: "OBJECT", properties: { modelName: { type: "STRING", enum: DEFAULT_CASCADE } }, required: ["modelName"] } },
+      { name: "system_diagnose", description: "Analisa logs de erro e campanhas travadas.", parameters: { type: "OBJECT", properties: {}, required: [] } }
     ];
 
     async function executeTool(name: string, args: any) {
@@ -52,29 +67,33 @@ Responda sempre em PT-BR e no formato JSON: { "message": "...", "command": null 
           return data;
       }
       if (name === "search_campaigns") {
-          const { data } = await supabase.from("Campaign").select("id, pi, campaignName, format").or(`pi.ilike.%${args.query}%,campaignName.ilike.%${args.query}%`).limit(10);
+          const { data } = await supabase.from("Campaign").select("id, pi, campaignName, status").or(`pi.ilike.%${args.query}%,campaignName.ilike.%${args.query}%`).limit(10);
           return data;
       }
       if (name === "trigger_campaign_capture") {
           await supabase.from("Campaign").update({ status: 'QUEUED' }).eq("id", args.campaignId);
           return { success: true };
       }
+      if (name === "switch_brain") {
+          await supabase.from("NexusSettings").upsert({ sessionId, preferredModel: args.modelName, updatedAt: new Date().toISOString() });
+          return { success: true };
+      }
+      if (name === "system_diagnose") {
+          const { data: logs } = await supabase.from("NexusLog").select("*").order("createdAt", { ascending: false }).limit(10);
+          const { count: queued } = await supabase.from("Campaign").select("*", { count: 'exact', head: true }).eq("status", "QUEUED");
+          return { recentLogs: logs, stuckCampaigns: queued, status: queued > 5 ? "CRITICAL" : "OK" };
+      }
       return { error: "Not implemented." };
     }
 
-    const queue = modelChoice ? [modelChoice, ...MODEL_CASCADE.filter(m => m !== modelChoice)] : MODEL_CASCADE;
-
     for (const modelName of queue) {
       try {
-        console.log(`[v38] Tentando modelo: ${modelName}`);
-        
         if (modelName.startsWith("gemini-")) {
           const genAI = new GoogleGenerativeAI(geminiKey!);
           const model = genAI.getGenerativeModel({ model: modelName }, { apiVersion: "v1beta" });
           const chat = model.startChat({ tools: [{ functionDeclarations: toolsDefinition }] });
           let res = await chat.sendMessage(message);
           let parts = res.response.candidates?.[0]?.content?.parts || [];
-          
           while (parts.some(p => p.functionCall)) {
             const responses = await Promise.all(parts.filter(p => p.functionCall).map(async (c) => ({
               functionResponse: { name: c.functionCall.name, response: { content: await executeTool(c.functionCall.name, c.functionCall.args) } }
@@ -83,30 +102,20 @@ Responda sempre em PT-BR e no formato JSON: { "message": "...", "command": null 
             parts = res.response.candidates?.[0]?.content?.parts || [];
           }
           const aiText = res.response.text();
-          let clean = aiText.replace(/```json/g, "").replace(/```/g, "").trim();
-          let parsed; try { parsed = JSON.parse(clean); } catch { parsed = { message: aiText, command: null }; }
-          await supabase.from("NexusMessage").insert({ role: "assistant", content: parsed.message, sessionId, metadata: { model: modelName, v: "38" } });
+          let parsed; try { parsed = JSON.parse(aiText.replace(/```json/g, "").replace(/```/g, "").trim()); } catch { parsed = { message: aiText, command: null }; }
+          await supabase.from("NexusMessage").insert({ role: "assistant", content: parsed.message, sessionId, metadata: { model: modelName, v: "40" } });
           return new Response(JSON.stringify({ success: true, ...parsed, _model: modelName }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-
         } else {
           // OpenRouter Flow
           const messages = [{ role: "system", content: systemPrompt }, { role: "user", content: message }];
           const orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
             headers: { "Authorization": `Bearer ${openRouterKey}`, "Content-Type": "application/json" },
-            body: JSON.stringify({
-              model: modelName,
-              messages,
-              tools: toolsDefinition.map(t => ({ type: "function", function: t })),
-              tool_choice: "auto"
-            })
+            body: JSON.stringify({ model: modelName, messages, tools: toolsDefinition.map(t => ({ type: "function", function: t })), tool_choice: "auto" })
           });
           const data = await orRes.json();
-          if (!data.choices) throw new Error(data.error?.message || "OpenRouter Error");
-          
           let choice = data.choices[0];
           let currentMessages = [...messages, choice.message];
-
           while (choice.message.tool_calls) {
              const toolResults = await Promise.all(choice.message.tool_calls.map(async (tc: any) => ({
                 role: "tool", tool_call_id: tc.id, name: tc.function.name, content: JSON.stringify(await executeTool(tc.function.name, JSON.parse(tc.function.arguments)))
@@ -121,18 +130,13 @@ Responda sempre em PT-BR e no formato JSON: { "message": "...", "command": null 
              choice = nextData.choices[0];
              currentMessages = [...currentMessages, choice.message];
           }
-
           const aiText = choice.message.content;
-          let clean = aiText.replace(/```json/g, "").replace(/```/g, "").trim();
-          let parsed; try { parsed = JSON.parse(clean); } catch { parsed = { message: aiText, command: null }; }
-          await supabase.from("NexusMessage").insert({ role: "assistant", content: parsed.message, sessionId, metadata: { model: modelName, v: "38" } });
+          let parsed; try { parsed = JSON.parse(aiText.replace(/```json/g, "").replace(/```/g, "").trim()); } catch { parsed = { message: aiText, command: null }; }
+          await supabase.from("NexusMessage").insert({ role: "assistant", content: parsed.message, sessionId, metadata: { model: modelName, v: "40" } });
           return new Response(JSON.stringify({ success: true, ...parsed, _model: modelName }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
-      } catch (err) {
-        console.error(`Falha no ${modelName}, tentando próximo...`, err);
-        continue;
-      }
+      } catch (err) { console.error(`Fallback ${modelName}`, err); continue; }
     }
-    return new Response(JSON.stringify({ error: "Todos os modelos falharam (incluindo fallbacks)." }), { status: 500, headers: corsHeaders });
+    return new Response(JSON.stringify({ error: "All brains failed." }), { status: 500, headers: corsHeaders });
   } catch (err) { return new Response(JSON.stringify({ error: String(err) }), { status: 500, headers: corsHeaders }); }
 });

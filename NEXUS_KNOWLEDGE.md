@@ -46,6 +46,7 @@ A captura não é apenas um "screenshot", é um processo de 3 etapas:
 - **get_nexus_source**: Permite ao Nexus ler seu código `index.ts`.
 - **evolve_nexus**: Permite ao Nexus sugerir melhorias. Por segurança, a proposta é enviada ao Antigravity (Arquiteto) antes de ser aplicada em produção.
 - **switch_brain**: Troca persistentemente o modelo de IA da sessão atual.
+- **system_diagnose**: Analisa os últimos 10 erros do `NexusLog` e identifica campanhas travadas.
 
 ## 7. Regras de Negócio e Segurança
 - **RBAC**: Somente administradores (`admin`) podem criar usuários ou gerenciar cargos.
