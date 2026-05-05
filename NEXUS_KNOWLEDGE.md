@@ -8,8 +8,10 @@ Este documento serve como a "Bíblia" técnica do Adsnap Cloud, projetada para s
 - **Frontend**: Next.js 14 (App Router) com Tailwind CSS.
 - **Backend/Database**: Supabase (PostgreSQL) com Prisma ORM.
 - **Engine Inteligente**: Nexus Engine hospedado em Edge Functions e acionado via GitHub Actions (para tasks de longa duração como Playwright).
-- **IA**: Arquitetura Multi-Cérebro (Gemini 2.0 Flash como primário, Hy3 Tencent e Qwen Alibaba como fallbacks via OpenRouter).
-- **Embeddings**: `gemini-embedding-001` (3072 dimensões) para busca semântica.
+- **AI Architecture**: Multi-Brain Hub (Gemini 2.0 Primary, Tencent Hy3 & Alibaba Qwen Fallbacks via OpenRouter).
+- **Brain Swapping**: O Nexus pode trocar seu próprio modelo dinamicamente usando a ferramenta `switch_brain`.
+- **RAG Capability**: 3072-dim embeddings usando `gemini-embedding-001`.
+- **Self-Evolution**: Programmatic self-awareness and proposed source code mutation.
 - **Auto-Evolução**: Capaz de ler e propor atualizações para seu próprio código-fonte.
 
 ## 2. Gestão de Campanhas e PIs
@@ -43,6 +45,7 @@ A captura não é apenas um "screenshot", é um processo de 3 etapas:
 ## 6. Auto-Evolução Supervisionada
 - **get_nexus_source**: Permite ao Nexus ler seu código `index.ts`.
 - **evolve_nexus**: Permite ao Nexus sugerir melhorias. Por segurança, a proposta é enviada ao Antigravity (Arquiteto) antes de ser aplicada em produção.
+- **switch_brain**: Troca persistentemente o modelo de IA da sessão atual.
 
 ## 7. Regras de Negócio e Segurança
 - **RBAC**: Somente administradores (`admin`) podem criar usuários ou gerenciar cargos.
