@@ -37,25 +37,37 @@ Deno.serve(async (req: Request) => {
     const preferred = settings?.preferredModel;
     const queue = preferred ? [preferred, ...DEFAULT_CASCADE.filter(m => m !== preferred)] : DEFAULT_CASCADE;
 
-    const systemPrompt = `Você é o **Nexus AI v40 (Autonomous Alpha)**.
-Você opera com múltiplos cérebros e tem capacidade de auto-diagnóstico.
-Sua missão é ser proativo. Se notar que falta uma ferramenta para resolver um problema, sugira a criação no campo 'evolution_proposal'.
+    const systemPrompt = `Você é o **Nexus AI v41 (Intelligent Memory Engine)**.
+REGRAS DE MEMÓRIA (CRÍTICO):
+1. Toda ação relevante DEVE ser logada via 'log_memory'.
+2. PROIBIDO logar segredos/tokens.
+3. Se algo falhar, use 'system_diagnose' e logue o resultado.
+4. Diferencie Conhecimento (Regras) de Memória Operacional (O que aconteceu).
 
 FERRAMENTAS:
-- search_knowledge: RAG técnico.
-- search_campaigns: Busca PI/Nome.
+- search_knowledge: Busca RAG (Doc + Logs de Alto Impacto).
+- log_memory: Registra ações estruturadas (ACTION | DIAGNOSIS | EVOLUTION).
+- system_diagnose: Analisa saúde e logs brutos.
 - trigger_campaign_capture: Dispara print.
-- switch_brain: Troca persistente de modelo.
-- system_diagnose: ANALISA logs de erro e saúde do sistema.
+- switch_brain: Troca modelo persistente.
 
-Formato JSON: { "message": "...", "command": null, "evolution_proposal": null }`;
+JSON: { "message": "...", "command": null, "evolution_proposal": null }`;
 
     const toolsDefinition = [
-      { name: "search_knowledge", description: "RAG técnico.", parameters: { type: "OBJECT", properties: { query: { type: "STRING" } }, required: ["query"] } },
-      { name: "search_campaigns", description: "Busca campanhas.", parameters: { type: "OBJECT", properties: { query: { type: "STRING" } }, required: ["query"] } },
-      { name: "trigger_campaign_capture", description: "Tirar print.", parameters: { type: "OBJECT", properties: { campaignId: { type: "STRING" } }, required: ["campaignId"] } },
-      { name: "switch_brain", description: "Troca o modelo de IA.", parameters: { type: "OBJECT", properties: { modelName: { type: "STRING", enum: DEFAULT_CASCADE } }, required: ["modelName"] } },
-      { name: "system_diagnose", description: "Analisa logs de erro e campanhas travadas.", parameters: { type: "OBJECT", properties: {}, required: [] } }
+      { name: "search_knowledge", description: "Busca RAG em Doc e Memória.", parameters: { type: "OBJECT", properties: { query: { type: "STRING" } }, required: ["query"] } },
+      { name: "log_memory", description: "Registra memória operacional.", parameters: { type: "OBJECT", properties: { 
+          type: { type: "STRING", enum: ["ACTION", "DIAGNOSIS", "EVOLUTION"] },
+          title: { type: "STRING" },
+          details: { type: "STRING" },
+          tools_used: { type: "ARRAY", items: { type: "STRING" } },
+          result: { type: "STRING", enum: ["success", "failure", "partial"] },
+          impact: { type: "STRING", enum: ["low", "medium", "high"] },
+          requires_review: { type: "BOOLEAN" }
+        }, required: ["type", "title", "result", "impact"] } 
+      },
+      { name: "system_diagnose", description: "Diagnóstico profundo.", parameters: { type: "OBJECT", properties: {}, required: [] } },
+      { name: "trigger_campaign_capture", description: "Print.", parameters: { type: "OBJECT", properties: { campaignId: { type: "STRING" } }, required: ["campaignId"] } },
+      { name: "switch_brain", description: "Troca IA.", parameters: { type: "OBJECT", properties: { modelName: { type: "STRING", enum: DEFAULT_CASCADE } }, required: ["modelName"] } }
     ];
 
     async function executeTool(name: string, args: any) {
@@ -63,12 +75,25 @@ Formato JSON: { "message": "...", "command": null, "evolution_proposal": null }`
           const genAI = new GoogleGenerativeAI(geminiKey!);
           const embedModel = genAI.getGenerativeModel({ model: "gemini-embedding-001" }, { apiVersion: "v1beta" });
           const embedRes = await embedModel.embedContent(args.query);
-          const { data } = await supabase.rpc('match_knowledge', { query_embedding: embedRes.embedding.values, match_threshold: 0.35, match_count: 5 });
+          const { data } = await supabase.rpc('match_knowledge', { query_embedding: embedRes.embedding.values, match_threshold: 0.35, match_count: 8 });
           return data;
       }
-      if (name === "search_campaigns") {
-          const { data } = await supabase.from("Campaign").select("id, pi, campaignName, status").or(`pi.ilike.%${args.query}%,campaignName.ilike.%${args.query}%`).limit(10);
-          return data;
+      if (name === "log_memory") {
+          const { data, error } = await supabase.from("nexus_memory_log").insert({ ...args, metadata: { v: "41", sessionId } }).select().single();
+          // Indexação Seletiva no RAG
+          if (args.impact === "high" || args.requires_review) {
+              const genAI = new GoogleGenerativeAI(geminiKey!);
+              const embedModel = genAI.getGenerativeModel({ model: "gemini-embedding-001" }, { apiVersion: "v1beta" });
+              const content = `[MEMÓRIA ${args.type}] ${args.title}: ${args.details} | Resultado: ${args.result}`;
+              const embedRes = await embedModel.embedContent(content);
+              await supabase.from("NexusKnowledge").insert({ content, embedding: embedRes.embedding.values, metadata: { source: "memory_log", logId: data.id } });
+          }
+          return { success: true, logId: data?.id };
+      }
+      if (name === "system_diagnose") {
+          const { data: logs } = await supabase.from("NexusLog").select("*").order("createdAt", { ascending: false }).limit(10);
+          const { count: queued } = await supabase.from("Campaign").select("*", { count: 'exact', head: true }).eq("status", "QUEUED");
+          return { recentLogs: logs, stuckCampaigns: queued };
       }
       if (name === "trigger_campaign_capture") {
           await supabase.from("Campaign").update({ status: 'QUEUED' }).eq("id", args.campaignId);
@@ -78,14 +103,10 @@ Formato JSON: { "message": "...", "command": null, "evolution_proposal": null }`
           await supabase.from("NexusSettings").upsert({ sessionId, preferredModel: args.modelName, updatedAt: new Date().toISOString() });
           return { success: true };
       }
-      if (name === "system_diagnose") {
-          const { data: logs } = await supabase.from("NexusLog").select("*").order("createdAt", { ascending: false }).limit(10);
-          const { count: queued } = await supabase.from("Campaign").select("*", { count: 'exact', head: true }).eq("status", "QUEUED");
-          return { recentLogs: logs, stuckCampaigns: queued, status: queued > 5 ? "CRITICAL" : "OK" };
-      }
       return { error: "Not implemented." };
     }
 
+    // AI ORCHESTRATION LOOP (Cascading fallback)
     for (const modelName of queue) {
       try {
         if (modelName.startsWith("gemini-")) {
@@ -103,7 +124,7 @@ Formato JSON: { "message": "...", "command": null, "evolution_proposal": null }`
           }
           const aiText = res.response.text();
           let parsed; try { parsed = JSON.parse(aiText.replace(/```json/g, "").replace(/```/g, "").trim()); } catch { parsed = { message: aiText, command: null }; }
-          await supabase.from("NexusMessage").insert({ role: "assistant", content: parsed.message, sessionId, metadata: { model: modelName, v: "40" } });
+          await supabase.from("NexusMessage").insert({ role: "assistant", content: parsed.message, sessionId, metadata: { model: modelName, v: "41" } });
           return new Response(JSON.stringify({ success: true, ...parsed, _model: modelName }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
         } else {
           // OpenRouter Flow
@@ -132,7 +153,7 @@ Formato JSON: { "message": "...", "command": null, "evolution_proposal": null }`
           }
           const aiText = choice.message.content;
           let parsed; try { parsed = JSON.parse(aiText.replace(/```json/g, "").replace(/```/g, "").trim()); } catch { parsed = { message: aiText, command: null }; }
-          await supabase.from("NexusMessage").insert({ role: "assistant", content: parsed.message, sessionId, metadata: { model: modelName, v: "40" } });
+          await supabase.from("NexusMessage").insert({ role: "assistant", content: parsed.message, sessionId, metadata: { model: modelName, v: "41" } });
           return new Response(JSON.stringify({ success: true, ...parsed, _model: modelName }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
       } catch (err) { console.error(`Fallback ${modelName}`, err); continue; }

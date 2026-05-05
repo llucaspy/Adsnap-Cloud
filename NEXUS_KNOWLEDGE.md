@@ -8,11 +8,10 @@ Este documento serve como a "Bíblia" técnica do Adsnap Cloud, projetada para s
 - **Frontend**: Next.js 14 (App Router) com Tailwind CSS.
 - **Backend/Database**: Supabase (PostgreSQL) com Prisma ORM.
 - **Engine Inteligente**: Nexus Engine hospedado em Edge Functions e acionado via GitHub Actions (para tasks de longa duração como Playwright).
-- **AI Architecture**: Multi-Brain Hub (Gemini 2.0 Primary, Tencent Hy3 & Alibaba Qwen Fallbacks via OpenRouter).
-- **Brain Swapping**: O Nexus pode trocar seu próprio modelo dinamicamente usando a ferramenta `switch_brain`.
-- **RAG Capability**: 3072-dim embeddings usando `gemini-embedding-001`.
-- **Self-Evolution**: Programmatic self-awareness and proposed source code mutation.
-- **Auto-Evolução**: Capaz de ler e propor atualizações para seu próprio código-fonte.
+- **AI Architecture**: Multi-Brain Hub (Gemini, Hy3, Qwen) com capacidades de `switch_brain`, `system_diagnose` e **Memória Operacional v41**.
+- **Memória em Camadas**:
+  - **Camada A (Conhecimento)**: Documentação técnica e regras (RAG Estático).
+  - **Camada B (Operacional)**: Tabela `nexus_memory_log` com indexação seletiva de alto impacto no RAG.
 
 ## 2. Gestão de Campanhas e PIs
 - **PI (Proposta de Inserção)**: O identificador mestre. Uma única PI pode ter múltiplos formatos e criativos.
@@ -43,12 +42,14 @@ A captura não é apenas um "screenshot", é um processo de 3 etapas:
 - **Seletor de Modelo**: O usuário pode forçar um modelo específico enviando `modelChoice` no corpo da requisição.
 
 ## 6. Auto-Evolução Supervisionada
-- **get_nexus_source**: Permite ao Nexus ler seu código `index.ts`.
-- **evolve_nexus**: Permite ao Nexus sugerir melhorias. Por segurança, a proposta é enviada ao Antigravity (Arquiteto) antes de ser aplicada em produção.
-- **switch_brain**: Troca persistentemente o modelo de IA da sessão atual.
-- **system_diagnose**: Analisa os últimos 10 erros do `NexusLog` e identifica campanhas travadas.
+- **log_memory**: Registra ações estruturadas no `nexus_memory_log`. Se o impacto for `high`, o log é indexado no RAG automaticamente.
+- **system_diagnose**: Analisa a saúde do sistema e logs brutos para identificar falhas recorrentes.
+- **search_knowledge**: Busca unificada entre documentação técnica e memória de alto impacto.
 
-## 7. Regras de Negócio e Segurança
+## 7. Política de Memória (v41)
+- **Registro Obrigatório**: Ações automáticas, mudanças de estado e sugestões de evolução.
+- **Indexação Seletiva**: Apenas logs marcados como `High Impact` ou `Requires Review` geram embeddings.
+- **Resumo Diário**: Job futuro para consolidar logs diários em novos itens de conhecimento.
 - **RBAC**: Somente administradores (`admin`) podem criar usuários ou gerenciar cargos.
 - **Arquivamento**: Campanhas com `isArchived: true` devem ser ignoradas em relatórios de saúde.
 - **AdOps vs Prints**: Prints são evidências visuais. Métricas AdOps (impressões/cliques) vêm de outra integração e são independentes.
