@@ -45,6 +45,7 @@
     "**/test-*.js",
     "**/migrate-*.js",
     "*.js",
-    ".reference_ui"
+    ".reference_ui",
+    "supabase"
   ]
 }
