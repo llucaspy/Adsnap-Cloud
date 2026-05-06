@@ -33,7 +33,7 @@ export async function processComposition(campaignId: string) {
 
     if (!template || !template.captures[0]) throw new Error(`Template PI 000 não encontrado para Formato ${campaign.format} / Device ${campaign.device}`)
     
-    const box = template.compositionBox as any;
+    const box = (template as any).compositionBox;
     if (!box || !box.width) throw new Error('Coordenadas de montagem não definidas no template.')
 
     // 3. URLs
