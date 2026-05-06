@@ -8,10 +8,9 @@ Este documento serve como a "Bíblia" técnica do Adsnap Cloud, projetada para s
 - **Frontend**: Next.js 14 (App Router) com Tailwind CSS.
 - **Backend/Database**: Supabase (PostgreSQL) com Prisma ORM.
 - **Engine Inteligente**: Nexus Engine hospedado em Edge Functions e acionado via GitHub Actions (para tasks de longa duração como Playwright).
-- **AI Architecture**: Multi-Brain Hub (Gemini, Hy3, Qwen) com capacidades de `switch_brain`, `system_diagnose` e **Memória Operacional v41**.
-- **Memória em Camadas**:
-  - **Camada A (Conhecimento)**: Documentação técnica e regras (RAG Estático).
-  - **Camada B (Operacional)**: Tabela `nexus_memory_log` com indexação seletiva de alto impacto no RAG.
+- **AI Architecture**: Multi-Brain Hub v42 com **Agência Proativa**.
+- **Protocolo Ação-Antes-de-Fala**: O Nexus executa ferramentas em silêncio antes de responder ao usuário.
+- **Memória em Camadas**: Camada A (Doc) e Camada B (Logs Operacionais via `nexus_memory_log`).
 
 ## 2. Gestão de Campanhas e PIs
 - **PI (Proposta de Inserção)**: O identificador mestre. Uma única PI pode ter múltiplos formatos e criativos.
@@ -46,10 +45,10 @@ A captura não é apenas um "screenshot", é um processo de 3 etapas:
 - **system_diagnose**: Analisa a saúde do sistema e logs brutos para identificar falhas recorrentes.
 - **search_knowledge**: Busca unificada entre documentação técnica e memória de alto impacto.
 
-## 7. Política de Memória (v41)
-- **Registro Obrigatório**: Ações automáticas, mudanças de estado e sugestões de evolução.
-- **Indexação Seletiva**: Apenas logs marcados como `High Impact` ou `Requires Review` geram embeddings.
-- **Resumo Diário**: Job futuro para consolidar logs diários em novos itens de conhecimento.
+## 7. Protocolo de Agência (v42)
+- **Zero Stall**: Proibido dizer "Vou verificar". Chame a ferramenta primeiro.
+- **Cadeia de Ferramentas**: Se uma ferramenta indicar erro, chame a próxima (diagnóstico) automaticamente.
+- **Relatório Final**: A mensagem final deve conter o insight ou a solução, não a intenção.
 - **RBAC**: Somente administradores (`admin`) podem criar usuários ou gerenciar cargos.
 - **Arquivamento**: Campanhas com `isArchived: true` devem ser ignoradas em relatórios de saúde.
 - **AdOps vs Prints**: Prints são evidências visuais. Métricas AdOps (impressões/cliques) vêm de outra integração e são independentes.
