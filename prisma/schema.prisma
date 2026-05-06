@@ -43,6 +43,7 @@ model Campaign {
   lastFetchedAt        DateTime?
   lastGoal             Int             @default(0)
   lastViewability      Float           @default(0)
+  compositionBox       Json?           @default("{}")
   captures             Capture[]
   emailDispatches      EmailDispatch[]
 }
