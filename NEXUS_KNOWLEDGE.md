@@ -8,9 +8,9 @@ Este documento serve como a "Bíblia" técnica do Adsnap Cloud, projetada para s
 - **Frontend**: Next.js 14 (App Router) com Tailwind CSS.
 - **Backend/Database**: Supabase (PostgreSQL) com Prisma ORM.
 - **Engine Inteligente**: Nexus Engine hospedado em Edge Functions e acionado via GitHub Actions (para tasks de longa duração como Playwright).
-- **AI Architecture**: Multi-Brain Hub v42 com **Agência Proativa**.
-- **Protocolo Ação-Antes-de-Fala**: O Nexus executa ferramentas em silêncio antes de responder ao usuário.
-- **Memória em Camadas**: Camada A (Doc) e Camada B (Logs Operacionais via `nexus_memory_log`).
+- **AI Architecture**: Multi-Brain Hub v43 com **Streaming & Ticking**.
+- **Real-Time Visibility**: O Nexus v43 envia atualizações de status em tempo real durante a execução de ferramentas.
+- **Protocolo de Agência**: Silencioso (Ação-Antes-de-Fala), porém transparente via Ticking.
 
 ## 2. Gestão de Campanhas e PIs
 - **PI (Proposta de Inserção)**: O identificador mestre. Uma única PI pode ter múltiplos formatos e criativos.
@@ -45,10 +45,10 @@ A captura não é apenas um "screenshot", é um processo de 3 etapas:
 - **system_diagnose**: Analisa a saúde do sistema e logs brutos para identificar falhas recorrentes.
 - **search_knowledge**: Busca unificada entre documentação técnica e memória de alto impacto.
 
-## 7. Protocolo de Agência (v42)
-- **Zero Stall**: Proibido dizer "Vou verificar". Chame a ferramenta primeiro.
-- **Cadeia de Ferramentas**: Se uma ferramenta indicar erro, chame a próxima (diagnóstico) automaticamente.
-- **Relatório Final**: A mensagem final deve conter o insight ou a solução, não a intenção.
+## 7. Protocolo de Agência (v43)
+- **Streaming (Ticking)**: Envio obrigatório de status a cada ferramenta (`search_knowledge`, `log_memory`, etc.).
+- **Zero Stall**: Proibido dizer "Vou verificar". O progresso é mostrado via status de streaming.
+- **Relatório Final**: Enviado no chunk `type: final`.
 - **RBAC**: Somente administradores (`admin`) podem criar usuários ou gerenciar cargos.
 - **Arquivamento**: Campanhas com `isArchived: true` devem ser ignoradas em relatórios de saúde.
 - **AdOps vs Prints**: Prints são evidências visuais. Métricas AdOps (impressões/cliques) vêm de outra integração e são independentes.

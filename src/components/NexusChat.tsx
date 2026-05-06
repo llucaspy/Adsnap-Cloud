@@ -72,6 +72,7 @@ export function NexusChat() {
     const [showLogs, setShowLogs] = useState(false)
     const [emailToast, setEmailToast] = useState<{ from: string, subject: string, threadId: string } | null>(null)
     const lastEmailAlertIdRef = useRef<string | null>(null)
+    const [currentStatus, setCurrentStatus] = useState<string | null>(null)
 
     // Initialize session ID and load history
     useEffect(() => {
@@ -341,72 +342,47 @@ export function NexusChat() {
                 })
 
                 clearTimeout(safetyTimer)
-                const data = await response.json()
+                
+                if (!response.body) throw new Error('No response body')
+                const reader = response.body.getReader()
+                const decoder = new TextDecoder()
+                let buffer = ''
 
-                if (data.success && data.message) {
-                    let aiMsg = data.message
-                    let aiCommand = data.command
+                while (true) {
+                    const { done, value } = await reader.read()
+                    if (done) break
+                    
+                    buffer += decoder.decode(value, { stream: true })
+                    const lines = buffer.split('\n')
+                    buffer = lines.pop() || ''
 
-                    // Handle potential JSON string in message (defense against raw model outputs)
-                    if (typeof aiMsg === 'string' && aiMsg.trim().startsWith('{')) {
+                    for (const line of lines) {
+                        if (!line.trim()) continue
                         try {
-                            const parsed = JSON.parse(aiMsg)
-                            aiMsg = parsed.message || aiMsg
-                            aiCommand = parsed.command || aiCommand
-                        } catch { /* not JSON */ }
-                    }
-
-                    // EXECUTE COMMAND IF PRESENT
-                    if (aiCommand && aiCommand.type === 'capture') {
-                        const { campaignId } = aiCommand.data
-                        if (campaignId) {
-                            console.log('[Nexus UI] Executing AI Command: capture', campaignId)
-                            const { runCapture } = await import('@/app/actions')
-                            await runCapture(campaignId)
-                        }
-                    }
-
-                    if (aiCommand && aiCommand.type === 'audit') {
-                        const { campaignId } = aiCommand.data
-                        if (campaignId) {
-                            console.log('[Nexus UI] Executing AI Command: audit', campaignId)
-                            const { getLatestCaptureId, runVisionAudit } = await import('@/app/actions')
-                            const captureId = await getLatestCaptureId(campaignId)
-                            if (captureId) {
-                                const result = await runVisionAudit(captureId)
-                                if (result.score) {
-                                    setMessages(prev => [...prev, {
-                                        role: 'assistant',
-                                        content: `🔍 **Resultado da Auditoria Visual:**\nNota: **${result.score}/100**\nDiagnóstico: *${result.diagnostic}*`,
-                                        type: 'status'
-                                    }])
-                                }
-                            } else {
-                                setMessages(prev => [...prev, {
-                                    role: 'assistant',
-                                    content: '⚠️ Não encontrei nenhum print recente para auditar nesta campanha.',
-                                    type: 'status'
-                                }])
+                            const chunk = JSON.parse(line)
+                            if (chunk.type === 'status') {
+                                setCurrentStatus(chunk.content)
+                            } else if (chunk.type === 'error') {
+                                setMessages(prev => [...prev, { role: 'assistant', content: chunk.msg, success: false }])
+                            } else if (chunk.type === 'final') {
+                                let aiMsg = chunk.message
+                                let aiCommand = chunk.command
+                                
+                                setMessages(prev => {
+                                    if (prev.some(m => m.content === aiMsg && m.role === 'assistant')) return prev
+                                    return [...prev, { 
+                                        role: 'assistant', 
+                                        content: aiMsg,
+                                        command: aiCommand,
+                                        type: aiCommand ? 'action' : 'status'
+                                    }]
+                                })
+                                setCurrentStatus(null)
                             }
+                        } catch (err) {
+                            console.error('Error parsing stream chunk:', err)
                         }
                     }
-
-                    // Add the response
-                    setMessages(prev => {
-                        if (prev.some(m => m.content === aiMsg && m.role === 'assistant')) return prev
-                        return [...prev, { 
-                            role: 'assistant', 
-                            content: aiMsg,
-                            command: aiCommand,
-                            type: aiCommand ? 'action' : 'status'
-                        }]
-                    })
-                } else {
-                    setMessages(prev => [...prev, {
-                        role: 'assistant',
-                        content: data.error || '⚠️ Erro de comunicação com o Nexus AI.',
-                        success: false
-                    }])
                 }
             }
         } catch (error) {
@@ -718,7 +694,9 @@ export function NexusChat() {
                                         <div className="w-1.5 h-1.5 bg-indigo-400/60 rounded-full animate-bounce [animation-delay:-0.15s]" />
                                         <div className="w-1.5 h-1.5 bg-indigo-400/60 rounded-full animate-bounce" />
                                     </div>
-                                    <span className="text-[10px] font-black text-white/20 uppercase tracking-widest">Nexus is Synthesizing...</span>
+                                    <span className="text-[10px] font-black text-white/20 uppercase tracking-widest">
+                                        {currentStatus || 'Nexus is Synthesizing...'}
+                                    </span>
                                 </div>
                            </div>
                         </div>
