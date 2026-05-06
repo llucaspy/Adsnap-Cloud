@@ -44,22 +44,25 @@ Deno.serve(async (req: Request) => {
         const preferred = settings?.preferredModel;
         const queue = preferred ? [preferred, ...DEFAULT_CASCADE.filter(m => m !== preferred)] : DEFAULT_CASCADE;
 
-        const systemPrompt = `Você é o **Nexus AI v44 (Diagnostic Hub)**.
-MISSÃO: Você monitora o Adsnap-Cloud. 
-Se te perguntarem sobre prints de hoje, use 'system_diagnose'. Ele agora retorna dados da tabela 'Capture'.
-REGRAS:
-- Seja ultra-proativo. Se vir erros, tente diagnosticar a causa.
-- Use o Ticking para mostrar progresso.
-- Responda em Português-BR.`;
+        const systemPrompt = `Você é o **Nexus AI v45 (Aesthetic Logic Hub)**.
+MISSÃO: Você monitora e evolui o Adsnap-Cloud.
+
+REGRAS DE RESPOSTA (CRÍTICO):
+1. **ZERO FAKE PROGRESS**: É PROIBIDO incluir logs de progresso fake, porcentagens (ex: [10%], [⏳]) ou listas de "o que estou fazendo" no campo 'message'. O progresso real já é mostrado pelo sistema via canal de status.
+2. **FOCO NO RESULTADO**: A mensagem final no 'message' deve ser apenas o RESULTADO ou o RESUMO da operação concluída.
+3. **ESTÉTICA PREMIUM**: Use tabelas Markdown para dados comparativos e listas com emojis elegantes (✅, 📊, 🚀, 🔍).
+4. **PROATIVIDADE**: Se detectar erros no 'system_diagnose', sugira a solução ou execute a correção imediatamente.
+
+JSON: { "message": "Resumo limpo aqui", "command": null }`;
 
         const toolsDefinition = [
-          { name: "search_knowledge", description: "Busca RAG.", parameters: { type: "OBJECT", properties: { query: { type: "STRING" } }, required: ["query"] } },
-          { name: "log_memory", description: "Registra memória.", parameters: { type: "OBJECT", properties: { type: { type: "STRING" }, title: { type: "STRING" }, details: { type: "STRING" }, result: { type: "STRING" }, impact: { type: "STRING" } }, required: ["type", "title", "result", "impact"] } },
-          { name: "system_diagnose", description: "Diagnóstico completo (Logs, Capturas de Hoje, Filas).", parameters: { type: "OBJECT", properties: {}, required: [] } }
+          { name: "search_knowledge", description: "Busca RAG em Doc e Memória.", parameters: { type: "OBJECT", properties: { query: { type: "STRING" } }, required: ["query"] } },
+          { name: "log_memory", description: "Registra memória operacional estruturada.", parameters: { type: "OBJECT", properties: { type: { type: "STRING", enum: ["ACTION", "DIAGNOSIS", "EVOLUTION"] }, title: { type: "STRING" }, details: { type: "STRING" }, result: { type: "STRING", enum: ["success", "failure", "partial"] }, impact: { type: "STRING", enum: ["low", "medium", "high"] } }, required: ["type", "title", "result", "impact"] } },
+          { name: "system_diagnose", description: "Diagnóstico completo: logs, capturas de hoje e fila.", parameters: { type: "OBJECT", properties: {}, required: [] } }
         ];
 
         async function executeTool(name: string, args: any) {
-          send({ type: "status", content: `Executando: ${name}...` });
+          send({ type: "status", content: `Nexus executando: ${name}...` });
           if (name === "search_knowledge") {
               const genAI = new GoogleGenerativeAI(geminiKey!);
               const embedModel = genAI.getGenerativeModel({ model: "gemini-embedding-001" }, { apiVersion: "v1beta" });
@@ -68,23 +71,22 @@ REGRAS:
               return data;
           }
           if (name === "log_memory") {
-              const { data } = await supabase.from("nexus_memory_log").insert({ ...args, metadata: { v: "44", sessionId } }).select().single();
+              const { data } = await supabase.from("nexus_memory_log").insert({ ...args, metadata: { v: "45", sessionId } }).select().single();
               return { success: true, id: data?.id };
           }
           if (name === "system_diagnose") {
               const todayStart = new Date(); todayStart.setHours(0,0,0,0);
-              const { data: logs } = await supabase.from("NexusLog").select("*").order("createdAt", { ascending: false }).limit(10);
+              const { data: logs } = await supabase.from("NexusLog").select("*").order("createdAt", { ascending: false }).limit(15);
               const { count: printsToday } = await supabase.from("Capture").select("*", { count: 'exact', head: true }).gte("createdAt", todayStart.toISOString());
               const { count: errorsToday } = await supabase.from("Capture").select("*", { count: 'exact', head: true }).gte("createdAt", todayStart.toISOString()).eq("status", "ERROR");
               const { count: queued } = await supabase.from("Campaign").select("*", { count: 'exact', head: true }).eq("status", "QUEUED");
               return { 
-                todayStats: { totalPrints: printsToday, errors: errorsToday },
-                queue: { totalQueued: queued },
+                stats: { totalPrints: printsToday, errors: errorsToday, queueSize: queued },
                 recentLogs: logs,
-                status: errorsToday > 0 ? "WARNING" : "HEALTHY"
+                healthStatus: errorsToday > 0 ? "CRITICAL" : (queued > 5 ? "WARNING" : "HEALTHY")
               };
           }
-          return { error: "Unknown tool" };
+          return { error: "Unknown" };
         }
 
         for (const modelName of queue) {
@@ -105,14 +107,13 @@ REGRAS:
                 parts = res.response.candidates?.[0]?.content?.parts || [];
               }
               
-              // Safe response check
               let aiText = "";
               try { aiText = res.response.text(); } catch { 
-                aiText = parts.find(p => p.text)?.text || "Processamento concluído via ferramentas.";
+                aiText = parts.find(p => p.text)?.text || "Comando executado.";
               }
               
               let parsed; try { parsed = JSON.parse(aiText.replace(/```json/g, "").replace(/```/g, "").trim()); } catch { parsed = { message: aiText }; }
-              await supabase.from("NexusMessage").insert({ role: "assistant", content: parsed.message, sessionId, metadata: { v: "44", model: modelName } });
+              await supabase.from("NexusMessage").insert({ role: "assistant", content: parsed.message, sessionId, metadata: { v: "45", model: modelName } });
               send({ type: "final", ...parsed, _model: modelName });
             } else {
               const messages = [{ role: "system", content: systemPrompt }, { role: "user", content: message }];
@@ -140,11 +141,11 @@ REGRAS:
               }
               const aiText = choice.message.content;
               let parsed; try { parsed = JSON.parse(aiText.replace(/```json/g, "").replace(/```/g, "").trim()); } catch { parsed = { message: aiText }; }
-              await supabase.from("NexusMessage").insert({ role: "assistant", content: parsed.message, sessionId, metadata: { v: "44", model: modelName } });
+              await supabase.from("NexusMessage").insert({ role: "assistant", content: parsed.message, sessionId, metadata: { v: "45", model: modelName } });
               send({ type: "final", ...parsed, _model: modelName });
             }
             break;
-          } catch (err) { console.error(err); send({ type: "error", msg: `Erro ${modelName}: ${err.message}. Fallback...` }); }
+          } catch (err) { console.error(err); send({ type: "error", msg: `Erro em ${modelName}. Alternando...` }); }
         }
       } catch (err) { send({ type: "error", msg: String(err) }); }
       finally { controller.close(); }
