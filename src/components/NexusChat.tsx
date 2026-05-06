@@ -735,13 +735,16 @@ export function NexusChat() {
 
                 {/* Input Area */}
                 <div className="p-6 pt-2 border-t border-white/10 bg-black/40 backdrop-blur-3xl">
-                        <button
-                            onClick={() => handleSend()}
-                            disabled={!input.trim() || isTyping}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 w-12 h-12 rounded-[18px] bg-white text-black flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-2xl disabled:opacity-20 disabled:grayscale"
-                        >
-                            <Send size={20} />
-                        </button>
+                    <div className="relative">
+                        <input
+                            type="text"
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
+                            placeholder="Fale com o Nexus..."
+                            disabled={isTyping}
+                            className="w-full h-14 pl-14 pr-16 rounded-2xl bg-white/5 border border-white/10 text-white placeholder-white/20 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/30 transition-all disabled:opacity-40"
+                        />
 
                         <label className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center cursor-pointer hover:bg-white/10 transition-all">
                             <Camera size={18} className="text-white/40" />
@@ -753,58 +756,82 @@ export function NexusChat() {
                                 onChange={async (e) => {
                                     const files = Array.from(e.target.files || [])
                                     if (files.length === 0) return
+                                    // Reset the input value so the same file can be re-selected
+                                    e.target.value = ''
                                     
                                     setIsTyping(true)
-                                    const { supabaseBrowser } = await import('../lib/supabaseBrowser')
+                                    setCurrentStatus(`Nexus: Preparando ${files.length} arquivo(s)...`)
                                     
-                                    const uploadedUrls: { name: string; url: string }[] = []
-                                    const errors: string[] = []
-                                    
-                                    for (let i = 0; i < files.length; i++) {
-                                        const file = files[i]
-                                        setCurrentStatus(`Nexus: Subindo criativo ${i + 1} de ${files.length} (${file.name})...`)
+                                    try {
+                                        const { supabaseBrowser } = await import('../lib/supabaseBrowser')
                                         
-                                        try {
-                                            const path = `uploads/${Date.now()}_${file.name}`
-                                            const { data, error } = await supabaseBrowser.storage.from('screenshots').upload(path, file)
+                                        const uploadedUrls: { name: string; url: string }[] = []
+                                        const errors: string[] = []
+                                        
+                                        for (let i = 0; i < files.length; i++) {
+                                            const file = files[i]
+                                            setCurrentStatus(`Nexus: Subindo criativo ${i + 1} de ${files.length} (${file.name})...`)
                                             
-                                            if (error) throw error
-                                            
-                                            const { data: { publicUrl } } = supabaseBrowser.storage.from('screenshots').getPublicUrl(path)
-                                            uploadedUrls.push({ name: file.name, url: publicUrl })
-                                        } catch (err: any) {
-                                            console.error('Upload error:', err)
-                                            errors.push(`${file.name}: ${err.message || 'Erro desconhecido'}`)
+                                            try {
+                                                const path = `uploads/${Date.now()}_${file.name}`
+                                                const { error } = await supabaseBrowser.storage.from('screenshots').upload(path, file)
+                                                
+                                                if (error) throw error
+                                                
+                                                const { data: { publicUrl } } = supabaseBrowser.storage.from('screenshots').getPublicUrl(path)
+                                                uploadedUrls.push({ name: file.name, url: publicUrl })
+                                            } catch (err: unknown) {
+                                                const errorMsg = err instanceof Error ? err.message : 'Erro desconhecido'
+                                                console.error('Upload error:', err)
+                                                errors.push(`${file.name}: ${errorMsg}`)
+                                            }
                                         }
-                                    }
-                                    
-                                    if (uploadedUrls.length > 0) {
-                                        let hint = `Enviei ${uploadedUrls.length} criativo(s) para montagem:\n`
-                                        uploadedUrls.forEach(item => {
-                                            hint += `- ${item.name}: ${item.url}\n`
-                                        })
-                                        hint += `\nPor favor, vincule-os conforme os formatos sugeridos nos nomes dos arquivos e prepare a montagem.`
                                         
-                                        setInput(hint)
-                                        setIsTyping(false) // Desbloqueia antes de enviar para evitar deadlock no handleSend
-                                        handleSend(hint)
-                                    }
-                                    
-                                    if (errors.length > 0) {
-                                        setIsTyping(false) // Garante desbloqueio em caso de erro
+                                        // Reset typing state BEFORE calling handleSend to prevent deadlock
+                                        setIsTyping(false)
+                                        setCurrentStatus(null)
+                                        
+                                        if (uploadedUrls.length > 0) {
+                                            let hint = `Enviei ${uploadedUrls.length} criativo(s) para montagem:\n`
+                                            uploadedUrls.forEach(item => {
+                                                hint += `- ${item.name}: ${item.url}\n`
+                                            })
+                                            hint += `\nPor favor, vincule-os conforme os formatos sugeridos nos nomes dos arquivos e prepare a montagem.`
+                                            
+                                            handleSend(hint)
+                                        }
+                                        
+                                        if (errors.length > 0) {
+                                            setMessages(prev => [...prev, { 
+                                                role: 'assistant', 
+                                                content: `⚠️ Falha em ${errors.length} upload(s):\n${errors.map(e => `• ${e}`).join('\n')}`, 
+                                                success: false 
+                                            }])
+                                        }
+                                    } catch (err) {
+                                        console.error('Upload fatal error:', err)
+                                        setIsTyping(false)
+                                        setCurrentStatus(null)
                                         setMessages(prev => [...prev, { 
                                             role: 'assistant', 
-                                            content: `⚠️ Falha em alguns uploads:\n${errors.map(e => `• ${e}`).join('\n')}`, 
+                                            content: '⚠️ Erro fatal no processo de upload. Verifique sua conexão e tente novamente.', 
                                             success: false 
                                         }])
                                     }
-                                    
-                                    setIsTyping(false)
-                                    setCurrentStatus(null)
                                 }}
                             />
                         </label>
+
+                        <button
+                            onClick={() => handleSend()}
+                            disabled={!input.trim() || isTyping}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 w-12 h-12 rounded-[18px] bg-white text-black flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-2xl disabled:opacity-20 disabled:grayscale"
+                        >
+                            <Send size={20} />
+                        </button>
+                    </div>
                 </div>
+
             </div>
 
             {showPreview && (
