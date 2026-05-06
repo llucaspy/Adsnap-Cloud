@@ -688,15 +688,27 @@ export function NexusChat() {
                         <div className="flex justify-start animate-in fade-in duration-500">
                            <div className="flex flex-col gap-2">
                                 <span className="text-[8px] font-black text-white/10 uppercase tracking-[0.4em] mb-2 px-1">Processing Signal</span>
-                                <div className="bg-white/[0.02] border border-white/10 p-4 rounded-2xl rounded-tl-none flex items-center gap-4">
-                                    <div className="flex gap-1.5">
-                                        <div className="w-1.5 h-1.5 bg-indigo-400/60 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                                        <div className="w-1.5 h-1.5 bg-indigo-400/60 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                                        <div className="w-1.5 h-1.5 bg-indigo-400/60 rounded-full animate-bounce" />
+                                <div className="bg-white/[0.02] border border-white/10 p-4 rounded-2xl rounded-tl-none flex flex-col gap-3 min-w-[300px]">
+                                    <div className="flex items-center gap-4">
+                                        <div className="flex gap-1.5">
+                                            <div className="w-1.5 h-1.5 bg-indigo-400/60 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                                            <div className="w-1.5 h-1.5 bg-indigo-400/60 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                                            <div className="w-1.5 h-1.5 bg-indigo-400/60 rounded-full animate-bounce" />
+                                        </div>
+                                        <span className="text-[10px] font-black text-white/20 uppercase tracking-widest">
+                                            {currentStatus?.replace(/\[⏳ \d+%\]\s*/, '') || 'Nexus is Synthesizing...'}
+                                        </span>
                                     </div>
-                                    <span className="text-[10px] font-black text-white/20 uppercase tracking-widest">
-                                        {currentStatus || 'Nexus is Synthesizing...'}
-                                    </span>
+                                    
+                                    {/* Progress Bar Logic */}
+                                    {currentStatus?.includes('%') && (
+                                        <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
+                                            <div 
+                                                className="h-full bg-indigo-500 transition-all duration-500 ease-out"
+                                                style={{ width: `${currentStatus.match(/(\d+)%/)?.[1] || 0}%` }}
+                                            />
+                                        </div>
+                                    )}
                                 </div>
                            </div>
                         </div>
@@ -723,24 +735,49 @@ export function NexusChat() {
 
                 {/* Input Area */}
                 <div className="p-6 pt-2 border-t border-white/10 bg-black/40 backdrop-blur-3xl">
-                    <div className="relative group">
-                        <input
-                            type="text"
-                            value={input}
-                            onChange={(e) => setInput(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && !isTyping && handleSend()}
-                            placeholder="Faça algum pergunta para o nexus AI"
-                            disabled={isTyping}
-                            className="w-full bg-white/[0.03] border border-white/[0.08] rounded-2xl px-6 py-4 pr-16 text-sm text-white placeholder:text-white/20 focus:outline-none focus:ring-2 focus:ring-white/10 focus:border-white/20 transition-all duration-300 group-hover:bg-white/5 disabled:opacity-50"
-                        />
                         <button
                             onClick={() => handleSend()}
-                            disabled={!input.trim()}
+                            disabled={!input.trim() || isTyping}
                             className="absolute right-2 top-1/2 -translate-y-1/2 w-12 h-12 rounded-[18px] bg-white text-black flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-2xl disabled:opacity-20 disabled:grayscale"
                         >
                             <Send size={20} />
                         </button>
-                    </div>
+
+                        <label className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center cursor-pointer hover:bg-white/10 transition-all">
+                            <Camera size={18} className="text-white/40" />
+                            <input 
+                                type="file" 
+                                className="hidden" 
+                                accept="image/*"
+                                onChange={async (e) => {
+                                    const file = e.target.files?.[0]
+                                    if (!file) return
+                                    
+                                    setIsTyping(true)
+                                    setCurrentStatus('Subindo criativo para o Nexus...')
+                                    
+                                    try {
+                                        const { supabaseBrowser } = await import('../lib/supabaseBrowser')
+                                        const path = `uploads/${Date.now()}_${file.name}`
+                                        const { data, error } = await supabaseBrowser.storage.from('screenshots').upload(path, file)
+                                        
+                                        if (error) throw error
+                                        
+                                        const { data: { publicUrl } } = supabaseBrowser.storage.from('screenshots').getPublicUrl(path)
+                                        
+                                        // Send as a special message
+                                        setInput(`Use este criativo para minha campanha: ${publicUrl}`)
+                                        handleSend(`Use este criativo para minha campanha: ${publicUrl}`)
+                                    } catch (err) {
+                                        console.error('Upload error:', err)
+                                        setMessages(prev => [...prev, { role: 'assistant', content: '⚠️ Falha ao subir imagem.', success: false }])
+                                    } finally {
+                                        setIsTyping(false)
+                                        setCurrentStatus(null)
+                                    }
+                                }}
+                            />
+                        </label>
                 </div>
             </div>
 

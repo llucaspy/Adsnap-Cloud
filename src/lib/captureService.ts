@@ -1,13 +1,78 @@
-import { chromium, devices, Page, Locator } from 'playwright'
-import prisma from './prisma'
-import { supabase } from './supabase'
-import { nexusLogStore } from './nexusLogStore'
-import { alertStore } from './alertStore'
-import { sendTelegramAlert } from './telegram'
+// ============================================================================
+// NEXUS V47 - AUTOMATED COMPOSITION ENGINE
+// ============================================================================
 
-// ============================================================================
-// NEXUS V5 - CAPTURE SERVICE (SIMPLIFIED)
-// ============================================================================
+export async function processComposition(campaignId: string) {
+    console.log('[Nexus Composition] Iniciando montagem para:', campaignId)
+    
+    // 1. Get Target Campaign (source of the creative)
+    const campaign = await prisma.campaign.findUnique({
+        where: { id: campaignId },
+        include: { captures: { where: { status: 'SUCCESS' }, orderBy: { createdAt: 'desc' }, take: 1 } }
+    })
+    
+    if (!campaign) throw new Error('Campanha não encontrada')
+    
+    // 2. Find Template (PI 000) for same format/device
+    const template = await prisma.campaign.findFirst({
+        where: { 
+            pi: '000', 
+            format: campaign.format, 
+            device: campaign.device,
+            isArchived: false 
+        },
+        include: { captures: { where: { status: 'SUCCESS' }, orderBy: { createdAt: 'desc' }, take: 1 } }
+    })
+
+    if (!template || !template.captures[0]) throw new Error(`Template PI 000 não encontrado para Formato ${campaign.format} / Device ${campaign.device}`)
+    
+    const box = template.compositionBox as any;
+    if (!box || !box.width) throw new Error('Coordenadas de montagem não definidas no template.')
+
+    // 3. URLs
+    const creativeUrl = campaign.captures[0]?.screenshotPath || campaign.url;
+    const templateUrl = template.captures[0].screenshotPath;
+
+    console.log(`[Nexus Composition] Renderizando: ${templateUrl} + Creative @ [${box.x},${box.y}]`)
+    
+    // 4. Render
+    const finalImage = await compositeAutomatedImage(templateUrl, creativeUrl, box, campaign.device === 'mobile');
+    
+    // 5. Save
+    return await saveCapture(campaign, finalImage, campaignId);
+}
+
+export async function compositeAutomatedImage(templateUrl: string, creativeUrl: string, box: any, isMobile: boolean): Promise<Buffer> {
+    console.log(`[Nexus] compositeAutomatedImage: Renderizando montagem em cloud...`);
+    const browser = await chromium.launch({ headless: true });
+    try {
+        const page = await browser.newPage();
+        await page.setViewportSize({ width: 1920, height: 1080 });
+
+        // HTML base to perform the overlay
+        // We use absolute positioning to place the creative over the template
+        const html = `
+            <html>
+            <body style="margin:0; padding:0; background:#000; width:1920px; height:1080px; overflow:hidden;">
+                <!-- Template Base -->
+                <img src="${templateUrl}" style="position:absolute; top:0; left:0; width:1920px; height:1080px; object-fit:contain;" />
+                
+                <!-- Creative Overlay -->
+                <div style="position:absolute; left:${box.x}px; top:${box.y}px; width:${box.width}px; height:${box.height}px; display:flex; align-items:center; justify-content:center; background:#f0f0f0; overflow:hidden; box-shadow: 0 0 5px rgba(0,0,0,0.2);">
+                    <img src="${creativeUrl}" style="width:100%; height:100%; object-fit:contain;" />
+                </div>
+            </body>
+            </html>
+        `;
+
+        await page.setContent(html);
+        await page.waitForTimeout(2000); // Wait for images to load
+        
+        return await page.screenshot({ type: 'png' });
+    } finally {
+        await browser.close();
+    }
+}
 
 export async function processCampaign(campaignId: string) {
     console.log('[Nexus] ========= INICIANDO CAPTURA =========')

@@ -1,6 +1,6 @@
 import '../lib/env'
 import prisma from '../lib/prisma'
-import { processCampaign } from '../lib/captureService'
+import { processCampaign, processComposition } from '../lib/captureService'
 import { nexusLogStore } from '../lib/nexusLogStore'
 import { getGmailClient, fetchRecentEmails } from '../lib/gmail'
 import { classifyEmail } from '../lib/gemini'
@@ -155,24 +155,36 @@ async function runWorkerCycle() {
     try {
         const campaigns = await prisma.campaign.findMany({
             where: {
-                status: { in: ['PENDING', 'QUEUED'] },
+                status: { in: ['PENDING', 'QUEUED', 'AUTOCONFIG'] },
                 isArchived: false
             },
             take: 20
         })
 
         if (campaigns.length > 0) {
-            console.log(`[Nexus Worker] Encontradas ${campaigns.length} campanhas para processar.`)
-            await nexusLogStore.addLog(`Nexus Worker: Processando lote de ${campaigns.length} itens`, 'SYSTEM')
+            console.log(`[Nexus Worker] Encontradas ${campaigns.length} campanhas/montagens para processar.`)
+            await nexusLogStore.addLog(`Nexus Worker: Processando lote de ${campaigns.length} itens (incluindo montagem automática)`, 'SYSTEM')
 
             for (const campaign of campaigns) {
                 // Atomic claim
                 const claim = await prisma.campaign.updateMany({
-                    where: { id: campaign.id, status: { in: ['PENDING', 'QUEUED'] } },
+                    where: { id: campaign.id, status: { in: ['PENDING', 'QUEUED', 'AUTOCONFIG'] } },
                     data: { status: 'PROCESSING', updatedAt: new Date() }
                 })
 
                 if (claim.count === 0) continue
+
+                if (campaign.status === 'AUTOCONFIG') {
+                    console.log(`[Nexus Worker] Realizando MONTAGEM: ${campaign.client} (PI ${campaign.pi})`)
+                    try {
+                        await processComposition(campaign.id)
+                        await nexusLogStore.addLog(`Nexus Worker: Montagem automatizada concluída para ${campaign.client}`, 'SUCCESS', undefined, campaign.id)
+                    } catch (err) {
+                        console.error(`[Nexus Worker] Erro na montagem ${campaign.pi}:`, err)
+                        await prisma.campaign.update({ where: { id: campaign.id }, data: { status: 'AUTOCONFIG' } }) // Retry
+                    }
+                    continue
+                }
 
                 console.log(`[Nexus Worker] Capturando: ${campaign.client} (PI ${campaign.pi})`)
                 try {
