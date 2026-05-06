@@ -765,9 +765,10 @@ export function NexusChat() {
                                         
                                         const { data: { publicUrl } } = supabaseBrowser.storage.from('screenshots').getPublicUrl(path)
                                         
-                                        // Send as a special message
-                                        setInput(`Use este criativo para minha campanha: ${publicUrl}`)
-                                        handleSend(`Use este criativo para minha campanha: ${publicUrl}`)
+                                        // Send as a special message with Filename Hint
+                                        const hint = `Use este criativo (Arquivo: ${file.name}) para minha campanha: ${publicUrl}`
+                                        setInput(hint)
+                                        handleSend(hint)
                                     } catch (err) {
                                         console.error('Upload error:', err)
                                         setMessages(prev => [...prev, { role: 'assistant', content: '⚠️ Falha ao subir imagem.', success: false }])

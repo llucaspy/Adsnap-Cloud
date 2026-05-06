@@ -46,15 +46,14 @@ Deno.serve(async (req: Request) => {
         const preferred = settings?.preferredModel;
         const queue = preferred ? [preferred, ...DEFAULT_CASCADE.filter(m => m !== preferred)] : DEFAULT_CASCADE;
 
-        const systemPrompt = `Nexus AI v48 (Progress Intelligence).
-Foco: Montagem automática com rastreamento visual de progresso.
+        const systemPrompt = `Nexus AI v48.1 (Filename Intelligence).
+Foco: Identificação instantânea por nome de arquivo + progresso.
 
 REGRAS CRÍTICAS:
-- Divida tarefas complexas em etapas e reporte o progresso numérico em mensagens 'status'.
-- Use o formato: "[⏳ X%] Descrição da etapa..." (X = 10, 25, 40, 60, 80, 100).
-- Exemplo: "[⏳ 10%] Iniciando análise de 7 criativos..."
-- Sempre reporte progresso ao: Analisar imagens, Vincular campanhas e Solicitar montagens.
-- O resumo final deve confirmar a conclusão de 100%.
+- PRIORIDADE MÁXIMA: Se o nome do arquivo (marcado como 'Arquivo: ...') contiver dimensões (ex: 300x250), use isso como a identificação final do formato.
+- Se não houver nome claro, use Lógica Fuzzy e Dimensões Visuais.
+- Mantenha o rastreamento de progresso [⏳ X%] em todas as etapas.
+- Vínculo automático para a data alvo (30/04).
 
 JSON: { "message": "...", "command": null }`;
 
