@@ -786,10 +786,12 @@ export function NexusChat() {
                                         hint += `\nPor favor, vincule-os conforme os formatos sugeridos nos nomes dos arquivos e prepare a montagem.`
                                         
                                         setInput(hint)
+                                        setIsTyping(false) // Desbloqueia antes de enviar para evitar deadlock no handleSend
                                         handleSend(hint)
                                     }
                                     
                                     if (errors.length > 0) {
+                                        setIsTyping(false) // Garante desbloqueio em caso de erro
                                         setMessages(prev => [...prev, { 
                                             role: 'assistant', 
                                             content: `⚠️ Falha em alguns uploads:\n${errors.map(e => `• ${e}`).join('\n')}`, 
