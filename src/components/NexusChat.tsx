@@ -749,33 +749,56 @@ export function NexusChat() {
                                 type="file" 
                                 className="hidden" 
                                 accept="image/*"
+                                multiple
                                 onChange={async (e) => {
-                                    const file = e.target.files?.[0]
-                                    if (!file) return
+                                    const files = Array.from(e.target.files || [])
+                                    if (files.length === 0) return
                                     
                                     setIsTyping(true)
-                                    setCurrentStatus('Subindo criativo para o Nexus...')
+                                    const { supabaseBrowser } = await import('../lib/supabaseBrowser')
                                     
-                                    try {
-                                        const { supabaseBrowser } = await import('../lib/supabaseBrowser')
-                                        const path = `uploads/${Date.now()}_${file.name}`
-                                        const { data, error } = await supabaseBrowser.storage.from('screenshots').upload(path, file)
+                                    const uploadedUrls: { name: string; url: string }[] = []
+                                    const errors: string[] = []
+                                    
+                                    for (let i = 0; i < files.length; i++) {
+                                        const file = files[i]
+                                        setCurrentStatus(`Nexus: Subindo criativo ${i + 1} de ${files.length} (${file.name})...`)
                                         
-                                        if (error) throw error
+                                        try {
+                                            const path = `uploads/${Date.now()}_${file.name}`
+                                            const { data, error } = await supabaseBrowser.storage.from('screenshots').upload(path, file)
+                                            
+                                            if (error) throw error
+                                            
+                                            const { data: { publicUrl } } = supabaseBrowser.storage.from('screenshots').getPublicUrl(path)
+                                            uploadedUrls.push({ name: file.name, url: publicUrl })
+                                        } catch (err: any) {
+                                            console.error('Upload error:', err)
+                                            errors.push(`${file.name}: ${err.message || 'Erro desconhecido'}`)
+                                        }
+                                    }
+                                    
+                                    if (uploadedUrls.length > 0) {
+                                        let hint = `Enviei ${uploadedUrls.length} criativo(s) para montagem:\n`
+                                        uploadedUrls.forEach(item => {
+                                            hint += `- ${item.name}: ${item.url}\n`
+                                        })
+                                        hint += `\nPor favor, vincule-os conforme os formatos sugeridos nos nomes dos arquivos e prepare a montagem.`
                                         
-                                        const { data: { publicUrl } } = supabaseBrowser.storage.from('screenshots').getPublicUrl(path)
-                                        
-                                        // Send as a special message with Filename Hint
-                                        const hint = `Use este criativo (Arquivo: ${file.name}) para minha campanha: ${publicUrl}`
                                         setInput(hint)
                                         handleSend(hint)
-                                    } catch (err) {
-                                        console.error('Upload error:', err)
-                                        setMessages(prev => [...prev, { role: 'assistant', content: '⚠️ Falha ao subir imagem.', success: false }])
-                                    } finally {
-                                        setIsTyping(false)
-                                        setCurrentStatus(null)
                                     }
+                                    
+                                    if (errors.length > 0) {
+                                        setMessages(prev => [...prev, { 
+                                            role: 'assistant', 
+                                            content: `⚠️ Falha em alguns uploads:\n${errors.map(e => `• ${e}`).join('\n')}`, 
+                                            success: false 
+                                        }])
+                                    }
+                                    
+                                    setIsTyping(false)
+                                    setCurrentStatus(null)
                                 }}
                             />
                         </label>
