@@ -1,3 +1,10 @@
+import { chromium, devices } from 'playwright';
+import prisma from './prisma';
+import { supabase } from './supabase';
+import { nexusLogStore } from './nexusLogStore';
+import { alertStore } from './alertStore';
+import { sendTelegramAlert } from './telegram';
+
 // ============================================================================
 // NEXUS V47 - AUTOMATED COMPOSITION ENGINE
 // ============================================================================
