@@ -345,7 +345,9 @@ export function NexusChat() {
             (text.includes('parar') && text.includes('captura')) ||
             (text.includes('baixar') || text.includes('download')) ||
             (text.includes('apagar') || text.includes('deletar') || text.includes('limpar')) ||
-            text.includes('arquivar') || text.includes('restaurar')
+            text.includes('arquivar') || text.includes('restaurar') ||
+            text.includes('montagem') || text.includes('preparar') || 
+            text.includes('gerar') || text.includes('criativo')
         )
 
         try {
@@ -392,9 +394,13 @@ export function NexusChat() {
                 // Call Supabase Edge Function DIRECTLY (bypasses Vercel 10s timeout)
                 console.log('[Nexus UI] Using Edge Function AI Core (direct)')
                 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+                const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
                 const response = await fetch(`${supabaseUrl}/functions/v1/nexus-chat`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${supabaseAnonKey}`
+                    },
                     body: JSON.stringify({
                         message: userMsg,
                         sessionId: sessionIdRef.current,
