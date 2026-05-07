@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { Send, Zap, X, Mail, Trash2, Camera, Download, Search, Eye } from 'lucide-react'
+import { Send, Zap, X, Mail, Trash2, Camera, Download, Search, Eye, ImageIcon } from 'lucide-react'
 import { useSession } from '@/lib/useSession'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -73,6 +73,7 @@ export function NexusChat() {
     const [emailToast, setEmailToast] = useState<{ from: string, subject: string, threadId: string } | null>(null)
     const lastEmailAlertIdRef = useRef<string | null>(null)
     const [currentStatus, setCurrentStatus] = useState<string | null>(null)
+    const [pendingFiles, setPendingFiles] = useState<File[]>([])
 
     // Initialize session ID and load history
     useEffect(() => {
@@ -263,10 +264,68 @@ export function NexusChat() {
 
     const handleSend = async (customPrompt?: string) => {
         const userMsg = (customPrompt || input).trim()
-        if (!userMsg) return
+        const filesToUpload = [...pendingFiles]
+        if (!userMsg && filesToUpload.length === 0) return
 
         if (!customPrompt) setInput('')
-        setMessages(prev => [...prev, { role: 'user', content: userMsg }])
+        setPendingFiles([])
+        
+        // If there are files to upload, handle them first
+        let finalMsg = userMsg
+        if (filesToUpload.length > 0) {
+            setIsTyping(true)
+            const uploadedUrls: { name: string; url: string }[] = []
+            const errors: string[] = []
+            
+            try {
+                const { supabaseBrowser: sb } = await import('../lib/supabaseBrowser')
+                
+                for (let i = 0; i < filesToUpload.length; i++) {
+                    const file = filesToUpload[i]
+                    setCurrentStatus(`Subindo criativo ${i + 1} de ${filesToUpload.length} (${file.name})...`)
+                    
+                    try {
+                        const path = `uploads/${Date.now()}_${file.name}`
+                        const { error } = await sb.storage.from('screenshots').upload(path, file)
+                        if (error) throw error
+                        const { data: { publicUrl } } = sb.storage.from('screenshots').getPublicUrl(path)
+                        uploadedUrls.push({ name: file.name, url: publicUrl })
+                    } catch (err: unknown) {
+                        const errorMsg = err instanceof Error ? err.message : 'Erro desconhecido'
+                        errors.push(`${file.name}: ${errorMsg}`)
+                    }
+                    // Small delay between uploads to avoid 'Failed to fetch'
+                    if (i < filesToUpload.length - 1) await new Promise(r => setTimeout(r, 300))
+                }
+                
+                setCurrentStatus(null)
+                
+                if (errors.length > 0) {
+                    setMessages(prev => [...prev, { 
+                        role: 'assistant', 
+                        content: `⚠️ Falha em ${errors.length} upload(s):\n${errors.map(e => `• ${e}`).join('\n')}`, 
+                        success: false 
+                    }])
+                }
+                
+                if (uploadedUrls.length > 0) {
+                    const fileList = uploadedUrls.map(u => `- ${u.name}: ${u.url}`).join('\n')
+                    finalMsg = userMsg 
+                        ? `${userMsg}\n\nCriativos anexados:\n${fileList}` 
+                        : `Criativos para montagem:\n${fileList}`
+                } else if (!userMsg) {
+                    setIsTyping(false)
+                    return // Nothing to send
+                }
+            } catch {
+                setIsTyping(false)
+                setCurrentStatus(null)
+                setMessages(prev => [...prev, { role: 'assistant', content: '⚠️ Erro fatal no upload. Tente novamente.', success: false }])
+                return
+            }
+        }
+        
+        setMessages(prev => [...prev, { role: 'user', content: finalMsg }])
         setIsTyping(true)
 
         console.log('[Nexus UI] handleSend v2 iniciado:', userMsg)
@@ -735,13 +794,34 @@ export function NexusChat() {
 
                 {/* Input Area */}
                 <div className="p-6 pt-2 border-t border-white/10 bg-black/40 backdrop-blur-3xl">
+                    {/* Attachment Preview Chips */}
+                    {pendingFiles.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mb-3 px-1">
+                            {pendingFiles.map((file, i) => (
+                                <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-xs font-medium text-indigo-300 animate-in fade-in duration-300">
+                                    <ImageIcon size={12} />
+                                    <span className="max-w-[160px] truncate">{file.name}</span>
+                                    <button
+                                        onClick={() => setPendingFiles(prev => prev.filter((_, idx) => idx !== i))}
+                                        className="w-4 h-4 rounded-full bg-white/10 flex items-center justify-center hover:bg-red-500/30 transition-colors"
+                                    >
+                                        <X size={10} />
+                                    </button>
+                                </div>
+                            ))}
+                            <span className="text-[9px] text-white/20 font-bold uppercase tracking-widest self-center">
+                                {pendingFiles.length} anexo(s) — escreva sua instrução e envie
+                            </span>
+                        </div>
+                    )}
+
                     <div className="relative">
                         <input
                             type="text"
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
                             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
-                            placeholder="Fale com o Nexus..."
+                            placeholder={pendingFiles.length > 0 ? 'Ex: Montar para o dia 30/05...' : 'Fale com o Nexus...'}
                             disabled={isTyping}
                             className="w-full h-14 pl-14 pr-16 rounded-2xl bg-white/5 border border-white/10 text-white placeholder-white/20 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/30 transition-all disabled:opacity-40"
                         />
@@ -753,78 +833,18 @@ export function NexusChat() {
                                 className="hidden" 
                                 accept="image/*"
                                 multiple
-                                onChange={async (e) => {
+                                onChange={(e) => {
                                     const files = Array.from(e.target.files || [])
                                     if (files.length === 0) return
-                                    // Reset the input value so the same file can be re-selected
                                     e.target.value = ''
-                                    
-                                    setIsTyping(true)
-                                    setCurrentStatus(`Nexus: Preparando ${files.length} arquivo(s)...`)
-                                    
-                                    try {
-                                        const { supabaseBrowser } = await import('../lib/supabaseBrowser')
-                                        
-                                        const uploadedUrls: { name: string; url: string }[] = []
-                                        const errors: string[] = []
-                                        
-                                        for (let i = 0; i < files.length; i++) {
-                                            const file = files[i]
-                                            setCurrentStatus(`Nexus: Subindo criativo ${i + 1} de ${files.length} (${file.name})...`)
-                                            
-                                            try {
-                                                const path = `uploads/${Date.now()}_${file.name}`
-                                                const { error } = await supabaseBrowser.storage.from('screenshots').upload(path, file)
-                                                
-                                                if (error) throw error
-                                                
-                                                const { data: { publicUrl } } = supabaseBrowser.storage.from('screenshots').getPublicUrl(path)
-                                                uploadedUrls.push({ name: file.name, url: publicUrl })
-                                            } catch (err: unknown) {
-                                                const errorMsg = err instanceof Error ? err.message : 'Erro desconhecido'
-                                                console.error('Upload error:', err)
-                                                errors.push(`${file.name}: ${errorMsg}`)
-                                            }
-                                        }
-                                        
-                                        // Reset typing state BEFORE calling handleSend to prevent deadlock
-                                        setIsTyping(false)
-                                        setCurrentStatus(null)
-                                        
-                                        if (uploadedUrls.length > 0) {
-                                            let hint = `Enviei ${uploadedUrls.length} criativo(s) para montagem:\n`
-                                            uploadedUrls.forEach(item => {
-                                                hint += `- ${item.name}: ${item.url}\n`
-                                            })
-                                            hint += `\nPor favor, vincule-os conforme os formatos sugeridos nos nomes dos arquivos e prepare a montagem.`
-                                            
-                                            handleSend(hint)
-                                        }
-                                        
-                                        if (errors.length > 0) {
-                                            setMessages(prev => [...prev, { 
-                                                role: 'assistant', 
-                                                content: `⚠️ Falha em ${errors.length} upload(s):\n${errors.map(e => `• ${e}`).join('\n')}`, 
-                                                success: false 
-                                            }])
-                                        }
-                                    } catch (err) {
-                                        console.error('Upload fatal error:', err)
-                                        setIsTyping(false)
-                                        setCurrentStatus(null)
-                                        setMessages(prev => [...prev, { 
-                                            role: 'assistant', 
-                                            content: '⚠️ Erro fatal no processo de upload. Verifique sua conexão e tente novamente.', 
-                                            success: false 
-                                        }])
-                                    }
+                                    setPendingFiles(prev => [...prev, ...files])
                                 }}
                             />
                         </label>
 
                         <button
                             onClick={() => handleSend()}
-                            disabled={!input.trim() || isTyping}
+                            disabled={(!input.trim() && pendingFiles.length === 0) || isTyping}
                             className="absolute right-2 top-1/2 -translate-y-1/2 w-12 h-12 rounded-[18px] bg-white text-black flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-2xl disabled:opacity-20 disabled:grayscale"
                         >
                             <Send size={20} />
