@@ -728,11 +728,11 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
         console.log('[Nexus AI Action] No manual override found. Passing to Nexus Brain (Gemini)...')
         const aiResult = await nexusBrain(prompt)
         
-        if (aiResult && aiResult.success) {
+        if (aiResult) {
             console.timeEnd('NexusTotal')
             return {
                 message: aiResult.message,
-                success: true,
+                success: aiResult.success,
                 actionPerformed: aiResult.actionPerformed as NexusResponse['actionPerformed'],
                 data: aiResult.data
             }
@@ -740,7 +740,7 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
 
         // Final Fallback (Should rarely be reached)
         return {
-            message: "Desculpe, tive um problema nos meus circuitos neurais. Como posso ajudar de outra forma?",
+            message: "Desculpe, tive um problema de comunicação com meus neurônios. Tente novamente em instantes.",
             success: false
         }
 

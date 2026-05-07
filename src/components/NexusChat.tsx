@@ -393,13 +393,23 @@ export function NexusChat() {
             } else {
                 // Call Supabase Edge Function DIRECTLY (bypasses Vercel 10s timeout)
                 console.log('[Nexus UI] Using Edge Function AI Core (direct)')
+                
+                const { supabaseBrowser: sb } = await import('../lib/supabaseBrowser')
                 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
                 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+                // Try to get active session JWT for auth
+                const { data: { session: currentSession } } = await sb.auth.getSession()
+                const authToken = currentSession?.access_token || supabaseAnonKey
+                
+                console.log(`[Nexus UI] Calling Edge Function (Auth: ${currentSession ? 'JWT' : 'AnonKey'})`)
+                
                 const response = await fetch(`${supabaseUrl}/functions/v1/nexus-chat`, {
                     method: 'POST',
                     headers: { 
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${supabaseAnonKey}`
+                        'Authorization': `Bearer ${authToken}`,
+                        'apikey': supabaseAnonKey || ''
                     },
                     body: JSON.stringify({
                         message: userMsg,
