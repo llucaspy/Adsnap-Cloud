@@ -285,7 +285,10 @@ export function NexusChat() {
                     setCurrentStatus(`Subindo criativo ${i + 1} de ${filesToUpload.length} (${file.name})...`)
                     
                     try {
-                        const path = `uploads/${Date.now()}_${file.name}`
+                        const extension = file.name.split('.').pop() || 'png'
+                        const safeName = `nx_${Math.random().toString(36).substring(2, 15)}_${Date.now()}.${extension}`
+                        const path = `uploads/${safeName}`
+                        
                         const { error } = await sb.storage.from('screenshots').upload(path, file)
                         if (error) throw error
                         const { data: { publicUrl } } = sb.storage.from('screenshots').getPublicUrl(path)
