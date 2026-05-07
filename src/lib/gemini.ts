@@ -1,7 +1,7 @@
 import type { EmailMessage } from './gmail'
 import * as brain from './nexusBrain'
 
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent'
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
 
 export interface ActionData {
     action: string | null
@@ -70,11 +70,25 @@ PERGUNTA: "${prompt}"
                 signal: controller.signal
             })
             console.timeEnd('[Gemini Fetch]')
+            
             const data = await response.json()
             clearTimeout(timeout)
+
+            if (!response.ok) {
+                console.error('[Gemini API Error]', data)
+                const errorCode = data.error?.code || response.status
+                const errorMsg = data.error?.message || 'Erro desconhecido'
+                
+                if (errorCode === 429) return 'ERRO_API: Limite de quota excedido no Gemini. Tente novamente em 60 segundos.'
+                if (errorCode === 403) return 'ERRO_API: Chave API inválida ou sem permissão.'
+                return `ERRO_API: (${errorCode}) ${errorMsg}`
+            }
+
             return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
-        } catch {
-            return ''
+        } catch (error: any) {
+            clearTimeout(timeout)
+            console.error('[Gemini Fetch Failed]', error)
+            return `ERRO_NETWORK: ${error.message || error}`
         }
     }
 
