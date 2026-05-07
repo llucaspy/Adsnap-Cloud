@@ -205,7 +205,8 @@ function isOperationalCommand(text: string): boolean {
         'como estão', 'como esta', 'métricas', 'metricas',
         'campanha', 'ver pi', 'detalhe',
         'alerta', 'avise', 'notifique',
-        'formato', 'agendar', 'schedule'
+        'formato', 'agendar', 'schedule',
+        'montagem', 'preparar', 'gerar print'
     ]
     
     // Short commands: exact or prefix match
@@ -378,9 +379,9 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
         console.log('[Nexus AI Action] Chamando Neural Brain (Async)...')
         console.time('NexusAI')
         
-        // Timeout de 8s para a IA (balanceado com o frontend de 20s)
+        // Timeout de 15s para a IA (balanceado com o frontend de 55s)
         const brainPromise = nexusBrain(prompt)
-        const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error('AI_TIMEOUT')), 8000))
+        const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error('AI_TIMEOUT')), 15000))
         
         let brainResult: NexusResponse | null = null
         try {
