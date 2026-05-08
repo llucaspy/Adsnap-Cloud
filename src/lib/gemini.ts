@@ -61,7 +61,8 @@ PERGUNTA: "${prompt}"
     CRITICAL: Diferencie "Captura" de "BI". BI = getCampaignBI. Captura = getCampaign ou runCapture.`
 
     // Model Rotation for maximum reliability when quota hits
-    const MODELS = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-1.5-flash-latest']
+    // Conforme diagnóstico v50.6, o Lite é o único que está passando na quota livre no momento.
+    const MODELS = ['gemini-flash-lite-latest', 'gemini-1.5-flash-latest', 'gemini-2.0-flash-lite-preview-02-05']
 
     async function callAI(text: string): Promise<string> {
         for (const model of MODELS) {
