@@ -16,15 +16,15 @@ export async function nexusBrain(prompt: string): Promise<NexusBrainResult> {
         return { message: 'Erro de configuração: Chave do OpenRouter ausente.', success: false }
     }
 
-    // Time Reserva (Cascata de 7 Modelos 100% Gratuitos)
+    // Time Reserva (Cascata de 7 Modelos Gratuitos - v51.1 com IDs verificados)
     const MODELS = [
-        'google/gemini-2.0-flash-001:free',
-        'meta-llama/llama-3.1-8b-instruct:free',
-        'qwen/qwen-2.5-72b-instruct:free',
-        'google/gemini-flash-1.5:free',
+        'google/gemma-4-31b-it:free',
+        'google/lyria-3-pro-preview',
+        'openai/gpt-oss-120b:free',
+        'meta-llama/llama-3.3-70b-instruct:free',
+        'qwen/qwen3-coder:free',
         'meta-llama/llama-3.2-3b-instruct:free',
-        'mistralai/mistral-7b-instruct:free',
-        'openrouter/auto-free'
+        'openrouter/free'
     ]
 
     const systemPrompt = `Você é o Nexus AI, o cérebro operacional da Adsnap.
