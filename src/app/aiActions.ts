@@ -379,17 +379,15 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
         console.log('[Nexus AI Action] Chamando Neural Brain (Async)...')
         console.time('NexusAI')
         
-        // Timeout de 15s para a IA (balanceado com o frontend de 55s)
+        // Timeout de 12s para a IA (balanceado com o limite de 30s no frontend)
         const brainPromise = nexusBrain(prompt)
-        const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error('AI_TIMEOUT')), 15000))
+        const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error('AI_TIMEOUT')), 12000))
         
         let brainResult: NexusResponse | null = null
         try {
             brainResult = await Promise.race([brainPromise, timeoutPromise]) as NexusResponse
         } catch (err) {
-            const isTimeout = err instanceof Error && err.message === 'AI_TIMEOUT'
-            console.warn(`[Nexus AI] Brain ${isTimeout ? 'Timeout (8s limit)' : 'Error'}:`, err)
-            // AI failed or timed out — continue to manual fallbacks
+            console.warn('[Nexus AI] Brain Error or Timeout:', err)
         }
         console.timeEnd('NexusAI')
         

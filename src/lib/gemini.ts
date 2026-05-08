@@ -1,9 +1,9 @@
 import type { EmailMessage } from './gmail'
 import * as brain from './nexusBrain'
 
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent'
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
-const OPENROUTER_MODELS = ['google/gemini-2.0-flash-001', 'qwen/qwen-2.5-72b-instruct']
+const OPENROUTER_MODELS = ['google/gemini-flash-1.5', 'google/gemini-pro', 'qwen/qwen-2.5-72b-instruct']
 
 export interface ActionData {
     action: string | null
@@ -62,11 +62,11 @@ PERGUNTA: "${prompt}"
 
     // Try Gemini first, then OpenRouter models as fallback
     async function callAI(text: string): Promise<string> {
-        // 1. Try Gemini (primary)
+        // 1. Try Gemini (primary) - 8s timeout
         try {
             console.log('[Nexus AI] Trying Gemini (primary)...')
             const controller = new AbortController()
-            const timeout = setTimeout(() => controller.abort(), 30000)
+            const timeout = setTimeout(() => controller.abort(), 8000)
             const response = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -95,7 +95,7 @@ PERGUNTA: "${prompt}"
             try {
                 console.log(`[Nexus AI] Trying OpenRouter: ${model}...`)
                 const controller = new AbortController()
-                const timeout = setTimeout(() => controller.abort(), 30000)
+                const timeout = setTimeout(() => controller.abort(), 8000)
                 const response = await fetch(OPENROUTER_URL, {
                     method: 'POST',
                     headers: {
