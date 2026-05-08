@@ -1,445 +1,120 @@
-import type { EmailMessage } from './gmail'
-import * as brain from './nexusBrain'
 
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
+import { NexusBrainResult } from '../types/nexus'
+import { extractHumanAnswer } from './aiUtils'
+
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
-const OPENROUTER_MODELS = ['google/gemini-flash-1.5', 'qwen/qwen-2.5-72b-instruct']
 
-export interface ActionData {
-    action: string | null
-    params: Record<string, unknown>
-    answer?: string
-}
-
-export interface NexusBrainResult {
-    message: string
-    success: boolean
-    actionPerformed?: 'CAPTURE' | 'CAPTURE_ALL' | 'ARCHIVE' | 'REGISTRATION_PREVIEW' | 'UPDATE_URL' | 'DELETE_WIZARD'
-    data?: unknown
-}
-
+/**
+ * v51.0: Transição Total para OpenRouter (Zero Custo / 7 Modelos Reserva)
+ * Removido Gemini direto para evitar erros de quota 429 persistentes.
+ */
 export async function nexusBrain(prompt: string): Promise<NexusBrainResult> {
-    const apiKey = process.env.GEMINI_API_KEY || ''
-    if (!apiKey) return { message: 'GEMINI_API_KEY não configurada', success: false }
+    const apiKey = process.env.OPENROUTER_API_KEY
+    
+    if (!apiKey) {
+        console.error('[Nexus AI] OPENROUTER_API_KEY não configurada em .env.local')
+        return { message: 'Erro de configuração: Chave do OpenRouter ausente.', success: false }
+    }
 
-    const systemPrompt = `Você é o Nexus AI, o núcleo neural do Adsnap Cloud. 
-    Sua missão é ser um consultor de AdOps sênior, analítico e proativo.
+    // Time Reserva (Cascata de 7 Modelos 100% Gratuitos)
+    const MODELS = [
+        'google/gemini-2.0-flash-001:free',
+        'meta-llama/llama-3.1-8b-instruct:free',
+        'qwen/qwen-2.5-72b-instruct:free',
+        'google/gemini-flash-1.5:free',
+        'meta-llama/llama-3.2-3b-instruct:free',
+        'mistralai/mistral-7b-instruct:free',
+        'openrouter/auto-free'
+    ]
 
-    CAPACIDADES VISUAIS (LIBERDADE TOTAL):
-    - GRÁFICOS: Para análises de tendência ou métricas, você PODE incluir um campo "chartData" no seu JSON de resposta (com action "none" se for apenas conversa).
-      Formato chartData: { type: "area"|"bar"|"pie", data: [{name: "Jan", v: 10}, ...], keys: ["v"], xAxis: "name", title: "Título" }
-    - DIAGRAMAS: Para processos ou fluxos, use blocos de código mermaid: \`\`\`mermaid ... \`\`\`
-    - TABELAS: Use tabelas Markdown para dados comparativos.
-    - ANALISE: Sempre que mostrar dados, faça uma análise de Pacing, Viewability e Pior/Melhor performance.
-
-    INSTRUÇÕES DE RESPOSTA:
-BI (BUSINESS INTELLIGENCE):
-No Adsnap, "BI" ou "Métricas" refere-se especificamente aos dados de entrega vindos do Dashboard AdOps (Viewability, Meta, Entregue, Pacing, Projeção). CAPTURAS (prints) não são BI. Ao ser solicitado por "BI", "Métricas", "Desempenho", "Saúde do Flight" ou "Como está a entrega", utilize obrigatoriamente getCampaignBI.
-
-CONHECIMENTO DO SISTEMA:
-- Campanhas (Campaigns): Status (ACTIVE, PENDING, ARCHIVED). 
-- AdOps BI: Métricas de performance calculadas em tempo real. Pacing (ritmo de entrega), Viewability (visibilidade), Projection (projeção de término).
-
-FERRAMENTAS DISPONÍVEIS:
-- searchCampaigns(query) - Busca básica por Nome ou PI.
-- getCampaign(idOrPi) - Detalhes de status e capturas (prints). Use para quando o foco for capturas ou status geral.
-- getCampaignBI(piOrName) - DETALHES DE BI e ADOPS. Use para análises de entrega, pacing, metas e projeções.
-- getAdOpsSummary() - Análise de BI global (saúde de TODO o sistema).
-- createCampaign, archiveCampaign, runCapture, getLogs - Operações de gestão.
-- deleteWizard() - VOCÊ PRECISA USAR ESTA FERRAMENTA sempre que o usuário quiser APAGAR, DELETAR ou LIMPAR campanhas ou prints. Ela abre um assistente interativo para seleção.
-- setCampaignThreshold(piOrId, threshold) - Configura um ALERTA de entrega diária. Use quando o usuário pedir para ser avisado ou notificado quando uma campanha atingir X impressões no dia.
-
-INSTRUÇÕES DE RESPOSTA:
-1. Pense como um analista: se o usuário quer saber "como está a Pé de Meia", ele quer um BI. Use getCampaignBI.
-2. Se o usuário quiser apagar algo, use obrigatoriamente deleteWizard().
-3. Responda em JSON: {"action": "ferramenta", "params": {...}, "answer": "Intro curta"}
-4. **TONALIDADE**: Profissional, analítico, direto e propositivo. Se encontrar um Pacing baixo, sugira otimização.
-5. Responda em PORTUGUÊS.
-
-PERGUNTA: "${prompt}"
-
+    const systemPrompt = `Você é o Nexus AI, o cérebro operacional da Adsnap.
+    Siga estritamente as ferramentas disponíveis e responda em JSON se for uma ação, ou texto natural se for conversa.
+    
+    Contexto do Usuário: ${prompt}
+    
     CRITICAL: Diferencie "Captura" de "BI". BI = getCampaignBI. Captura = getCampaign ou runCapture.`
 
-    // Model Rotation for maximum reliability when quota hits
-    // Conforme diagnóstico v50.6, o Lite é o único que está passando na quota livre no momento.
-    const MODELS = ['gemini-flash-lite-latest', 'gemini-1.5-flash-latest', 'gemini-2.0-flash-lite-preview-02-05']
-
-    async function callAI(text: string): Promise<string> {
+    async function callOpenRouter(text: string): Promise<string> {
         for (const model of MODELS) {
             try {
-                console.log(`[Nexus AI] Trying Gemini Model: ${model}...`)
+                console.log(`[Nexus AI] Tentando modelo reserva: ${model}...`)
                 const controller = new AbortController()
-                const timeout = setTimeout(() => controller.abort(), 8000)
+                // Timeout curto de 6s por modelo para garantir que a cascata rode dentro do limite do Vercel Hobby
+                const timeout = setTimeout(() => controller.abort(), 6000)
                 
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
-                const response = await fetch(url, {
+                const response = await fetch(OPENROUTER_URL, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ contents: [{ parts: [{ text }] }] }),
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json',
+                        'HTTP-Referer': 'https://adsnap.cloud', // Opcional, ajuda no ranking do OR
+                        'X-Title': 'Nexus AI'
+                    },
+                    body: JSON.stringify({
+                        model,
+                        messages: [{ role: 'user', content: text }],
+                        temperature: 0.1,
+                    }),
                     signal: controller.signal
                 })
                 
-                const data = await response.json()
                 clearTimeout(timeout)
+                const data = await response.json()
                 
                 if (response.ok) {
-                    const result = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
-                    if (result) return result
+                    const result = data.choices?.[0]?.message?.content?.trim()
+                    if (result) {
+                        console.log(`[Nexus AI] Sucesso com modelo: ${model}`)
+                        return result
+                    }
+                } else {
+                    console.warn(`[Nexus AI] Modelo ${model} indisponível (Status ${response.status}):`, data.error?.message)
                 }
-                console.warn(`[Nexus AI] Model ${model} failed:`, response.status)
             } catch (err) {
-                console.warn(`[Nexus AI] Model ${model} error:`, err)
+                console.warn(`[Nexus AI] Falha crítica no modelo ${model}:`, err instanceof Error ? err.message : err)
             }
         }
         return ''
     }
 
-    /**
-     * Tenta extrair a mensagem humana de uma resposta do Gemini,
-     * ignorando estruturas JSON ou blocos técnicos.
-     */
-    function extractHumanAnswer(text: string): string {
-        if (!text) return ""
+    try {
+        console.log('[Nexus AI] Iniciando processamento v51.0 (OpenRouter Cascade)...')
+        const rawResult = await callOpenRouter(systemPrompt)
         
-        let workingText = text
+        if (!rawResult) {
+            return { message: 'Nexus indisponível no momento (Quota OpenRouter esgotada).', success: false }
+        }
 
-        // 1. First, handle explicit code blocks which are often used for JSON
-        workingText = workingText.replace(/```json[\s\S]*?```/g, (match) => {
+        // Tenta extrair JSON de ação ou resposta direta
+        const jsonMatch = rawResult.match(/\{[\s\S]*\}/)
+        if (jsonMatch) {
             try {
-                const content = match.replace(/```json|```/g, '').trim()
-                const data = JSON.parse(content)
-                return data.answer || ""
-            } catch {
-                return "" // Remove invalid JSON blocks
-            }
-        })
-        workingText = workingText.replace(/```[\s\S]*?```/g, '')
-
-        // 2. Identify and process potential JSON blocks outside code fences
-        // This regex looks for { ... "action": ... } pattern
-        const jsonBlockPattern = /\{[\s\S]*?"action"[\s\S]*?\}/g
-        workingText = workingText.replace(jsonBlockPattern, (match) => {
-            try {
-                const data = JSON.parse(match)
-                return data.answer || ""
-            } catch {
-                // If not valid JSON, but matched the pattern, it's likely the technical block
-                return ""
-            }
-        })
-
-        // 3. Final cleanup: remove any leftover singleton braces that look like broken JSON
-        // but be careful not to remove conversational ones.
-        // For now, the above should cover 99% of cases.
-
-        return workingText.trim() || text
-    }
-
-    try {
-        const rawResult = await callAI(systemPrompt)
-        if (!rawResult) return { message: 'Sem resposta da IA (v50.3).', success: false }
-        
-        console.log('[Nexus Brain] Answer:', rawResult)
-        
-        let actionData: ActionData
-        try {
-            const jsonMatch = rawResult.match(/\{[\s\S]*\}/)
-            const jsonStr = jsonMatch ? jsonMatch[0] : rawResult
-            actionData = JSON.parse(jsonStr)
-        } catch {
-            return { message: extractHumanAnswer(rawResult), success: true }
-        }
-        
-        if (!actionData.action) {
-            const humanMessage = extractHumanAnswer(actionData.answer || rawResult)
-            
-            return { 
-                message: humanMessage || "Entendido. Como posso ajudar mais?", 
-                success: true 
+                const actionData = JSON.parse(jsonMatch[0])
+                if (actionData.action) {
+                    return {
+                        action: actionData.action,
+                        params: actionData.params || {},
+                        answer: actionData.answer || 'Processando sua solicitação...',
+                        success: true
+                    }
+                }
+                return {
+                    message: actionData.answer || actionData.message || rawResult,
+                    success: true
+                }
+            } catch (pErr) {
+                console.error('[Nexus AI] Erro ao parsear JSON:', pErr)
             }
         }
-        
-        const { action, params, answer: introAnswer } = actionData
-        let result: brain.BrainResponse | null = null
-        
-        switch (action) {
-            case 'searchCampaigns':
-                result = await brain.searchCampaigns(params.query as string)
-                break
-            case 'listCampaigns':
-                result = await brain.listCampaigns(params)
-                break
-            case 'getCampaign':
-                result = await brain.getCampaign(params.idOrPi as string || params.id as string)
-                break
-            case 'createCampaign':
-                result = await brain.createCampaign(params as any)
-                break
-            case 'updateCampaign':
-                result = await brain.updateCampaign(params.id as string, params.data as Record<string, unknown>)
-                break
-            case 'archiveCampaign':
-                result = await brain.archiveCampaign(params.id as string)
-                break
-            case 'runCapture':
-                result = await brain.runCapture(params.campaignId as string)
-                break
-            case 'getAdOpsSummary':
-                result = await brain.getAdOpsSummary()
-                break
-            case 'getCampaignBI':
-                result = await brain.getCampaignBI(params.piOrName as string)
-                break
-            case 'getStorageStats':
-                result = await brain.getStorageStats()
-                break
-            case 'getSettings':
-                result = await brain.getSettings()
-                break
-            case 'getLogs':
-                result = await brain.getLogs(params.limit as number | undefined)
-                break
-            case 'deleteWizard':
-                result = await brain.getDeleteWizardData()
-                break
-            case 'setCampaignThreshold':
-                result = await brain.setCampaignThreshold(params.piOrId as string, params.threshold as number)
-                break
-            default:
-                return { message: `Ação "${action}" não reconhecida`, success: false }
-        }
-        
-        if (result?.success) {
-            // SECOND PASS: Permitir que a IA veja o resultado do banco e formule a resposta final
-            // Isso "ensina" a IA a operar e consultar antes de falar.
-            const secondPrompt = `${systemPrompt}
-            
-            O resultado da ferramenta "${action}" foi:
-            ${typeof result.data === 'string' ? result.data : JSON.stringify(result.data, null, 2)}
-            
-            ${result.message}
-            
-            Com base NO RESULTADO ACIMA, forneça uma resposta FINAL e ANALÍTICA para o usuário.
-            REGRAS DE BI:
-            - Se for um detalhe de campanha (BI), analise métricas como Pacing (Meta vs Realizado), Viewability e Projeção.
-            - Se o Pacing estiver abaixo de 100%, sugira maior volume de entrega.
-            - Use tabelas Markdown se houver muitos dados numéricos.
-            - Identifique a variação da campanha (Mobile/Desktop/Seção) se houver múltiplas.
-            - Mantenha o tom de um consultor de AdOps sênior, evitando ser apenas um repetidor de dados.`
 
-            console.log('[Nexus Brain] Iniciando 2nd Pass (Context Aware)...')
-            const finalAnswer = await callAI(secondPrompt).catch(() => null)
-            
-            const responseMsg = extractHumanAnswer(finalAnswer || introAnswer || result.message)
-            
-            // Map brain action to UI actionPerformed
-            let perf: NexusBrainResult['actionPerformed'] = undefined
-            if (action === 'runCapture') perf = 'CAPTURE'
-            if (action === 'archiveCampaign') perf = 'ARCHIVE'
-            if (action === 'createCampaign') perf = 'REGISTRATION_PREVIEW'
-            if (action === 'updateCampaign') perf = 'UPDATE_URL'
-            if (action === 'deleteWizard') perf = 'DELETE_WIZARD'
-
-            return { 
-                message: responseMsg, 
-                success: true, 
-                actionPerformed: perf,
-                data: perf === 'REGISTRATION_PREVIEW' ? [result.data] : result.data 
-            }
-        } else {
-            return { message: result?.message || 'Erro ao executar ação', success: false }
+        const humanMessage = extractHumanAnswer(rawResult)
+        return { 
+            message: humanMessage || "Entendido. Como posso ajudar mais?", 
+            success: true 
         }
-        
+
     } catch (error) {
-        console.error('[Nexus Brain] Erro:', error)
-        return { message: `Erro: ${error}`, success: false }
+        console.error('[Nexus AI] Fallback v51.0 ativado por erro:', error)
+        return { message: 'Erro interno no núcleo neural v51.0.', success: false }
     }
-}
-
-/**
- * Worker use: classify if an email is a real human communication directed to the user,
- * or automated noise (newsletters, NF alerts, system notifications).
- */
-export async function classifyEmail(email: EmailMessage): Promise<boolean> {
-    const apiKey = process.env.GEMINI_API_KEY || ''
-    if (!apiKey) return false
-
-    const payload = {
-        contents: [{
-            parts: [{
-                text: `Você é um classificador de e-mails corporativos. Analise o e-mail abaixo e determine se é uma COMUNICAÇÃO REAL de uma pessoa (SIM) ou uma notificação automática/sistema (NAO).
-
-DE: ${email.from}
-PARA: ${email.to}
-ASSUNTO: ${email.subject}
-PREVIEW: ${email.snippet}
-
-Responda APENAS "SIM" ou "NAO".`
-            }]
-        }]
-    }
-
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 30000) // 30s timeout
-
-    try {
-        const response = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-            signal: controller.signal
-        })
-        const data = await response.json()
-        clearTimeout(timeout)
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim().toUpperCase() || ''
-        return text.includes('SIM')
-    } catch (error) {
-        clearTimeout(timeout)
-        console.error('[Gemini] Erro na classificação:', error)
-        return false
-    }
-}
-
-/**
- * Smart Gmail Query Builder - Gemini interprets directly
- */
-export async function buildGmailQuery(prompt: string, currentDate: string): Promise<string> {
-    const apiKey = process.env.GEMINI_API_KEY || ''
-    if (!apiKey) return 'to:me newer_than:1d'
-
-    const userEmail = process.env.GMAIL_USER_EMAIL || ''
-
-    const payload = {
-        contents: [{
-            parts: [{
-                text: `Analise a pergunta do usuário e gere uma query para o Gmail.
-
-Pergunta: "${prompt}"
-Seu email: ${userEmail}
-Data atual: ${currentDate}
-
-INSTRUÇÕES:
-- Interprete a intenção do usuário
-- Se mencionar alguém ("do ad", "do joão", "da maria") -> from:NOME
-- Se perguntar sobre "para mim" -> to:${userEmail}
-- Se não mencionar tempo -> buscar dos últimos 7 dias por padrão
-- Se mencionar "último", "hoje", "ontem" -> ajuste o período
-
-Retorne APENAS a query do Gmail (ex: from:Adreson to:${userEmail} newer_than:7d)`
-            }]
-        }]
-    }
-
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 30000)
-
-    try {
-        const response = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-            signal: controller.signal
-        })
-        const data = await response.json()
-        clearTimeout(timeout)
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim().replace(/"/g, '').replace(/\./g, '') || 'newer_than:7d'
-        return text
-    } catch (error) {
-        clearTimeout(timeout)
-        console.error('[Gemini] Erro ao construir query:', error)
-        return 'newer_than:7d'
-    }
-}
-
-/**
- * Chat use: Gemini directly interprets the question and formats answer
- */
-export async function askGeminiAboutEmails(
-    userQuestion: string,
-    emails: EmailMessage[],
-    finalQuery: string
-): Promise<string> {
-    const apiKey = process.env.GEMINI_API_KEY || ''
-    if (!apiKey) return 'Chave do Gemini não configurada.'
-
-    if (emails.length === 0) {
-        return `### 📧 Resultados
-
-Nenhum e-mail encontrado para "${userQuestion}"
-
-> Query usada: \`${finalQuery}\``
-    }
-
-    const userEmail = process.env.GMAIL_USER_EMAIL || ''
-    const emailList = emails.map((e, i) => {
-        const date = new Date(parseInt(e.date)).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
-        const isDirect = e.to.toLowerCase().includes(userEmail.toLowerCase()) ? '📨' : '📤'
-        return `${isDirect} **Email ${i + 1}**
-De: ${e.from}
-Assunto: ${e.subject}
-Data: ${date}
-Preview: ${e.snippet}`
-    }).join('\n\n---\n')
-
-    const payload = {
-        contents: [{
-            parts: [{
-                text: `Você é o Nexus, assistente do Adsnap Cloud.
-O usuário perguntou: "${userQuestion}"
-
-Emails encontrados:
-${emailList}
-
-Responda de forma direta e útil. Se a pergunta for sobre "último email" ou "email mais recente", mostre o mais recente. Use emojis.`
-            }]
-        }]
-    }
-
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 60000) // 60s for chat
-
-    try {
-        const response = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-            signal: controller.signal
-        })
-        const data = await response.json()
-        clearTimeout(timeout)
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
-        
-        if (!text) return formatFallbackResponse(emails, userQuestion, finalQuery)
-        
-        return text
-    } catch {
-        clearTimeout(timeout)
-        return formatFallbackResponse(emails, userQuestion, finalQuery)
-    }
-}
-
-function formatFallbackResponse(emails: EmailMessage[], question: string, query: string): string {
-    const userEmail = process.env.GMAIL_USER_EMAIL || ''
-    
-    const directEmails = emails.filter(e => e.to.toLowerCase().includes(userEmail.toLowerCase()))
-    const displayEmails = directEmails.length > 0 ? directEmails : emails.slice(0, 3)
-    
-    let response = `### 📧 Relatório de E-mails\n\n**Sua pergunta:** "${question}"\n\n`
-    
-    if (directEmails.length > 0) {
-        response += `**Encontrados ${directEmails.length} email(s) direto(s) para você:**\n\n`
-    }
-    
-    displayEmails.forEach((e, i) => {
-        const fromName = e.from.replace(/<.*>/, '').trim()
-        const dateStr = new Date(parseInt(e.date)).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
-        response += `${i + 1}. **De:** ${fromName}\n`
-        response += `   **Assunto:** ${e.subject}\n`
-        response += `   **Data:** ${dateStr}\n`
-        response += `   **Preview:** ${e.snippet.substring(0, 100)}...\n\n`
-    })
-    
-    response += `---\n*Busca: \`${query}\` | Total: ${emails.length} email(s)*`
-    
-    return response
 }
