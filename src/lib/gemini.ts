@@ -184,8 +184,7 @@ PERGUNTA: "${prompt}"
         }
         
         if (!actionData.action) {
-            // Human conversation or Tool result that Gemini put in 'answer' directly (though 1st pass should use null action)
-            const humanMessage = extractHumanAnswer(actionData.answer || resultText)
+            const humanMessage = extractHumanAnswer(actionData.answer || rawResult)
             
             return { 
                 message: humanMessage || "Entendido. Como posso ajudar mais?", 
