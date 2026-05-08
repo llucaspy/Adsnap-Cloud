@@ -62,11 +62,11 @@ PERGUNTA: "${prompt}"
 
     // Try Gemini first, then OpenRouter models as fallback
     async function callAI(text: string): Promise<string> {
-        // 1. Try Gemini (primary) - 8s timeout
+        // 1. Try Gemini (primary) - 5s timeout (Hobby limit is 10s total)
         try {
             console.log('[Nexus AI] Trying Gemini (primary)...')
             const controller = new AbortController()
-            const timeout = setTimeout(() => controller.abort(), 8000)
+            const timeout = setTimeout(() => controller.abort(), 5000)
             const response = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -95,7 +95,7 @@ PERGUNTA: "${prompt}"
             try {
                 console.log(`[Nexus AI] Trying OpenRouter: ${model}...`)
                 const controller = new AbortController()
-                const timeout = setTimeout(() => controller.abort(), 8000)
+                const timeout = setTimeout(() => controller.abort(), 4000)
                 const response = await fetch(OPENROUTER_URL, {
                     method: 'POST',
                     headers: {

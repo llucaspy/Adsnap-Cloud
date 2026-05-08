@@ -379,9 +379,9 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
         console.log('[Nexus AI Action] Chamando Neural Brain (Async)...')
         console.time('NexusAI')
         
-        // Timeout de 12s para a IA (balanceado com o limite de 30s no frontend)
+        // Timeout de 9s para a IA (essencial para o limite de 10s do Vercel Hobby)
         const brainPromise = nexusBrain(prompt)
-        const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error('AI_TIMEOUT')), 12000))
+        const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error('AI_TIMEOUT')), 9000))
         
         let brainResult: NexusResponse | null = null
         try {
