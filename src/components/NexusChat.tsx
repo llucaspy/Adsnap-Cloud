@@ -437,23 +437,19 @@ export function NexusChat() {
         try {
             if (isLegacyAction) {
                 // Use the legacy processNexusCommand for actions that need server-side execution
+                // This MUST stay on Vercel — the Edge Function cannot execute DB operations
                 console.log('[Nexus UI] Legacy action detected, using processNexusCommand')
                 const response = await Promise.race([
                     processNexusCommand(userMsg),
-                    new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 20000))
-                ]).catch((err) => {
-                    console.warn('[Nexus UI] Vercel brain error/timeout, will fallback:', err)
-                    return null
-                })
+                    new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 30000))
+                ])
                 
-                // If Vercel fails OR returns an API error (quota/auth/etc), CASCADE!
-                if (!response || !response.success || (response.message && response.message.includes('ERRO_API'))) {
-                    console.log('[Nexus UI] Brain 1 (Vercel) unstable. Cascading to Brain 2 (Edge Function)...')
-                    await callEdgeFunction(userMsg, safetyTimer)
+                clearTimeout(safetyTimer)
+                if (!response) {
+                    setMessages(prev => [...prev, { role: 'assistant', content: '⚠️ O núcleo neural não respondeu. Tente novamente.', success: false }])
+                    cleanup()
                     return
                 }
-
-                clearTimeout(safetyTimer)
 
                 if (response.actionPerformed === 'REGISTRATION_PREVIEW' && response.data) {
                     setPendingCampaigns(response.data)
@@ -480,11 +476,19 @@ export function NexusChat() {
                     setIsGlobalPolling(true)
                 }
             } else {
+                // Generic chat — use the Edge Function (has its own multi-model cascade)
                 await callEdgeFunction(userMsg, safetyTimer)
             }
         } catch (error) {
-            console.error('[Nexus UI] Fatal handleSend error, trying emergency fallback:', error)
-            await callEdgeFunction(userMsg, safetyTimer)
+            clearTimeout(safetyTimer)
+            console.error('[Nexus UI] handleSend error:', error)
+            setMessages(prev => [...prev, {
+                role: 'assistant',
+                content: error instanceof Error && error.message === 'Timeout'
+                    ? '⏳ O servidor está demorando demais. Tente novamente.'
+                    : '⚠️ Erro de comunicação com o Nexus. Tente novamente.',
+                success: false
+            }])
         } finally {
             clearTimeout(safetyTimer)
             cleanup()

@@ -1,7 +1,9 @@
 import type { EmailMessage } from './gmail'
 import * as brain from './nexusBrain'
 
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-001:generateContent'
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
+const OPENROUTER_MODELS = ['google/gemini-2.0-flash-001', 'qwen/qwen-2.5-72b-instruct']
 
 export interface ActionData {
     action: string | null
@@ -58,38 +60,71 @@ PERGUNTA: "${prompt}"
 
     CRITICAL: Diferencie "Captura" de "BI". BI = getCampaignBI. Captura = getCampaign ou runCapture.`
 
-    async function callGemini(text: string): Promise<string> {
-        const controller = new AbortController()
-        const timeout = setTimeout(() => controller.abort(), 100000)
+    // Try Gemini first, then OpenRouter models as fallback
+    async function callAI(text: string): Promise<string> {
+        // 1. Try Gemini (primary)
         try {
-            console.time('[Gemini Fetch]')
+            console.log('[Nexus AI] Trying Gemini (primary)...')
+            const controller = new AbortController()
+            const timeout = setTimeout(() => controller.abort(), 30000)
             const response = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ contents: [{ parts: [{ text }] }] }),
                 signal: controller.signal
             })
-            console.timeEnd('[Gemini Fetch]')
-            
             const data = await response.json()
             clearTimeout(timeout)
-
-            if (!response.ok) {
-                console.error('[Gemini API Error]', data)
-                const errorCode = data.error?.code || response.status
-                const errorMsg = data.error?.message || 'Erro desconhecido'
-                
-                if (errorCode === 429) return 'ERRO_API: Limite de quota excedido no Gemini. Tente novamente em 60 segundos.'
-                if (errorCode === 403) return 'ERRO_API: Chave API inválida ou sem permissão.'
-                return `ERRO_API: (${errorCode}) ${errorMsg}`
+            if (response.ok) {
+                const result = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
+                if (result) return result
             }
-
-            return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || ''
-        } catch (error: any) {
-            clearTimeout(timeout)
-            console.error('[Gemini Fetch Failed]', error)
-            return `ERRO_NETWORK: ${error.message || error}`
+            console.warn('[Nexus AI] Gemini failed:', response.status, data.error?.message)
+        } catch (err) {
+            console.warn('[Nexus AI] Gemini error:', err)
         }
+
+        // 2. Try OpenRouter models as fallback
+        const orKey = process.env.OPENROUTER_API_KEY
+        if (!orKey) {
+            console.error('[Nexus AI] No OPENROUTER_API_KEY, cannot fallback')
+            return ''
+        }
+
+        for (const model of OPENROUTER_MODELS) {
+            try {
+                console.log(`[Nexus AI] Trying OpenRouter: ${model}...`)
+                const controller = new AbortController()
+                const timeout = setTimeout(() => controller.abort(), 30000)
+                const response = await fetch(OPENROUTER_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${orKey}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        model,
+                        messages: [{ role: 'user', content: text }],
+                    }),
+                    signal: controller.signal
+                })
+                const data = await response.json()
+                clearTimeout(timeout)
+                if (response.ok) {
+                    const result = data.choices?.[0]?.message?.content?.trim()
+                    if (result) {
+                        console.log(`[Nexus AI] OpenRouter ${model} succeeded`)
+                        return result
+                    }
+                }
+                console.warn(`[Nexus AI] OpenRouter ${model} failed:`, response.status)
+            } catch (err) {
+                console.warn(`[Nexus AI] OpenRouter ${model} error:`, err)
+            }
+        }
+
+        console.error('[Nexus AI] All models exhausted')
+        return ''
     }
 
     /**
@@ -134,7 +169,7 @@ PERGUNTA: "${prompt}"
     }
 
     try {
-        const rawResult = await callGemini(systemPrompt)
+        const rawResult = await callAI(systemPrompt)
         const resultText = rawResult // Mantemos o bruto para o parse original abaixo
         console.log('[Nexus Brain] Gemini 1st Pass:', resultText)
         
@@ -229,7 +264,7 @@ PERGUNTA: "${prompt}"
             - Mantenha o tom de um consultor de AdOps sênior, evitando ser apenas um repetidor de dados.`
 
             console.log('[Nexus Brain] Iniciando 2nd Pass (Context Aware)...')
-            const finalAnswer = await callGemini(secondPrompt).catch(() => null)
+            const finalAnswer = await callAI(secondPrompt).catch(() => null)
             
             const responseMsg = extractHumanAnswer(finalAnswer || introAnswer || result.message)
             
