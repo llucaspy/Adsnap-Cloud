@@ -262,6 +262,90 @@ export function NexusChat() {
         return () => clearInterval(interval)
     }, [])
 
+    const [isGlobalPolling, setIsGlobalPolling] = useState(false)
+
+    // Helper for direct Edge Function calls (provides a secondary brain path)
+    const callEdgeFunction = async (userMsg: string, safetyTimer: any) => {
+        console.log('[Nexus UI] Calling Edge Function AI Core (direct/fallback)')
+        setCurrentStatus('Conectando ao núcleo de backup...')
+        
+        try {
+            const { supabaseBrowser: sb } = await import('../lib/supabaseBrowser')
+            const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+            const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+            const { data: { session: currentSession } } = await sb.auth.getSession()
+            const authToken = currentSession?.access_token || supabaseAnonKey
+            
+            const response = await fetch(`${supabaseUrl}/functions/v1/nexus-chat`, {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`,
+                    'apikey': supabaseAnonKey || ''
+                },
+                body: JSON.stringify({
+                    message: userMsg,
+                    sessionId: sessionIdRef.current,
+                    callerRole: session?.role || 'guest',
+                    callerEmail: session?.email || 'anonymous',
+                }),
+            })
+
+            clearTimeout(safetyTimer)
+            
+            if (!response.body) throw new Error('No response body')
+            const reader = response.body.getReader()
+            const decoder = new TextDecoder()
+            let buffer = ''
+
+            while (true) {
+                const { done, value } = await reader.read()
+                if (done) break
+                
+                buffer += decoder.decode(value, { stream: true })
+                const lines = buffer.split('\n')
+                buffer = lines.pop() || ''
+
+                for (const line of lines) {
+                    if (!line.trim()) continue
+                    try {
+                        const chunk = JSON.parse(line)
+                        if (chunk.type === 'status') {
+                            setCurrentStatus(chunk.content)
+                        } else if (chunk.type === 'error') {
+                            setMessages(prev => [...prev, { role: 'assistant', content: chunk.msg, success: false }])
+                        } else if (chunk.type === 'final') {
+                            let aiMsg = chunk.message
+                            let aiCommand = chunk.command
+                            
+                            setMessages(prev => {
+                                if (prev.some(m => m.content === aiMsg && m.role === 'assistant')) return prev
+                                return [...prev, { 
+                                    role: 'assistant', 
+                                    content: aiMsg,
+                                    command: aiCommand,
+                                    type: aiCommand ? 'action' : 'status'
+                                }]
+                            })
+                            setCurrentStatus(null)
+                        }
+                    } catch (err) {
+                        console.error('Error parsing stream chunk:', err)
+                    }
+                }
+            }
+        } catch (error: any) {
+            console.error('[Nexus UI] Backup brain failed:', error)
+            setMessages(prev => [...prev, { 
+                role: 'assistant', 
+                content: `⚠️ Ambos os núcleos falharam. Erro técnico: ${error.message || error}`, 
+                success: false 
+            }])
+            setCurrentStatus(null)
+        }
+    }
+
     const handleSend = async (customPrompt?: string) => {
         const userMsg = (customPrompt || input).trim()
         const filesToUpload = [...pendingFiles]
@@ -357,14 +441,19 @@ export function NexusChat() {
                 const response = await Promise.race([
                     processNexusCommand(userMsg),
                     new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 20000))
-                ])
+                ]).catch((err) => {
+                    console.warn('[Nexus UI] Vercel brain error/timeout, will fallback:', err)
+                    return null
+                })
                 
-                clearTimeout(safetyTimer)
-                if (!response) {
-                    setMessages(prev => [...prev, { role: 'assistant', content: '⚠️ O núcleo neural não respondeu.', success: false }])
-                    cleanup()
+                // If Vercel fails OR returns an API error (quota/auth/etc), CASCADE!
+                if (!response || !response.success || (response.message && response.message.includes('ERRO_API'))) {
+                    console.log('[Nexus UI] Brain 1 (Vercel) unstable. Cascading to Brain 2 (Edge Function)...')
+                    await callEdgeFunction(userMsg, safetyTimer)
                     return
                 }
+
+                clearTimeout(safetyTimer)
 
                 if (response.actionPerformed === 'REGISTRATION_PREVIEW' && response.data) {
                     setPendingCampaigns(response.data)
@@ -391,88 +480,11 @@ export function NexusChat() {
                     setIsGlobalPolling(true)
                 }
             } else {
-                // Call Supabase Edge Function DIRECTLY (bypasses Vercel 10s timeout)
-                console.log('[Nexus UI] Using Edge Function AI Core (direct)')
-                
-                const { supabaseBrowser: sb } = await import('../lib/supabaseBrowser')
-                const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-                const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-
-                // Try to get active session JWT for auth
-                const { data: { session: currentSession } } = await sb.auth.getSession()
-                const authToken = currentSession?.access_token || supabaseAnonKey
-                
-                console.log(`[Nexus UI] Calling Edge Function (Auth: ${currentSession ? 'JWT' : 'AnonKey'})`)
-                
-                const response = await fetch(`${supabaseUrl}/functions/v1/nexus-chat`, {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${authToken}`,
-                        'apikey': supabaseAnonKey || ''
-                    },
-                    body: JSON.stringify({
-                        message: userMsg,
-                        sessionId: sessionIdRef.current,
-                        callerRole: session?.role || 'guest',
-                        callerEmail: session?.email || 'anonymous',
-                    }),
-                })
-
-                clearTimeout(safetyTimer)
-                
-                if (!response.body) throw new Error('No response body')
-                const reader = response.body.getReader()
-                const decoder = new TextDecoder()
-                let buffer = ''
-
-                while (true) {
-                    const { done, value } = await reader.read()
-                    if (done) break
-                    
-                    buffer += decoder.decode(value, { stream: true })
-                    const lines = buffer.split('\n')
-                    buffer = lines.pop() || ''
-
-                    for (const line of lines) {
-                        if (!line.trim()) continue
-                        try {
-                            const chunk = JSON.parse(line)
-                            if (chunk.type === 'status') {
-                                setCurrentStatus(chunk.content)
-                            } else if (chunk.type === 'error') {
-                                setMessages(prev => [...prev, { role: 'assistant', content: chunk.msg, success: false }])
-                            } else if (chunk.type === 'final') {
-                                let aiMsg = chunk.message
-                                let aiCommand = chunk.command
-                                
-                                setMessages(prev => {
-                                    if (prev.some(m => m.content === aiMsg && m.role === 'assistant')) return prev
-                                    return [...prev, { 
-                                        role: 'assistant', 
-                                        content: aiMsg,
-                                        command: aiCommand,
-                                        type: aiCommand ? 'action' : 'status'
-                                    }]
-                                })
-                                setCurrentStatus(null)
-                            }
-                        } catch (err) {
-                            console.error('Error parsing stream chunk:', err)
-                        }
-                    }
-                }
+                await callEdgeFunction(userMsg, safetyTimer)
             }
         } catch (error) {
-            clearTimeout(safetyTimer)
-            console.error('[Nexus UI] Erro:', error)
-            setMessages(prev => [...prev, {
-                role: 'assistant',
-                content: error instanceof Error && error.message === 'Timeout'
-                    ? '⏳ O servidor está demorando demais. Tente novamente.'
-                    : '⚠️ Erro de comunicação com o Nexus. Tente novamente.',
-                success: false
-            }])
+            console.error('[Nexus UI] Fatal handleSend error, trying emergency fallback:', error)
+            await callEdgeFunction(userMsg, safetyTimer)
         } finally {
             clearTimeout(safetyTimer)
             cleanup()
