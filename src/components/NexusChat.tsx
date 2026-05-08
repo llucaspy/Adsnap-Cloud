@@ -320,17 +320,19 @@ export function NexusChat() {
                             
                             setMessages(prev => {
                                 if (prev.some(m => m.content === aiMsg && m.role === 'assistant')) return prev
-                                return [...prev, { 
+                                return [...prev.filter(m => m.type !== 'status'), { 
                                     role: 'assistant', 
                                     content: aiMsg,
                                     command: aiCommand,
-                                    type: aiCommand ? 'action' : 'status'
+                                    type: aiCommand ? 'action' : 'status',
+                                    success: true,
+                                    data: aiCommand
                                 }]
                             })
                             setCurrentStatus(null)
                         }
                     } catch (err) {
-                        console.error('Error parsing stream chunk:', err)
+                        console.warn('[Nexus UI] Fragment skipped:', err)
                     }
                 }
             }
