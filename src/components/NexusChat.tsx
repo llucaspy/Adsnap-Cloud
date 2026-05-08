@@ -262,7 +262,6 @@ export function NexusChat() {
         return () => clearInterval(interval)
     }, [])
 
-    const [isGlobalPolling, setIsGlobalPolling] = useState(false)
 
     // Helper for direct Edge Function calls (provides a secondary brain path)
     const callEdgeFunction = async (userMsg: string, safetyTimer: any) => {
