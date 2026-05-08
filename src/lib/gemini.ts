@@ -3,7 +3,7 @@ import * as brain from './nexusBrain'
 
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
-const OPENROUTER_MODELS = ['google/gemini-flash-1.5', 'google/gemini-pro', 'qwen/qwen-2.5-72b-instruct']
+const OPENROUTER_MODELS = ['google/gemini-flash-1.5', 'qwen/qwen-2.5-72b-instruct']
 
 export interface ActionData {
     action: string | null
@@ -170,19 +170,17 @@ PERGUNTA: "${prompt}"
 
     try {
         const rawResult = await callAI(systemPrompt)
-        const resultText = rawResult // Mantemos o bruto para o parse original abaixo
-        console.log('[Nexus Brain] Gemini 1st Pass:', resultText)
+        if (!rawResult) return { message: 'Sem resposta da IA (v50.3).', success: false }
         
-        if (!resultText) return { message: 'Sem resposta da IA.', success: false }
+        console.log('[Nexus Brain] Answer:', rawResult)
         
         let actionData: ActionData
         try {
-            // Robust JSON extraction: Find the first { and the last }
-            const jsonMatch = resultText.match(/\{[\s\S]*\}/)
-            const jsonStr = jsonMatch ? jsonMatch[0] : resultText
+            const jsonMatch = rawResult.match(/\{[\s\S]*\}/)
+            const jsonStr = jsonMatch ? jsonMatch[0] : rawResult
             actionData = JSON.parse(jsonStr)
         } catch {
-            return { message: extractHumanAnswer(resultText), success: true }
+            return { message: extractHumanAnswer(rawResult), success: true }
         }
         
         if (!actionData.action) {

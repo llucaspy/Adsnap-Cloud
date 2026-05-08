@@ -434,22 +434,17 @@ export function NexusChat() {
         )
 
         try {
-            if (isLegacyAction) {
-                // Use the legacy processNexusCommand for actions that need server-side execution
-                // This MUST stay on Vercel — the Edge Function cannot execute DB operations
-                console.log('[Nexus UI] Legacy action detected, using processNexusCommand')
-                const response = await Promise.race([
-                    processNexusCommand(userMsg),
-                    new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 30000))
-                ])
-                
-                clearTimeout(safetyTimer)
-                if (!response) {
-                    setMessages(prev => [...prev, { role: 'assistant', content: '⚠️ O núcleo neural não respondeu. Tente novamente.', success: false }])
-                    cleanup()
-                    return
-                }
-
+            // ALWAYS try the Vercel brain (processNexusCommand) first
+            // It has the full DB context and the new model cascade.
+            console.log('[Nexus UI] Sending command to Vercel brain...')
+            const response = await Promise.race([
+                processNexusCommand(userMsg),
+                new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 25000))
+            ])
+            
+            clearTimeout(safetyTimer)
+            
+            if (response && response.success) {
                 if (response.actionPerformed === 'REGISTRATION_PREVIEW' && response.data) {
                     setPendingCampaigns(response.data)
                     setShowPreview(true)
@@ -474,10 +469,13 @@ export function NexusChat() {
                     hasShownFinalMessage.current = false
                     setIsGlobalPolling(true)
                 }
-            } else {
-                // Generic chat — use the Edge Function (has its own multi-model cascade)
-                await callEdgeFunction(userMsg, safetyTimer)
+                return // Success!
             }
+
+            // If Vercel fails or is not successful, THEN try Edge Function fallback
+            console.log('[Nexus UI] Vercel brain failed or rejected, falling back to Edge Function...')
+            await callEdgeFunction(userMsg, safetyTimer)
+            
         } catch (error) {
             clearTimeout(safetyTimer)
             console.error('[Nexus UI] handleSend error:', error)
