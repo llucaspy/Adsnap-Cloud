@@ -60,70 +60,36 @@ PERGUNTA: "${prompt}"
 
     CRITICAL: Diferencie "Captura" de "BI". BI = getCampaignBI. Captura = getCampaign ou runCapture.`
 
-    // Try Gemini first, then OpenRouter models as fallback
+    // Model Rotation for maximum reliability when quota hits
+    const MODELS = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-1.5-flash-latest']
+
     async function callAI(text: string): Promise<string> {
-        // 1. Try Gemini (primary) - 5s timeout (Hobby limit is 10s total)
-        try {
-            console.log('[Nexus AI] Trying Gemini (primary)...')
-            const controller = new AbortController()
-            const timeout = setTimeout(() => controller.abort(), 5000)
-            const response = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ contents: [{ parts: [{ text }] }] }),
-                signal: controller.signal
-            })
-            const data = await response.json()
-            clearTimeout(timeout)
-            if (response.ok) {
-                const result = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
-                if (result) return result
-            }
-            console.warn('[Nexus AI] Gemini failed:', response.status, data.error?.message)
-        } catch (err) {
-            console.warn('[Nexus AI] Gemini error:', err)
-        }
-
-        // 2. Try OpenRouter models as fallback
-        const orKey = process.env.OPENROUTER_API_KEY
-        if (!orKey) {
-            console.error('[Nexus AI] No OPENROUTER_API_KEY, cannot fallback')
-            return ''
-        }
-
-        for (const model of OPENROUTER_MODELS) {
+        for (const model of MODELS) {
             try {
-                console.log(`[Nexus AI] Trying OpenRouter: ${model}...`)
+                console.log(`[Nexus AI] Trying Gemini Model: ${model}...`)
                 const controller = new AbortController()
-                const timeout = setTimeout(() => controller.abort(), 4000)
-                const response = await fetch(OPENROUTER_URL, {
+                const timeout = setTimeout(() => controller.abort(), 8000)
+                
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+                const response = await fetch(url, {
                     method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${orKey}`,
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        model,
-                        messages: [{ role: 'user', content: text }],
-                    }),
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text }] }] }),
                     signal: controller.signal
                 })
+                
                 const data = await response.json()
                 clearTimeout(timeout)
+                
                 if (response.ok) {
-                    const result = data.choices?.[0]?.message?.content?.trim()
-                    if (result) {
-                        console.log(`[Nexus AI] OpenRouter ${model} succeeded`)
-                        return result
-                    }
+                    const result = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim()
+                    if (result) return result
                 }
-                console.warn(`[Nexus AI] OpenRouter ${model} failed:`, response.status)
+                console.warn(`[Nexus AI] Model ${model} failed:`, response.status)
             } catch (err) {
-                console.warn(`[Nexus AI] OpenRouter ${model} error:`, err)
+                console.warn(`[Nexus AI] Model ${model} error:`, err)
             }
         }
-
-        console.error('[Nexus AI] All models exhausted')
         return ''
     }
 
