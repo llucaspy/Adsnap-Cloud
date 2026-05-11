@@ -149,12 +149,40 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
                                         </p>
                                     </div>
 
-                                    <div className="absolute inset-0 z-0">
-                                        <CaptureImage
-                                            src={`/api/captures/${capture.id}`}
-                                            alt={capture.campaign.client}
-                                            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-                                        />
+                                    <div className="absolute inset-0 z-0 bg-bg-tertiary">
+                                        {capture.isAssembly && capture.baseCaptureId ? (
+                                            <>
+                                                <img
+                                                    src={`/api/captures/${capture.baseCaptureId}`}
+                                                    alt="Background"
+                                                    className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-700"
+                                                />
+                                                {capture.campaign?.compositionBox && (
+                                                    <div 
+                                                        className="absolute pointer-events-none transition-transform duration-700 group-hover:scale-110"
+                                                        style={{
+                                                            left: `${(capture.campaign.compositionBox.x / 1920) * 100}%`,
+                                                            top: `${(capture.campaign.compositionBox.y / 1080) * 100}%`,
+                                                            width: `${(capture.campaign.compositionBox.width / 1920) * 100}%`,
+                                                            height: `${(capture.campaign.compositionBox.height / 1080) * 100}%`,
+                                                            zIndex: 5
+                                                        }}
+                                                    >
+                                                        <img
+                                                            src={capture.screenshotPath}
+                                                            alt="Creative Overlay"
+                                                            className="w-full h-full object-contain"
+                                                        />
+                                                    </div>
+                                                )}
+                                            </>
+                                        ) : (
+                                            <CaptureImage
+                                                src={`/api/captures/${capture.id}`}
+                                                alt={capture.campaign.client}
+                                                className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+                                            />
+                                        )}
                                     </div>
 
                                     {/* Gradient border on hover */}
