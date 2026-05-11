@@ -43,7 +43,7 @@ model Campaign {
   lastFetchedAt        DateTime?
   lastGoal             Int             @default(0)
   lastViewability      Float           @default(0)
-  compositionBox       Json?           @default("{}")
+  compositionBox       Json?
   captures             Capture[]
   emailDispatches      EmailDispatch[]
 }
@@ -55,16 +55,12 @@ model Capture {
   status         String   @default("SUCCESS")
   auditNotes     String?
   createdAt      DateTime @default(now())
-  campaign       Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-
-  // Visual Assembly Fields
   isAssembly     Boolean  @default(false)
   baseCaptureId  String?
-
-  // Nexus Vision Fields
-  aiAuditStatus String?  @default("PENDING") // PENDING, SUCCESS, FAILED
-  aiScore       Int?
-  aiDiagnostic  String?
+  aiAuditStatus  String?  @default("PENDING")
+  aiDiagnostic   String?
+  aiScore        Int?
+  campaign       Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 }
 
 model Settings {
@@ -122,7 +118,7 @@ model EmailDispatch {
 }
 
 model NexusMessage {
-  id          String   @id @default(cuid())
+  id          String   @id @default(dbgenerated("(gen_random_uuid())::text"))
   role        String
   content     String
   metadata    Json?    @default("{}")
@@ -142,4 +138,57 @@ model DailyMetric {
   createdAt   DateTime @default(now())
 
   @@unique([campaignId, date])
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model NexusEvolutionLog {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type        String
+  description String
+  metadata    Json?     @default("{}")
+  createdAt   DateTime? @default(now()) @db.Timestamptz(6)
+}
+
+model NexusKnowledge {
+  id        String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  content   String                 @unique(map: "nexus_knowledge_content_unique")
+  embedding Unsupported("vector")?
+  metadata  Json?                  @default("{}")
+  createdAt DateTime?              @default(now()) @db.Timestamptz(6)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model NexusSecrets {
+  name      String    @id
+  value     String
+  createdat DateTime? @default(now()) @db.Timestamptz(6)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model NexusSettings {
+  sessionId      String    @id
+  preferredModel String?
+  updatedAt      DateTime? @default(now()) @db.Timestamptz(6)
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model nexus_memory_log {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  timestamp       DateTime? @default(now()) @db.Timestamptz(6)
+  type            String
+  title           String
+  details         String?
+  tools_used      String[]
+  result          String?
+  impact          String?
+  requires_review Boolean?  @default(false)
+  metadata        Json?     @default("{}")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model nexus_memory_summary {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  date      DateTime? @unique @default(dbgenerated("CURRENT_DATE")) @db.Date
+  summary   Json
+  createdat DateTime? @default(now()) @db.Timestamptz(6)
 }
