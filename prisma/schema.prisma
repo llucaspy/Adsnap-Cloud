@@ -57,6 +57,10 @@ model Capture {
   createdAt      DateTime @default(now())
   campaign       Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
+  // Visual Assembly Fields
+  isAssembly     Boolean  @default(false)
+  baseCaptureId  String?
+
   // Nexus Vision Fields
   aiAuditStatus String?  @default("PENDING") // PENDING, SUCCESS, FAILED
   aiScore       Int?

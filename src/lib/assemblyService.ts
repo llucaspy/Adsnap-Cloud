@@ -262,7 +262,31 @@ async function saveAssemblyCapture(campaign: any, imageBuffer: Buffer, campaignI
     return { success: true, filePath };
 }
 
-async function compositeAssemblyImage(screenshot: Buffer, url: string, isMobile: boolean, customDate: string, customTime: string): Promise<Buffer> {
+export async function processExistingImageAssembly(imageUrl: string, campaignId: string, customDate: string, customTime: string) {
+    console.log('[Nexus Assembly] Starting assembly for existing image:', imageUrl);
+    try {
+        const campaign = await prisma.campaign.findUnique({
+            where: { id: campaignId },
+            select: { url: true, format: true, device: true, client: true, agency: true }
+        });
+
+        if (!campaign) throw new Error('Campanha não encontrada');
+
+        const response = await fetch(imageUrl);
+        if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
+        const imageBuffer = Buffer.from(await response.arrayBuffer());
+
+        const isMobile = campaign.device === 'mobile' || (campaign.format.includes('320') && (campaign.format.includes('100') || campaign.format.includes('50')));
+
+        const finalImage = await compositeAssemblyImage(imageBuffer, campaign.url, isMobile, customDate, customTime);
+        return await saveAssemblyCapture(campaign, finalImage, campaignId);
+    } catch (e) {
+        console.error('[Nexus Assembly Error]', e);
+        return { success: false, error: String(e) };
+    }
+}
+
+export async function compositeAssemblyImage(screenshot: Buffer, url: string, isMobile: boolean, customDate: string, customTime: string): Promise<Buffer> {
     const studioBrowser = await chromium.launch({ headless: true });
     try {
         const studioPage = await studioBrowser.newPage();

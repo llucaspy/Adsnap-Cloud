@@ -93,17 +93,49 @@ export function CaptureTimelineCard({ capture }: CaptureTimelineCardProps) {
             </div>
 
             <div className="aspect-[16/10] relative overflow-hidden bg-bg-tertiary">
-                <img
-                    src={`/api/captures/${capture.id}`}
-                    alt={capture.campaign.campaignName}
-                    className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105"
-                />
+                {/* Background (Base Print) or Main Screenshot */}
+                {capture.isAssembly && capture.baseCaptureId ? (
+                    <>
+                        <img
+                            src={`/api/captures/${capture.baseCaptureId}`}
+                            alt="Background"
+                            className="w-full h-full object-cover transition-transform duration-1000"
+                        />
+                        {/* Overlay Creative (Banner) */}
+                        {capture.campaign?.compositionBox && (
+                            <div 
+                                className="absolute pointer-events-none transition-transform duration-1000 group-hover:scale-105"
+                                style={{
+                                    left: `${(capture.campaign.compositionBox.x / 1920) * 100}%`,
+                                    top: `${(capture.campaign.compositionBox.y / 1080) * 100}%`,
+                                    width: `${(capture.campaign.compositionBox.width / 1920) * 100}%`,
+                                    height: `${(capture.campaign.compositionBox.height / 1080) * 100}%`,
+                                    zIndex: 5
+                                }}
+                            >
+                                <img
+                                    src={capture.screenshotPath}
+                                    alt="Creative Overlay"
+                                    className="w-full h-full object-contain"
+                                />
+                            </div>
+                        )}
+                    </>
+                ) : (
+                    <img
+                        src={`/api/captures/${capture.id}`}
+                        alt={capture.campaign.campaignName}
+                        className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105"
+                    />
+                )}
 
                 {/* Status Indicator Chip */}
                 <div className="absolute top-4 left-4 z-10 flex flex-col gap-2">
                     <div className="px-3 py-1 rounded-lg bg-black/40 backdrop-blur-md border border-white/10 flex items-center gap-2 w-fit">
-                        <div className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
-                        <span className="text-[8px] font-black text-white/80 uppercase tracking-widest">Capturado</span>
+                        <div className={`w-1.5 h-1.5 rounded-full ${capture.isAssembly ? 'bg-accent' : 'bg-success'} animate-pulse`} />
+                        <span className="text-[8px] font-black text-white/80 uppercase tracking-widest">
+                            {capture.isAssembly ? 'Montagem AI' : 'Capturado'}
+                        </span>
                     </div>
 
                     {/* AI Score Badge */}

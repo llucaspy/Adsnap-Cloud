@@ -105,8 +105,7 @@ function getRandom(arr: string[]): string {
 
 export async function extractCampaignsFromText(text: string): Promise<Partial<brain.ParsedCampaign>[]> {
     const campaigns: Partial<brain.ParsedCampaign>[] = []
-    text.split(/---|Nova Campanha:|Campanha \d+:|Campanha:/i).filter(s => s.trim().length > 10)
-
+    
     // Helper regex patterns
     const datePattern = /(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?/
     const piPattern = /\b\d{3,6}\b/
@@ -158,7 +157,6 @@ export async function extractCampaignsFromText(text: string): Promise<Partial<br
 
     // Pattern 2: Natural Language extraction for single/bulk block
     if (campaigns.length === 0) {
-        // Split by semantic blocks or explicit "new item" markers
         const blocks = text.split(/;|\ne |(?=agenc|client|campanh|link|formato|pi|data|segmen|inicio|fim|veicula)/i)
         const currentData: Partial<brain.ParsedCampaign> = { agency: 'Adsnap', segmentation: 'PRIVADO' }
         let hasData = false
@@ -167,7 +165,6 @@ export async function extractCampaignsFromText(text: string): Promise<Partial<br
             const piMatch = block.match(/pi[:\s]+(\d+)/i) || block.match(piPattern)
             const urlMatch = block.match(/link[:\s]+(https?:\/\/[^\s,]+)/i) || block.match(urlPattern)
             const clientMatch = block.match(/client[e]?[:\s]+([^,\n|]+)/i)
-            const agencyMatch = block.match(/(?:agência|agency)[:\s]+(.+)/i)
             const nameMatch = block.match(/(?:nome|campanha|name)[:\s]+(.+)/i)
             const formatMatch = block.match(/(?:formato|format)[:\s]+(.+)/i)
             const segMatch = block.match(/(?:segmentação|segmentation|seg)[:\s]+(.+)/i)
@@ -177,7 +174,6 @@ export async function extractCampaignsFromText(text: string): Promise<Partial<br
             if (clientMatch) { currentData.client = clientMatch[1].trim(); hasData = true; }
             if (piMatch) { currentData.pi = piMatch[1].trim(); hasData = true; }
             if (urlMatch) { currentData.url = urlMatch[1].trim(); hasData = true; }
-            if (agencyMatch) { currentData.agency = agencyMatch[1].trim(); hasData = true; }
             if (nameMatch) { currentData.campaignName = nameMatch[1].trim(); hasData = true; }
             if (formatMatch) { currentData.format = formatMatch[1].trim(); hasData = true; }
             if (segMatch) { currentData.segmentation = detectSegmentation(segMatch[1]); hasData = true; }
@@ -195,8 +191,6 @@ export async function extractCampaignsFromText(text: string): Promise<Partial<br
 
 function isOperationalCommand(text: string): boolean {
     const t = text.toLowerCase().trim()
-    
-    // Technical keywords that bypass AI for instant response.
     const technicalKeywords = [
         'status', 'bi', 'dashboard', 'painel', 'resumo bi', 'resumo',
         'baixar zip', 'download zip', 'baixar', 'download', 'exportar',
@@ -209,72 +203,162 @@ function isOperationalCommand(text: string): boolean {
         'montagem', 'preparar', 'gerar print'
     ]
     
-    // Short commands: exact or prefix match
-    if (t.length < 25) {
+    if (t.length < 30) {
         return technicalKeywords.some(kw => t === kw || t.startsWith(kw + ' ') || t.includes(kw))
     }
-    
-    // Longer messages: look for strong operational signals
     return technicalKeywords.some(kw => t.includes(kw))
 }
 
 async function handleDirectCommand(prompt: string): Promise<NexusResponse | null> {
     const text = prompt.toLowerCase()
     
-    // 1. STATUS / DASHBOARD / BI
-    if (text.includes('status') || text.includes('resumo') || text.includes('como estão') || text.includes('análise') || text.includes('analise') || text.includes('bi')) {
-        if (text.includes('dashboard') || text.includes('métrica') || text.includes('detalhe') || text.includes('bi') || text.includes('análise') || text.includes('analise')) {
-            console.log('[Nexus FastPath] Calling BI AdOps Summary...')
-            const result = await brain.getAdOpsSummary()
-            if (result.success && result.data) {
-                const data = result.data as brain.BIData
-                const { total, healthScore, globalGoal, globalDelivered, globalToday, globalProjected, avgViewability, atRiskCampaigns } = data
-                const emoji = healthScore > 80 ? '✅' : healthScore > 50 ? '⚠️' : '🚨'
-                const progress = ((globalDelivered / globalGoal) * 100).toFixed(1)
-                const projPercent = ((globalProjected / globalGoal) * 100).toFixed(1)
-                
-                let message = `### 📊 Relatório BI de AdOps\n\n`
-                message += `- **Saúde Geral:** ${healthScore}% ${emoji}\n`
-                message += `- **Volume Total:** ${globalDelivered.toLocaleString()} / ${globalGoal.toLocaleString()} (${progress}%)\n`
-                message += `- **Entrega Hoje:** ${globalToday.toLocaleString()} impressões ⚡\n`
-                message += `- **Projeção Final:** ${globalProjected.toLocaleString()} (${projPercent}%)\n`
-                message += `- **Média Viewability:** ${avgViewability.toFixed(1)}%\n`
-                
-                if (atRiskCampaigns && atRiskCampaigns.length > 0) {
-                    message += `\n⚠️ **Campanhas em Atenção:** ${atRiskCampaigns.join(', ')}\n`
+    // 1. MONTAGEM (ASSEMBLY) — MUST BE #1 PRIORITY
+    if (text.includes('montagem') || (text.includes('gerar') && text.includes('print')) || text.includes('preparar')) {
+        console.log('[Nexus FastPath] Triggering Assembly Handler...')
+        
+        const urlPattern = /https?:\/\/[^\s,]+/g
+        const urls = prompt.match(urlPattern) || []
+        
+        const dateMatch = prompt.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/)
+        let targetDateStr = new Date().toLocaleDateString('pt-BR')
+        let queryDate = new Date()
+        
+        if (dateMatch) {
+            const day = parseInt(dateMatch[1])
+            const month = parseInt(dateMatch[2]) - 1
+            const year = dateMatch[3] ? (dateMatch[3].length === 2 ? 2000 + parseInt(dateMatch[3]) : parseInt(dateMatch[3])) : new Date().getFullYear()
+            queryDate = new Date(year, month, day)
+            targetDateStr = `${day.toString().padStart(2, '0')}/${(month + 1).toString().padStart(2, '0')}/${year}`
+        }
+        
+        // Start/End of day for Prisma date query
+        const startOfDay = new Date(queryDate.setHours(0, 0, 0, 0))
+        const endOfDay = new Date(queryDate.setHours(23, 59, 59, 999))
+
+        if (urls.length > 0) {
+            const results = []
+            const settings = await getSettings()
+            const bannerFormats: { id: string; width: number; height: number }[] = settings.bannerFormats ? JSON.parse(settings.bannerFormats) : []
+            
+            const lines = prompt.split('\n')
+            
+            for (const url of urls) {
+                const line = lines.find(l => l.includes(url)) || ''
+                const formatMatch = line.match(/(\d{3,4})[xX](\d{2,3})/) || url.match(/(\d{3,4})[xX](\d{2,3})/)
+                const format = formatMatch ? `${formatMatch[1]}x${formatMatch[2]}` : '300x250'
+                const [w, h] = format.split('x').map(Number)
+                const matchedFormat = bannerFormats.find(f => f.width === w && f.height === h)
+                const formatId = matchedFormat?.id
+
+                // Priority 1: PI 000 Template (Reference for Montagem)
+                let campaign = await prisma.campaign.findFirst({
+                    where: { 
+                        pi: '000',
+                        compositionBox: { path: ['width'], equals: w },
+                        AND: [ { compositionBox: { path: ['height'], equals: h } } ]
+                    }
+                })
+
+                // Find Base Print (Background) for this PI 000 on the targeted date
+                let baseCaptureId: string | null = null
+                if (campaign) {
+                    const baseCapture = await prisma.capture.findFirst({
+                        where: {
+                            campaignId: campaign.id,
+                            status: 'SUCCESS',
+                            createdAt: { gte: startOfDay, lte: endOfDay }
+                        },
+                        orderBy: { createdAt: 'desc' }
+                    })
+                    if (baseCapture) {
+                        baseCaptureId = baseCapture.id
+                        console.log(`[Nexus Assembly] Found Base Print: ${baseCapture.id} for date ${targetDateStr}`)
+                    }
+                }
+
+                // Identify target campaign for record registry
+                let targetCampaign = campaign
+                if (!targetCampaign && formatId) {
+                    targetCampaign = await prisma.campaign.findFirst({
+                        where: { format: formatId, isArchived: false }
+                    })
                 }
                 
-                message += `\n*Análise BI consolidada para ${total} campanhas.*`
-                
-                return {
-                    message,
-                    success: true,
-                    data: result.data
+                if (!targetCampaign) {
+                    targetCampaign = await prisma.campaign.findFirst({
+                        where: { 
+                            OR: [
+                                { format: { contains: w.toString() } },
+                                { format: { contains: h.toString() } }
+                            ],
+                            isArchived: false
+                        }
+                    })
+                }
+
+                if (targetCampaign) {
+                    await prisma.capture.create({
+                        data: {
+                            campaignId: targetCampaign.id,
+                            screenshotPath: url,
+                            status: 'SUCCESS',
+                            isAssembly: true,
+                            baseCaptureId: baseCaptureId
+                        }
+                    })
+
+                    await prisma.campaign.update({
+                        where: { id: targetCampaign.id },
+                        data: { status: 'SUCCESS', lastCaptureAt: new Date() }
+                    })
+
+                    results.push({ url: url, success: true, format: format, client: targetCampaign.client, baseFound: !!baseCaptureId })
+                } else {
+                    results.push({ url: url, success: false, format: format, error: 'Campanha não encontrada' })
                 }
             }
+            
+            const successCount = results.filter(r => r.success).length
+            const baseCount = results.filter(r => r.baseFound).length
+            
             return {
-                message: result.message,
-                success: result.success,
-                data: result.data
+                message: successCount > 0 
+                    ? `✅ Protocolo de montagem finalizado!\n- ${successCount} criativos vinculados para o dia ${targetDateStr}.\n- ${baseCount > 0 ? `Composição visual vinculada em ${baseCount} casos.` : '⚠️ Print de fundo (PI 000) não encontrado para esta data.'}\n- Clientes: ${Array.from(new Set(results.filter(r => r.success).map(r => r.client))).join(', ')}`
+                    : `⚠️ Formatos não reconhecidos no sistema. Verifique se existem campanhas ou templates (PI 000) para estes tamanhos.`,
+                success: successCount > 0,
+                actionPerformed: 'CAPTURE' as const
             }
         }
         
-        console.log('[Nexus FastPath] Calling Fast DB Status...')
-        const count = await prisma.campaign.count({ where: { isArchived: false } })
-        const scheduled = await prisma.campaign.count({ where: { isArchived: false, isScheduled: true } })
-        const todaysCaptures = await prisma.capture.count({
-            where: { createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) } }
-        })
-
         return {
-            message: `Status do Sistema:\n- ${count} Campanhas Ativas\n- ${scheduled} Agendadas\n- ${todaysCaptures} Capturas hoje.\n\nSistemas operando normalmente.`,
-            success: true
+            message: "Para realizar a montagem, anexe os criativos e informe a data. Ex: 'Fazer montagem desses criativos para o dia 30/04'.",
+            success: false
         }
     }
 
-    // 2. CAPTURE ALL
-    if ((text.includes('print') || text.includes('capturar')) && (text.includes('tudo') || text.includes('todas'))) {
-        console.log('[Nexus FastPath] Triggering Global Capture...')
+    // 2. BI / STATUS
+    if (text.includes('status') || text.includes('resumo') || text.includes('análise') || text.includes('bi')) {
+        const result = await brain.getAdOpsSummary()
+        if (result.success && result.data) {
+            const data = result.data as brain.BIData
+            const { total, healthScore, globalGoal, globalDelivered, globalToday, globalProjected, avgViewability, atRiskCampaigns } = data
+            const emoji = healthScore > 80 ? '✅' : healthScore > 50 ? '⚠️' : '🚨'
+            const progress = ((globalDelivered / globalGoal) * 100).toFixed(1)
+            
+            let message = `### 📊 Relatório BI de AdOps\n\n`
+            message += `- **Saúde Geral:** ${healthScore}% ${emoji}\n`
+            message += `- **Volume Total:** ${globalDelivered.toLocaleString()} / ${globalGoal.toLocaleString()} (${progress}%)\n`
+            message += `- **Entrega Hoje:** ${globalToday.toLocaleString()} ⚡\n`
+            if (atRiskCampaigns?.length > 0) message += `\n⚠️ **Atenção:** ${atRiskCampaigns.join(', ')}\n`
+            
+            return { message, success: true, data: result.data }
+        }
+        const count = await prisma.campaign.count({ where: { isArchived: false } })
+        return { message: `Status do Sistema: ${count} campanhas ativas. Operação normal.`, success: true }
+    }
+
+    // 3. CAPTURE ALL
+    if ((text.includes('print') || text.includes('capturar')) && text.includes('tudo')) {
         const trigger = await runAllCaptures()
         return {
             message: getRandom(RESPONSES.SUCCESS_CAPTURE_ALL).replace('{count}', trigger.count.toString()),
@@ -283,30 +367,25 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
         }
     }
 
-    // 3. STOP CAPTURES
-    if ((text.includes('parar') || text.includes('interromper') || text.includes('cancelar') || text.includes('stop')) &&
-        (text.includes('print') || text.includes('captura') || text.includes('disparo') || text.includes('tudo'))) {
-        console.log('[Nexus FastPath] Stopping all captures...')
+    // 4. STOP
+    if (text.includes('parar') || text.includes('stop')) {
         const result = await stopAllCaptures()
         return {
-            message: getRandom(RESPONSES.SUCCESS_STOP).replace('{count}', result.stoppedCount.toString()),
+            message: getRandom(RESPONSES.SUCCESS_STOP).replace('{count}', (result.stoppedCount || 0).toString()),
             success: true,
-            actionPerformed: 'STOP_CAPTURES',
-            data: { stoppedCount: result.stoppedCount }
+            actionPerformed: 'STOP_CAPTURES'
         }
     }
 
-    // 4. DOWNLOAD ZIP
+    // 5. DOWNLOAD ZIP
     if (text.includes('baixar') || text.includes('download') || text.includes('exportar')) {
-        console.log('[Nexus FastPath] Preparing Download...')
-        const dateMatch = prompt.match(/(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?/)
+        const dateMatch = prompt.match(/(\d{1,2})[/-](\d{1,2})/)
         let targetDate = new Date().toISOString().split('T')[0]
-
         if (dateMatch) {
-            const day = parseInt(dateMatch[1])
-            const month = parseInt(dateMatch[2]) - 1
-            const year = dateMatch[3] ? (dateMatch[3].length === 2 ? 2000 + parseInt(dateMatch[3]) : parseInt(dateMatch[3])) : new Date().getFullYear()
-            targetDate = new Date(year, month, day).toISOString().split('T')[0]
+            const day = dateMatch[1].padStart(2, '0')
+            const month = dateMatch[2].padStart(2, '0')
+            const year = new Date().getFullYear()
+            targetDate = `${year}-${month}-${day}`
         }
 
         return {
@@ -317,42 +396,14 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
         }
     }
 
-    // 5. CAMPAIGN DETAILS (PI OR NAME)
+    // 6. CAMPAIGN DETAILS
     if (text.includes('campanha') || text.includes('detalhe') || text.includes('ver pi') || text.match(/\b\d{3,6}\b/)) {
         const piMatch = prompt.match(/\b\d{3,6}\b/)
-        const nameMatch = prompt.match(/(?:campanha|cliente|client)[:\s]+(.+)/i) || 
-                          prompt.match(/como está a campanha\s+(.+)/i)
-        
-        const rawQuery = piMatch ? piMatch[0] : (nameMatch ? nameMatch[1].trim() : null)
-        const query = rawQuery ? rawQuery.replace(/[?.,!]+$/, '').trim() : null
+        const query = piMatch ? piMatch[0] : null
         
         if (query) {
             console.log(`[Nexus FastPath] Searching for campaign: "${query}"`)
             return await brain.getCampaign(query)
-        }
-    }
-
-    // 6. SET THRESHOLD ALERT (NEW)
-    if ((text.includes('alerta') || text.includes('avise') || text.includes('notifique')) && 
-        (text.includes('impressão') || text.includes('entrega') || text.includes('chegar'))) {
-        
-        const piMatch = prompt.match(/\b\d{3,6}\b/)
-        const thresholdMatch = prompt.match(/(\d+)\s*(?:mil|k)/i) || prompt.match(/(\d{4,9})/)
-        
-        if (piMatch && thresholdMatch) {
-            const pi = piMatch[0]
-            let threshold = parseInt(thresholdMatch[1])
-            if (prompt.toLowerCase().includes('mil') || prompt.toLowerCase().includes(' k')) {
-                threshold *= 1000
-            }
-            
-            console.log(`[Nexus FastPath] Setting threshold for PI ${pi}: ${threshold}`)
-            const result = await brain.setCampaignThreshold(pi, threshold)
-            return {
-                message: result.message,
-                success: result.success,
-                data: result.data
-            }
         }
     }
 
@@ -379,88 +430,59 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
         console.log('[Nexus AI Action] Chamando Neural Brain (Async)...')
         console.time('NexusAI')
         
-        // Timeout de 9s para a IA (essencial para o limite de 10s do Vercel Hobby)
         const brainPromise = nexusBrain(prompt)
         const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error('AI_TIMEOUT')), 9000))
         
-        let brainResult: NexusResponse | null = null
+        let brainResult: any = null
         try {
-            brainResult = await Promise.race([brainPromise, timeoutPromise]) as NexusResponse
+            brainResult = await Promise.race([brainPromise, timeoutPromise])
         } catch (err) {
             console.warn('[Nexus AI] Brain Error or Timeout:', err)
         }
         console.timeEnd('NexusAI')
         
-        if (brainResult?.success && brainResult.actionPerformed) {
+        if (brainResult?.success) {
             console.timeEnd('NexusTotal')
             return {
-                message: brainResult.message,
+                message: brainResult.message || brainResult.answer || "Processamento concluído.",
                 success: true,
                 actionPerformed: brainResult.actionPerformed,
                 data: brainResult.data
             }
         }
-        
-        if (brainResult?.success && brainResult.message) {
-            console.timeEnd('NexusTotal')
-            return { message: brainResult.message, success: true }
-        }
 
-        // ---------------------------------------------------------
-        // 1. GESTÃO DE FORMATOS (Legacy/Manual Override)
-        // ---------------------------------------------------------
-        if (text.includes('formato') && (text.includes('adicionar') || text.includes('novo') || text.includes('criar') || text.includes('configurar'))) {
-            // Ex: "Adicionar formato Super Banner 970x90 com seletor .super-banner"
+        // --- 3. LEGACY OVERRIDES ---
+        if (text.includes('formato') && (text.includes('adicionar') || text.includes('novo'))) {
             const dimsMatch = text.match(/(\d+)[xX](\d+)/)
             const selectorMatch = text.match(/(?:seletor|selector|xpath)[:\s]+([^\s]+)/i)
-            // Tenta extrair o nome (tudo entre "formato" e as dimensões/seletor)
-            const nameMatch = text.match(/formato[:\s]+(.+?)(?=\s+\d+[xX]|\s+(?:com\s+)?seletor|$)/i) ||
-                text.match(/novo[:\s]+(.+?)(?=\s+\d+[xX]|\s+(?:com\s+)?seletor|$)/i)
-
             if (dimsMatch && selectorMatch) {
                 const width = parseInt(dimsMatch[1])
                 const height = parseInt(dimsMatch[2])
                 const selector = selectorMatch[1]
-                const label = (nameMatch ? nameMatch[1].trim() : `${width}x${height}`)
-                const id = `${width}x${height}`
+                const label = `${width}x${height}`
+                const id = label
 
                 const settings = await getSettings()
-                const currentFormats: { id: string; label: string; width: number; height: number; selector: string }[] = settings.bannerFormats ? JSON.parse(settings.bannerFormats) : []
-
-                const existingIndex = currentFormats.findIndex((f) => f.id === id)
+                const currentFormats: any[] = settings.bannerFormats ? JSON.parse(settings.bannerFormats) : []
                 const newFormat = { id, label, width, height, selector }
-
-                if (existingIndex >= 0) {
-                    currentFormats[existingIndex] = newFormat
-                } else {
-                    currentFormats.push(newFormat)
-                }
+                currentFormats.push(newFormat)
 
                 await updateSettings({ bannerFormats: JSON.stringify(currentFormats) })
 
                 return {
-                    message: (existingIndex >= 0 ? '✅ Formato atualizado' : '✅ Novo formato registrado') + `: ${label} (${width}x${height})`,
+                    message: `✅ Formato registrado: ${label}`,
                     success: true,
                     actionPerformed: 'UPDATE_FORMATS',
                     data: newFormat
                 }
-            } else {
-                return {
-                    message: "Para adicionar um formato, preciso das dimensões e do seletor CSS. Exemplo: 'Adicionar formato Topo 300x250 com seletor .banner-top'.",
-                    success: false
-                }
             }
         }
 
-        // ---------------------------------------------------------
-        // 2. REGISTRO / CADASTRO
-        // ---------------------------------------------------------
-        if (text.includes('cadastr') || text.includes('criar') || text.includes('novo registro') || text.includes('adicionar camp')) {
+        if (text.includes('cadastr') || text.includes('criar')) {
             const extracted = await extractCampaignsFromText(prompt)
-
             if (extracted.length > 0) {
                 return {
-                    message: `Entendido. Identifiquei ${extracted.length} potenciais ${extracted.length === 1 ? 'campanha' : 'campanhas'}. Abrindo painel de revisão...`,
+                    message: `Entendido. Identifiquei ${extracted.length} potenciais campanhas.`,
                     success: true,
                     actionPerformed: 'REGISTRATION_PREVIEW',
                     data: extracted
@@ -468,275 +490,7 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
             }
         }
 
-        // ---------------------------------------------------------
-        // 3. INTERROMPER CAPTURAS (NOVO)
-        // ---------------------------------------------------------
-        if ((text.includes('parar') || text.includes('interromper') || text.includes('cancelar') || text.includes('stop')) &&
-            (text.includes('print') || text.includes('captura') || text.includes('disparo') || text.includes('tudo'))) {
-            const result = await stopAllCaptures()
-            return {
-                message: getRandom(RESPONSES.SUCCESS_STOP).replace('{count}', result.stoppedCount.toString()),
-                success: true,
-                actionPerformed: 'STOP_CAPTURES',
-                data: { stoppedCount: result.stoppedCount }
-            }
-        }
-
-        // ---------------------------------------------------------
-        // 4. AGENDAR TODAS AS CAMPANHAS (NOVO)
-        // ---------------------------------------------------------
-        if ((text.includes('agendar') || text.includes('programar') || text.includes('schedule')) &&
-            (text.includes('todas') || text.includes('tudo') || text.includes('all') || text.includes('campanhas'))) {
-            // Extract time from text (formats: 14:30, 14h30, 14h, às 14:30)
-            const timeMatch = text.match(/(\d{1,2})[h:](\d{2})/) || text.match(/(\d{1,2})h\b/)
-
-            if (timeMatch) {
-                const hours = timeMatch[1].padStart(2, '0')
-                const minutes = timeMatch[2] ? timeMatch[2] : '00'
-                const time = `${hours}:${minutes}`
-
-                const result = await scheduleAllCampaigns(time)
-
-                if (result.success) {
-                    return {
-                        message: getRandom(RESPONSES.SUCCESS_SCHEDULE_ALL)
-                            .replace('{count}', result.updatedCount!.toString())
-                            .replace('{time}', time),
-                        success: true,
-                        actionPerformed: 'SCHEDULE_ALL',
-                        data: { updatedCount: result.updatedCount, time }
-                    }
-                } else {
-                    return { message: result.error || 'Erro ao agendar campanhas.', success: false }
-                }
-            }
-
-            return {
-                message: "Para agendar todas as campanhas, informe o horário. Ex: 'Agendar todas para 14:30' ou 'Programar campanhas às 10h'.",
-                success: false
-            }
-        }
-
-        // ---------------------------------------------------------
-        // 5. IDENTIDADE & SMALL TALK
-        // ---------------------------------------------------------
-        if (text.includes('quem é você') || text.includes('o que você é'))
-            return { message: getRandom(RESPONSES.IDENTITY), success: true }
-
-        if (text.includes('ajuda') || text.includes('help') || text.includes('o que você faz'))
-            return { message: getRandom(RESPONSES.HELP), success: true }
-
-        if (text.match(/^(oi|olá|ola|bom dia|boa tarde|boa noite)/)) {
-            if (text.length < 15) return { message: getRandom(RESPONSES.GREETING), success: true }
-            return { message: getRandom(RESPONSES.SMALL_TALK), success: true }
-        }
-
-        // ---------------------------------------------------------
-        // 4. CAPTURAS
-        // ---------------------------------------------------------
-        if (text.includes('print') || text.includes('captur') || text.includes('screenshot') || text.includes('foto')) {
-            // ALL
-            if (text.includes('tudo') || text.includes('todas') || text.includes('geral')) {
-                const trigger = await runAllCaptures()
-                return {
-                    message: getRandom(RESPONSES.SUCCESS_CAPTURE_ALL).replace('{count}', trigger.count.toString()),
-                    success: true,
-                    actionPerformed: 'CAPTURE_ALL'
-                }
-            }
-            // SINGLE
-            const piMatch = text.match(/pi\s*(\d+)/) || text.match(/\d{3,6}/)
-            if (piMatch) {
-                const pi = piMatch.length > 1 ? piMatch[1] : piMatch[0]
-                const campaign = await prisma.campaign.findFirst({ where: { pi, isArchived: false } })
-
-                if (campaign) {
-                    const result = await runCapture(campaign.id)
-                    if (result.success) {
-                        return {
-                            message: getRandom(RESPONSES.SUCCESS_CAPTURE)
-                                .replace('{name}', campaign.campaignName || campaign.client)
-                                .replace('{pi}', pi),
-                            success: true,
-                            actionPerformed: 'CAPTURE'
-                        }
-                    } else {
-                        return { message: `Falha ao capturar PI ${pi}. Verifique o link.`, success: false }
-                    }
-                }
-                return { message: `Campanha PI ${pi} não encontrada ou arquivada.`, success: false }
-            }
-            return { message: "Preciso saber qual PI capturar. Ex: 'Tira print do PI 123'.", success: false }
-        }
-
-        // ---------------------------------------------------------
-        // 5. ARQUIVAMENTO / RESTAURO
-        // ---------------------------------------------------------
-        if (text.includes('arquivar') || text.includes('desarquivar') || text.includes('restaurar') || text.includes('ativar')) {
-            const isArchive = text.includes('arquivar')
-            const piMatch = text.match(/\d{3,6}/)
-
-            if (piMatch) {
-                const pi = piMatch[0]
-                const campaign = await prisma.campaign.findFirst({ where: { pi, isArchived: !isArchive } })
-
-                if (campaign) {
-                    await archiveCampaign(campaign.id, isArchive)
-                    const tpl = isArchive ? RESPONSES.SUCCESS_ARCHIVE : RESPONSES.SUCCESS_RESTORE
-                    return {
-                        message: getRandom(tpl)
-                            .replace('{name}', campaign.campaignName || campaign.client)
-                            .replace('{pi}', pi),
-                        success: true,
-                        actionPerformed: 'ARCHIVE'
-                    }
-                }
-                return { message: `Não encontrei a campanha PI ${pi} para ${isArchive ? 'arquivar' : 'restaurar'}.`, success: false }
-            }
-            return { message: isArchive ? "Qual PI devo arquivar?" : "Qual PI devo restaurar?", success: false }
-        }
-
-        // ---------------------------------------------------------
-        // 6. TROCAR URL
-        // ---------------------------------------------------------
-        if ((text.includes('url') || text.includes('link')) && (text.includes('trocar') || text.includes('mudar') || text.includes('alterar'))) {
-            const urlMatch = text.match(/https?:\/\/[^\s]+/)
-            const piMatch = text.match(/\d{3,6}/)
-
-            if (urlMatch && piMatch) {
-                const pi = piMatch[0]
-                const newUrl = urlMatch[0]
-                const campaign = await prisma.campaign.findFirst({ where: { pi, isArchived: false } })
-
-                if (campaign) {
-                    const formData = new FormData()
-                    // Re-populating formData to reuse updateCampaign action (which expects FormData)
-                    formData.append('agency', campaign.agency)
-                    formData.append('client', campaign.client)
-                    formData.append('campaignName', campaign.campaignName)
-                    formData.append('pi', campaign.pi)
-                    formData.append('format', campaign.format)
-                    formData.append('url', newUrl) // THE CHANGE
-                    formData.append('device', campaign.device)
-                    formData.append('segmentation', campaign.segmentation)
-                    formData.append('isScheduled', String(campaign.isScheduled))
-                    formData.append('scheduledTimes', campaign.scheduledTimes)
-                    if (campaign.flightStart) formData.append('flightStart', campaign.flightStart.toISOString())
-                    if (campaign.flightEnd) formData.append('flightEnd', campaign.flightEnd.toISOString())
-
-                    await updateCampaign(campaign.id, formData)
-
-                    return {
-                        message: getRandom(RESPONSES.SUCCESS_URL)
-                            .replace('{client}', campaign.client)
-                            .replace('{pi}', pi)
-                            .replace('{url}', newUrl),
-                        success: true,
-                        actionPerformed: 'UPDATE_URL'
-                    }
-                }
-                return { message: `Campanha PI ${pi} não encontrada.`, success: false }
-            }
-            return { message: "Informe o PI e a nova URL. Ex: 'Mudar link PI 123 para http://...'", success: false }
-        }
-
-        // ---------------------------------------------------------
-        // 8. DOWNLOAD ZIP (NOVO)
-        // ---------------------------------------------------------
-        if (text.includes('baixar') || text.includes('download') || text.includes('exportar')) {
-            const dateMatch = prompt.match(/(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?/)
-            let targetDate = new Date().toISOString().split('T')[0] // Default: Today
-
-            if (dateMatch) {
-                const day = parseInt(dateMatch[1])
-                const month = parseInt(dateMatch[2]) - 1
-                const year = dateMatch[3] ? (dateMatch[3].length === 2 ? 2000 + parseInt(dateMatch[3]) : parseInt(dateMatch[3])) : new Date().getFullYear()
-                targetDate = new Date(year, month, day).toISOString().split('T')[0]
-            }
-
-            return {
-                message: getRandom(RESPONSES.SUCCESS_DOWNLOAD).replace(/{date}/g, targetDate),
-                success: true,
-                actionPerformed: 'DOWNLOAD_ZIP',
-                data: { date: targetDate }
-            }
-        }
-
-
-        // ---------------------------------------------------------
-        // 10. CONSULTAR E-MAILS (V2 — LIVE SEARCH)
-        // ---------------------------------------------------------
-        const emailKeywords = [
-            'email', 'e-mail', 'gmail', 'mensagem', 'caixa de entrada', 'inbox',
-            'recebi', 'recebeu', 'mandou', 'enviou', 'tem algo', 'tem algum'
-        ]
-        const hasEmailIntent = emailKeywords.some(kw => text.toLowerCase().includes(kw))
-        
-        if (hasEmailIntent) {
-            try {
-                const gmailClient = await createGmailClientFromEnv()
-                
-                if (!gmailClient) {
-                    return {
-                        message: '⚠️ Gmail não configurado. Verifique GMAIL_CLIENT_ID, GMAIL_REFRESH_TOKEN e GMAIL_USER_EMAIL.',
-                        success: false
-                    }
-                }
-
-                const userEmail = process.env.GMAIL_USER_EMAIL || ''
-                const toFilter = userEmail ? `to:${userEmail}` : 'to:me'
-                
-                const { buildGmailQuery, askGeminiAboutEmails } = await import('@/lib/gemini')
-                const brDate = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
-                
-                const aiQuery = await buildGmailQuery(prompt, brDate)
-                
-                let finalQuery = aiQuery
-                if (!aiQuery.includes('to:') && !aiQuery.includes('to =')) {
-                    finalQuery = `${toFilter} ${aiQuery}`
-                } else if (!aiQuery.includes(userEmail) && userEmail) {
-                    finalQuery = aiQuery.replace(/to:[^\s]+/, `to:${userEmail}`)
-                }
-
-                console.log(`[Nexus AI] Query Gemini: "${aiQuery}"`)
-                console.log(`[Nexus AI] Query Final: "${finalQuery}"`)
-                
-                const emails = await searchEmails(gmailClient, finalQuery, 15)
-                console.log(`[Nexus AI] Emails encontrados: ${emails.length}`)
-                
-                const geminiAnswer = await askGeminiAboutEmails(prompt, emails, finalQuery)
-                
-                return {
-                    message: geminiAnswer,
-                    success: true,
-                    data: emails.length > 0 ? { threadId: emails[0].threadId, from: emails[0].from } : undefined
-                }
-            } catch (emailErr) {
-                console.error('[Nexus AI] Erro na busca de emails:', emailErr)
-                return {
-                    message: 'Erro ao consultar o Gmail. Verifique se as credenciais estão corretas.',
-                    success: false
-                }
-            }
-        }
-
-        // ---------------------------------------------------------
-        // ULTIMATE PASS: Gemini (Nexus Brain)
-        // ---------------------------------------------------------
-        console.log('[Nexus AI Action] No manual override found. Passing to Nexus Brain (Gemini)...')
-        const aiResult = await nexusBrain(prompt)
-        
-        if (aiResult) {
-            console.timeEnd('NexusTotal')
-            return {
-                message: aiResult.message,
-                success: aiResult.success,
-                actionPerformed: aiResult.actionPerformed as NexusResponse['actionPerformed'],
-                data: aiResult.data
-            }
-        }
-
-        // Final Fallback (Should rarely be reached)
+        // Final Fallback
         return {
             message: "Desculpe, tive um problema de comunicação com meus neurônios. Tente novamente em instantes.",
             success: false
@@ -745,15 +499,6 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
     } catch (error) {
         console.error('Nexus AI Error:', error)
         const errorMsg = error instanceof Error ? error.message : String(error)
-
-        // Log to persistent store
-        try {
-            const { nexusLogStore } = await import('@/lib/nexusLogStore')
-            await nexusLogStore.addLog(`Nexus AI: Falha ao processar comando - ${errorMsg}`, 'ERROR')
-        } catch (logErr) {
-            console.error('Failed to log AI error:', logErr)
-        }
-
         return { message: `Erro interno nos circuitos neurais: ${errorMsg}`, success: false }
     }
 }

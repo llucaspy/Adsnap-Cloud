@@ -422,7 +422,8 @@ export function NexusChat() {
         const safetyTimer = setTimeout(cleanup, 55000) // 55s: 6 modelos × 8s cada + margem
 
         // Check if this is an operational command that needs the legacy system
-        const text = userMsg.toLowerCase()
+        // CRITICAL: Use finalMsg (includes uploaded file URLs) not userMsg
+        const text = finalMsg.toLowerCase()
         const isLegacyAction = (
             (text.includes('print') && (text.includes('tudo') || text.includes('todas'))) ||
             (text.includes('capturar') && text.includes('tudo')) ||
@@ -440,7 +441,7 @@ export function NexusChat() {
             // It has the full DB context and the new model cascade.
             console.log('[Nexus UI] Sending command to Vercel brain...')
             const response = await Promise.race([
-                processNexusCommand(userMsg),
+                processNexusCommand(finalMsg),
                 new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 25000))
             ])
             
@@ -476,7 +477,7 @@ export function NexusChat() {
 
             // If Vercel fails or is not successful, THEN try Edge Function fallback
             console.log('[Nexus UI] Vercel brain failed or rejected, falling back to Edge Function...')
-            await callEdgeFunction(userMsg, safetyTimer)
+            await callEdgeFunction(finalMsg, safetyTimer)
             
         } catch (error) {
             clearTimeout(safetyTimer)

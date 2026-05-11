@@ -1,5 +1,14 @@
 
-import { NexusBrainResult } from '../types/nexus'
+export interface NexusBrainResult {
+    message?: string
+    success: boolean
+    actionPerformed?: string
+    data?: any
+    action?: string
+    params?: any
+    answer?: string
+}
+
 import { extractHumanAnswer } from './aiUtils'
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
@@ -32,22 +41,29 @@ export async function nexusBrain(prompt: string): Promise<NexusBrainResult> {
     
     Contexto do Usuário: ${prompt}
     
-    CRITICAL: Diferencie "Captura" de "BI". BI = getCampaignBI. Captura = getCampaign ou runCapture.`
+    FERRAMENTAS:
+    1. CAPTURA: Use para tirar prints de campanhas.
+    2. BI: Use para consultar métricas AdOps (Impressões, CTR, etc).
+    
+    IMPORTANTE: NÃO tente processar pedidos de "montagem", "preparar print" ou "gerar layout". 
+    Esses comandos são processados automaticamente pelo sistema FastPath. 
+    Se o usuário pedir montagem, responda apenas: "O sistema de montagem automática está processando seu pedido."
+    
+    CRITICAL: Diferencie "Captura" de "BI". BI = getCampaignBI. Captura = RunCapture.`
 
     async function callOpenRouter(text: string): Promise<string> {
         for (const model of MODELS) {
             try {
                 console.log(`[Nexus AI] Tentando modelo reserva: ${model}...`)
                 const controller = new AbortController()
-                // Timeout curto de 6s por modelo para garantir que a cascata rode dentro do limite do Vercel Hobby
-                const timeout = setTimeout(() => controller.abort(), 6000)
+                const timeout = setTimeout(() => controller.abort(), 8000)
                 
                 const response = await fetch(OPENROUTER_URL, {
                     method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${apiKey}`,
                         'Content-Type': 'application/json',
-                        'HTTP-Referer': 'https://adsnap.cloud', // Opcional, ajuda no ranking do OR
+                        'HTTP-Referer': 'https://adsnap.cloud',
                         'X-Title': 'Nexus AI'
                     },
                     body: JSON.stringify({
@@ -67,11 +83,9 @@ export async function nexusBrain(prompt: string): Promise<NexusBrainResult> {
                         console.log(`[Nexus AI] Sucesso com modelo: ${model}`)
                         return result
                     }
-                } else {
-                    console.warn(`[Nexus AI] Modelo ${model} indisponível (Status ${response.status}):`, data.error?.message)
                 }
             } catch (err) {
-                console.warn(`[Nexus AI] Falha crítica no modelo ${model}:`, err instanceof Error ? err.message : err)
+                console.warn(`[Nexus AI] Falha no modelo ${model}:`, err instanceof Error ? err.message : err)
             }
         }
         return ''
@@ -82,10 +96,9 @@ export async function nexusBrain(prompt: string): Promise<NexusBrainResult> {
         const rawResult = await callOpenRouter(systemPrompt)
         
         if (!rawResult) {
-            return { message: 'Nexus indisponível no momento (Quota OpenRouter esgotada).', success: false }
+            return { message: 'Nexus indisponível no momento.', success: false }
         }
 
-        // Tenta extrair JSON de ação ou resposta direta
         const jsonMatch = rawResult.match(/\{[\s\S]*\}/)
         if (jsonMatch) {
             try {
@@ -94,7 +107,10 @@ export async function nexusBrain(prompt: string): Promise<NexusBrainResult> {
                     return {
                         action: actionData.action,
                         params: actionData.params || {},
+                        actionPerformed: actionData.action,
+                        data: actionData.params || {},
                         answer: actionData.answer || 'Processando sua solicitação...',
+                        message: actionData.answer || 'Processando sua solicitação...',
                         success: true
                     }
                 }
@@ -107,14 +123,57 @@ export async function nexusBrain(prompt: string): Promise<NexusBrainResult> {
             }
         }
 
-        const humanMessage = extractHumanAnswer(rawResult)
         return { 
-            message: humanMessage || "Entendido. Como posso ajudar mais?", 
+            message: extractHumanAnswer(rawResult) || "Entendido.", 
             success: true 
         }
 
     } catch (error) {
-        console.error('[Nexus AI] Fallback v51.0 ativado por erro:', error)
-        return { message: 'Erro interno no núcleo neural v51.0.', success: false }
+        console.error('[Nexus AI Error]', error)
+        return { message: 'Erro interno no núcleo neural.', success: false }
     }
+}
+
+export async function buildGmailQuery(prompt: string, brDate: string): Promise<string> {
+    const apiKey = process.env.OPENROUTER_API_KEY
+    if (!apiKey) return 'is:unread'
+    
+    const response = await fetch(OPENROUTER_URL, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            model: 'google/gemma-4-31b-it:free',
+            messages: [{
+                role: 'system',
+                content: `Hoje é ${brDate}. Converta o pedido do usuário para uma query de busca do Gmail. Retorne APENAS a query string.\nExemplo: "emails da marcelle" -> "from:marcelle"\n"emails de ontem" -> "newer_than:2d"`
+            }, { role: 'user', content: prompt }],
+            temperature: 0
+        })
+    })
+    
+    const data = await response.json()
+    return data.choices?.[0]?.message?.content?.trim() || 'is:unread'
+}
+
+export async function askGeminiAboutEmails(prompt: string, emails: any[], query: string): Promise<string> {
+    const apiKey = process.env.OPENROUTER_API_KEY
+    if (!apiKey) return 'Não foi possível analisar os e-mails.'
+    
+    const context = emails.map(e => `De: ${e.from}\nAssunto: ${e.subject}\nSnippet: ${e.snippet}`).join('\n---\n')
+    
+    const response = await fetch(OPENROUTER_URL, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            model: 'openai/gpt-oss-120b:free',
+            messages: [{
+                role: 'system',
+                content: `Você é o Nexus AI. Analise os e-mails abaixo e responda à pergunta do usuário de forma executiva e direta.\n\nE-MAILS:\n${context}`
+            }, { role: 'user', content: prompt }],
+            temperature: 0.3
+        })
+    })
+    
+    const data = await response.json()
+    return data.choices?.[0]?.message?.content?.trim() || 'Sem resposta da IA.'
 }
