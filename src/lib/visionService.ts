@@ -9,9 +9,11 @@ export interface AdBox {
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const VISION_MODEL = 'google/gemini-flash-1.5-8b'; // Fast, vision-capable and free on OpenRouter
 
+import sharp from 'sharp';
+
 /**
  * Uses AI Vision to detect an advertisement placeholder (red rectangle or clear ad space)
- * in a background template image.
+ * in a background template image. Optimized for performance with local compression.
  */
 export async function detectAdBoxViaVision(imageUrl: string, format: string): Promise<AdBox | null> {
     const apiKey = process.env.OPENROUTER_API_KEY;
@@ -20,22 +22,32 @@ export async function detectAdBoxViaVision(imageUrl: string, format: string): Pr
         return null;
     }
 
-    console.log(`[VisionService] Analyzing image for format ${format}...`);
+    console.log(`[VisionService] Optimizing image for Vision Engine (Format: ${format})...`);
 
     try {
-        const prompt = `Analise esta captura de tela de um site.
-        O sistema marcou o espaço de um anúncio ${format} com um retângulo vermelho.
-        Retorne APENAS um objeto JSON com as coordenadas EXATAS [x, y, width, height] desse retângulo vermelho em relação ao tamanho total da imagem (pixel-based).
-        
-        IMPORTANTE:
-        1. A imagem tem 1920x1080.
-        2. Seja extremamente preciso nos pixels.
-        3. O formato esperado é ${format}.
-        
-        Exemplo de resposta:
-        {"x": 100, "y": 200, "width": 728, "height": 90}`;
+        // 1. Pre-process image to be lightweight (1024px wide, compressed JPEG)
+        // This avoids timeouts and reduces OpenRouter/Gemini latency significantly.
+        const res = await fetch(imageUrl);
+        if (!res.ok) throw new Error(`Failed to fetch image: ${res.statusText}`);
+        const originalBuffer = Buffer.from(await res.arrayBuffer());
 
-        const response = await fetch(OPENROUTER_URL, {
+        const VISION_WIDTH = 1024;
+        const processedImage = await sharp(originalBuffer)
+            .resize(VISION_WIDTH)
+            .jpeg({ quality: 80 })
+            .toBuffer();
+        
+        const base64Image = processedImage.toString('base64');
+        const scaleFactor = 1920 / VISION_WIDTH;
+
+        const prompt = `Analise esta captura de tela.
+        Identifique o retângulo vermelho que marca o espaço do anúncio ${format}.
+        Retorne APENAS um objeto JSON com as coordenadas [x, y, width, height] desse retângulo em pixels.
+        
+        IMPORTANTE: O arquivo de imagem agora tem largura de ${VISION_WIDTH}px.
+        Responda as coordenadas BASEADAS NOS PIXELS REAIS DESTA IMAGEM que você está vendo agora.`;
+
+        const apiResponse = await fetch(OPENROUTER_URL, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${apiKey}`,
@@ -50,7 +62,10 @@ export async function detectAdBoxViaVision(imageUrl: string, format: string): Pr
                         role: 'user',
                         content: [
                             { type: 'text', text: prompt },
-                            { type: 'image_url', image_url: { url: imageUrl } }
+                            { 
+                                type: 'image_url', 
+                                image_url: { url: `data:image/jpeg;base64,${base64Image}` } 
+                            }
                         ]
                     }
                 ],
@@ -59,27 +74,31 @@ export async function detectAdBoxViaVision(imageUrl: string, format: string): Pr
             })
         });
 
-        const data = await response.json();
+        const data = await apiResponse.json();
         const content = data.choices?.[0]?.message?.content;
         
-        if (!content) {
-            console.error('[VisionService] Empty response from AI');
-            return null;
-        }
+        if (!content) return null;
 
         try {
-            const result = JSON.parse(content.replace(/```json|```/g, ''));
-            if (result.x !== undefined && result.y !== undefined) {
-                console.log(`[VisionService] Detected box:`, result);
-                return result as AdBox;
-            }
+            const rawResult = JSON.parse(content.replace(/```json|```/g, ''));
+            
+            // 2. Scale coordinates back to 1920p original resolution
+            const scaledResult: AdBox = {
+                x: Math.round(rawResult.x * scaleFactor),
+                y: Math.round(rawResult.y * scaleFactor),
+                width: Math.round(rawResult.width * scaleFactor),
+                height: Math.round(rawResult.height * scaleFactor)
+            };
+
+            console.log(`[VisionService] Detected and scaled box:`, scaledResult);
+            return scaledResult;
         } catch (e) {
-            console.error('[VisionService] Failed to parse JSON result:', content);
+            console.error('[VisionService] Parse error:', content);
         }
 
         return null;
     } catch (error) {
-        console.error('[VisionService] Error:', error);
+        console.error('[VisionService] Critical Error:', error);
         return null;
     }
 }
