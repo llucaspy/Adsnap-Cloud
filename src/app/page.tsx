@@ -9,6 +9,8 @@ import { ArrowRight, Box, Zap, Search } from 'lucide-react'
 
 export const revalidate = 30
 
+console.log('[Adsnap] Nexus Engine v2.1.0 Ready')
+
 export default async function PresentationHome() {
   const today = startOfDay(new Date())
 

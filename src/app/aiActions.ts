@@ -253,6 +253,7 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                 const formatId = matchedFormat?.id
 
                 // Priority 1: PI 000 Template (Reference for Montagem)
+                // Try precise match via compositionBox first
                 let campaign = await prisma.campaign.findFirst({
                     where: { 
                         pi: '000',
@@ -261,23 +262,42 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                     }
                 })
 
-                // Find Base Print (Background) for this PI 000 on the targeted date
+                // Fallback: Try match via format string (e.g. "728x90")
+                if (!campaign) {
+                    console.log(`[Nexus Assembly] No precise box match for PI 000 ${w}x${h}. Trying format fallback...`)
+                    campaign = await prisma.campaign.findFirst({
+                        where: {
+                            pi: '000',
+                            OR: [
+                                { format: format },
+                                { format: { contains: w.toString() } },
+                                { format: { contains: h.toString() } }
+                            ]
+                        }
+                    })
+                }
+
+                // Find Base Print (Background) for this PI 000 (Date Agnostic - Latest Success)
                 let baseCaptureId: string | null = null
+                let templateDetails = ''
+                
                 if (campaign) {
                     const baseCapture = await prisma.capture.findFirst({
                         where: {
                             campaignId: campaign.id,
-                            status: 'SUCCESS',
-                            createdAt: { gte: startOfDay, lte: endOfDay }
+                            status: 'SUCCESS'
                         },
                         orderBy: { createdAt: 'desc' }
                     })
+
                     if (baseCapture) {
                         baseCaptureId = baseCapture.id
-                        console.log(`[Nexus Assembly] Found Base Print: ${baseCapture.id} for date ${targetDateStr}`)
+                        console.log(`[Nexus Assembly] Using Latest Base Print: ${baseCapture.id} (from ${baseCapture.createdAt})`)
                     } else {
-                        console.warn(`[Nexus Assembly] No PI 000 capture found for ${targetDateStr} for format ${format}`)
+                        templateDetails = `(PI 000 achado ID:${campaign.id}, mas sem prints de SUCESSO)`
                     }
+                } else {
+                    templateDetails = `(Nenhum PI '000' achado para ${w}x${h})`
                 }
 
                 // Identify target campaign for record registry
@@ -303,17 +323,18 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                 if (targetCampaign) {
                     let finalScreenshotPath = url
                     let compositeSuccess = false
+                    let compositionError: string | null = null
 
                     // If we found a base print, perform COMPOSITION now (Server-side)
                     if (baseCaptureId) {
                         try {
-                            const baseCapture = await prisma.capture.findUnique({ where: { id: baseCaptureId } })
-                            if (baseCapture && baseCapture.screenshotPath && campaign) {
+                            const baseCaptureObj = await prisma.capture.findUnique({ where: { id: baseCaptureId } })
+                            if (baseCaptureObj && baseCaptureObj.screenshotPath && campaign) {
                                 const box = (campaign as any).compositionBox
                                 if (box && (box as any).width) {
                                     console.log(`[Nexus Assembly] Rendering composite via Sharp for ${targetCampaign.client}...`)
                                     const compositeBuffer = await compositeWithSharp(
-                                        baseCapture.screenshotPath,
+                                        baseCaptureObj.screenshotPath,
                                         url,
                                         box
                                     )
@@ -337,14 +358,15 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                                         console.log(`[Nexus Assembly] Composite uploaded: ${publicUrl}`)
                                     } else {
                                         console.error('[Nexus Assembly] Upload error:', uploadError)
+                                        compositionError = `Erro no upload: ${uploadError.message}`
                                     }
+                                } else {
+                                    compositionError = "Campos de composição (box) incompletos no PI 000"
                                 }
                             }
                         } catch (err) {
-                            const errorMsg = err instanceof Error ? err.message : String(err)
-                            console.error('[Nexus Assembly] Composition failed:', errorMsg)
-                            results.push({ url: url, success: true, format: format, client: targetCampaign.client, baseFound: false, error: `Falha na composição: ${errorMsg}` })
-                            // Continua para salvar o criativo original como fallback
+                            compositionError = err instanceof Error ? err.message : String(err)
+                            console.error('[Nexus Assembly] Composition failed:', compositionError)
                         }
                     }
 
@@ -353,7 +375,7 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                             campaignId: targetCampaign.id,
                             screenshotPath: finalScreenshotPath,
                             status: 'SUCCESS',
-                            isAssembly: compositeSuccess, // Only true if composition worked
+                            isAssembly: compositeSuccess,
                             baseCaptureId: baseCaptureId
                         }
                     })
@@ -369,28 +391,33 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                         format: format, 
                         client: targetCampaign.client, 
                         baseFound: compositeSuccess, 
-                        compositeUrl: finalScreenshotPath 
+                        compositeUrl: finalScreenshotPath,
+                        error: compositionError,
+                        diagnostics: templateDetails
                     })
                 } else {
-                    results.push({ url: url, success: false, format: format, error: 'Campanha não encontrada' })
+                    results.push({ url: url, success: false, format: format, error: 'Campanha não encontrada', diagnostics: templateDetails })
                 }
             }
             
             const successCount = results.filter(r => r.success).length
             const baseCount = results.filter(r => r.baseFound).length
-            
             const lastCompositeUrl = results.find(r => r.baseFound)?.compositeUrl
-            const failure = results.find(r => r.error && r.error.includes('Falha na composição'))
+            const failure = results.find(r => r.error)
+            const metaInfo = results.map(r => r.diagnostics).filter(Boolean).join(' | ')
             
             let message = successCount > 0 
-                ? `✅ Protocolo de montagem finalizado!\n- ${successCount} criativos processados para o dia ${targetDateStr}.\n- ${baseCount > 0 ? `Composição visual realizada com sucesso em ${baseCount} caso(s).` : `❌ **Nesta data (${targetDateStr}) não temos print modelo (PI 000) capturado ou houve falha na fusão.**`}`
+                ? `✅ Protocolo de montagem finalizado!\n- ${successCount} criativos processados para o dia ${targetDateStr}.\n- ${baseCount > 0 ? `Composição visual realizada com sucesso.` : `❌ **Nesta data (${targetDateStr}) não temos print modelo (PI 000) capturado ou houve falha na fusão.**`}`
                 : `⚠️ Formatos não reconhecidos no sistema ou sem PI 000 configurado para ${targetDateStr}.`
+
+            if (metaInfo) {
+                message += `\n\n🔍 **Diagnóstico:** ${metaInfo}`
+            }
 
             if (failure) {
                 message += `\n\n⚠️ **Nota Técnica:** ${failure.error}. (O criativo foi salvo mas a montagem falhou).`
             }
 
-            // Se houver montagem, mostra a última no chat para conferência imediata
             if (lastCompositeUrl) {
                 message += `\n\n### 🖼️ Resultado da Montagem:\n\n![Montagem](${lastCompositeUrl})\n\n*(O download começará automaticamente)*`
             }
