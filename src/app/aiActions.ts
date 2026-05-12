@@ -22,7 +22,7 @@ console.log('[Gemini Module] Carregado!')
 export interface NexusResponse {
     message: string
     success: boolean
-    actionPerformed?: 'CAPTURE' | 'CAPTURE_ALL' | 'ARCHIVE' | 'UPDATE_URL' | 'REGISTRATION_PREVIEW' | 'UPDATE_FORMATS' | 'STOP_CAPTURES' | 'SCHEDULE_ALL' | 'DOWNLOAD_ZIP'
+    actionPerformed?: 'CAPTURE' | 'CAPTURE_ALL' | 'ARCHIVE' | 'UPDATE_URL' | 'REGISTRATION_PREVIEW' | 'UPDATE_FORMATS' | 'STOP_CAPTURES' | 'SCHEDULE_ALL' | 'DOWNLOAD_ZIP' | 'DOWNLOAD_FILE'
     data?: unknown
 }
 
@@ -360,7 +360,7 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                         data: { status: 'SUCCESS', lastCaptureAt: new Date() }
                     })
 
-                    results.push({ url: url, success: true, format: format, client: targetCampaign.client, baseFound: !!baseCaptureId })
+                    results.push({ url: url, success: true, format: format, client: targetCampaign.client, baseFound: !!baseCaptureId, compositeUrl: finalScreenshotPath })
                 } else {
                     results.push({ url: url, success: false, format: format, error: 'Campanha não encontrada' })
                 }
@@ -369,12 +369,22 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
             const successCount = results.filter(r => r.success).length
             const baseCount = results.filter(r => r.baseFound).length
             
+            const lastCompositeUrl = results.find(r => r.baseFound)?.compositeUrl
+            
+            let message = successCount > 0 
+                ? `✅ Protocolo de montagem finalizado!\n- ${successCount} criativos processados para o dia ${targetDateStr}.\n- ${baseCount > 0 ? `Composição visual realizada com sucesso em ${baseCount} caso(s).` : `❌ **Nesta data (${targetDateStr}) não temos print modelo (PI 000) capturado.** Os criativos foram salvos isoladamente no histórico.`}\n- Clientes: ${Array.from(new Set(results.filter(r => r.success).map(r => r.client))).join(', ')}`
+                : `⚠️ Formatos não reconhecidos no sistema ou sem PI 000 configurado para ${targetDateStr}.`
+
+            // Se houver montagem, mostra a última no chat para conferência imediata
+            if (lastCompositeUrl) {
+                message += `\n\n### 🖼️ Resultado da Montagem:\n\n![Montagem](${lastCompositeUrl})\n\n*(O download começará automaticamente)*`
+            }
+
             return {
-                message: successCount > 0 
-                    ? `✅ Protocolo de montagem finalizado!\n- ${successCount} criativos processados para o dia ${targetDateStr}.\n- ${baseCount > 0 ? `Composição visual realizada com sucesso em ${baseCount} caso(s).` : `❌ **Nesta data (${targetDateStr}) não temos print modelo (PI 000) capturado.** Os criativos foram salvos isoladamente no histórico.`}\n- Clientes: ${Array.from(new Set(results.filter(r => r.success).map(r => r.client))).join(', ')}`
-                    : `⚠️ Formatos não reconhecidos no sistema ou sem PI 000 configurado para ${targetDateStr}.`,
+                message,
                 success: successCount > 0,
-                actionPerformed: 'CAPTURE' as const
+                actionPerformed: lastCompositeUrl ? 'DOWNLOAD_FILE' : 'CAPTURE',
+                data: lastCompositeUrl ? { url: lastCompositeUrl } : undefined
             }
         }
         

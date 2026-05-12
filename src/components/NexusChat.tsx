@@ -456,8 +456,14 @@ export function NexusChat() {
                     setDeleteData(response.data as any[])
                     setShowDeleteWizard(true)
                 }
-                if (response.actionPerformed === 'DOWNLOAD_ZIP' && response.data?.date) {
-                    window.location.href = `/api/books/download?date=${response.data.date}`
+                if (response.actionPerformed === 'DOWNLOAD_FILE' && response.data?.url) {
+                    const link = document.createElement('a')
+                    link.href = response.data.url
+                    link.setAttribute('download', response.data.url.split('/').pop() || 'montagem.png')
+                    link.setAttribute('target', '_blank')
+                    document.body.appendChild(link)
+                    link.click()
+                    document.body.removeChild(link)
                 }
 
                 setMessages(prev => [...prev, {
