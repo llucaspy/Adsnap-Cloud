@@ -219,7 +219,7 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
         console.log('[Nexus FastPath] Triggering Assembly Handler...')
         
         const urlPattern = /https?:\/\/[^\s,]+/g
-        let urls: string[] = prompt.match(urlPattern) || []
+        const urls: string[] = prompt.match(urlPattern) || []
         
         const dateMatch = prompt.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/)
         let targetDateStr = new Date().toLocaleDateString('pt-BR')
@@ -240,25 +240,15 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
         const endOfDay = new Date(queryDate.getTime())
         endOfDay.setUTCHours(23, 59, 59, 999)
 
+        // IMPORTANT: Do NOT auto-fetch screenshots from DB as "creatives".
+        // Screenshots of pages are NOT banners. The user must provide creative URLs manually.
+        // If no URLs provided, guide the user.
         if (urls.length === 0) {
-            console.log(`[Nexus Assembly] No URLs in prompt. Searching database for creatives on ${targetDateStr}...`);
-            const dbCreatives = await prisma.capture.findMany({
-                where: {
-                    status: 'SUCCESS',
-                    isAssembly: false,
-                    campaign: {
-                        pi: { not: '000' },
-                        isArchived: false
-                    },
-                    createdAt: {
-                        gte: startOfDay,
-                        lte: endOfDay
-                    }
-                },
-                select: { screenshotPath: true }
-            });
-            urls = dbCreatives.map(c => c.screenshotPath);
-            console.log(`[Nexus Assembly] Found ${urls.length} candidates in DB.`);
+            console.log(`[Nexus Assembly] No creative URLs provided in prompt.`);
+            return {
+                message: `⚠️ Nenhum criativo (banner) foi detectado na sua mensagem.\n\nPara fazer a montagem, envie os **links dos criativos (banners)** junto com a data. Exemplo:\n\n*"Fazer montagem do dia ${targetDateStr} com https://link-do-banner-728x90.jpg"*\n\n💡 **Dica:** O criativo deve ser a imagem isolada do anúncio, não um screenshot do site.`,
+                success: false
+            }
         }
 
         if (urls.length > 0) {
