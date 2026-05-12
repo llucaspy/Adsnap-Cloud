@@ -36,25 +36,12 @@ export async function compositeWithSharp(
             })
             .toBuffer();
 
-        // 4. Studio Frame Compensation (Important!)
-        // Our 'Studio' images add a browser frame: 12px margin + 80px header = 92px Y offset, 12px X offset.
-        // We apply this only if the background is likely a 1080p Studio print.
-        const metadata = await bgBase.metadata();
-        let offsetX = 0;
-        let offsetY = 0;
-
-        if (metadata.width === 1920 && metadata.height === 1080) {
-            console.log('[RasterService] Applying Studio Frame offset (Desktop: 12, 92)');
-            offsetX = 12;
-            offsetY = 92;
-        }
-
-        // 5. Perform composition
+        // 4. Perform composition
         const finalImage = await bgBase
             .composite([{
                 input: resizedCreative,
-                left: Math.round(box.x + offsetX),
-                top: Math.round(box.y + offsetY)
+                left: Math.round(box.x),
+                top: Math.round(box.y)
             }])
             .png()
             .toBuffer();

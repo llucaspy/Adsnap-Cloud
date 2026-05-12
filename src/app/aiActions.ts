@@ -330,66 +330,87 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                         try {
                             const baseCaptureObj = await prisma.capture.findUnique({ where: { id: baseCaptureId } })
                             if (baseCaptureObj && baseCaptureObj.screenshotPath && campaign) {
-                                const box = (campaign as any).compositionBox
-                                if (box && (box as any).width) {
-                                    console.log(`[Nexus Assembly] Rendering composite via Sharp for ${targetCampaign.client}...`)
-                                    const compositeBuffer = await compositeWithSharp(
-                                        baseCaptureObj.screenshotPath,
-                                        url,
-                                        box
-                                    )
+                                const targetPI000 = campaign as any;
+                                const templateUrl = baseCaptureObj.screenshotPath;
+                                const creativeUrl = url;
 
-                                    // Upload to Supabase via REST API (bypass SDK JWT issues)
-                                    const filename = `assembly_${targetCampaign.id}_${Date.now()}.png`
-                                    const sbUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim()
-                                    const sbServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
-                                    const sbAnonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim()
-                                    const uploadPath = `assemblies/${filename}`
+                                // Vision-Assisted Alignment (New!)
+                                // Let AI "see" where the ad placeholder is on the actual template image
+                                let activeBox = { 
+                                    x: Number(targetPI000.compositionBox.x),
+                                    y: Number(targetPI000.compositionBox.y),
+                                    width: Number(targetPI000.compositionBox.width),
+                                    height: Number(targetPI000.compositionBox.height)
+                                };
+
+                                try {
+                                    const { detectAdBoxViaVision } = await import('@/lib/visionService');
+                                    const visionBox = await detectAdBoxViaVision(templateUrl, targetCampaign.format);
+                                    if (visionBox) {
+                                        console.log(`[Nexus Assembly] Vision detected precise alignment:`, visionBox);
+                                        activeBox = visionBox;
+                                    } else {
+                                        console.warn('[Nexus Assembly] Vision detection failed, using database defaults');
+                                    }
+                                } catch (vErr) {
+                                    console.error('[Nexus Assembly] Vision service error:', vErr);
+                                }
+
+                                console.log(`[Nexus Assembly] Rendering composite via Sharp for ${targetCampaign.client}...`);
+                                const compositeBuffer = await compositeWithSharp(
+                                    templateUrl,
+                                    creativeUrl,
+                                    activeBox
+                                );
+
+                                // Upload to Supabase via REST API (bypass SDK JWT issues)
+                                const filename = `assembly_${targetCampaign.id}_${Date.now()}.png`
+                                const sbUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim()
+                                const sbServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
+                                const sbAnonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim()
+                                const uploadPath = `assemblies/${filename}`
+                                
+                                // Try with Service Role first, fallback to Anon Key
+                                let success = false
+                                let lastStatusCode = 0
+                                let lastErrorBody = ''
+
+                                for (const key of [sbServiceKey, sbAnonKey]) {
+                                    if (!key) continue
                                     
-                                    // Try with Service Role first, fallback to Anon Key
-                                    let success = false
-                                    let lastStatusCode = 0
-                                    let lastErrorBody = ''
-
-                                    for (const key of [sbServiceKey, sbAnonKey]) {
-                                        if (!key) continue
-                                        
-                                        try {
-                                            const uploadRes = await fetch(
-                                                `${sbUrl}/storage/v1/object/screenshots/${uploadPath}`,
-                                                {
-                                                    method: 'POST',
-                                                    headers: {
-                                                        'Authorization': `Bearer ${key}`,
-                                                        'Content-Type': 'image/png',
-                                                        'x-upsert': 'true'
-                                                    },
-                                                    body: new Uint8Array(compositeBuffer)
-                                                }
-                                            )
-
-                                            if (uploadRes.ok) {
-                                                const publicUrl = `${sbUrl}/storage/v1/object/public/screenshots/${uploadPath}`
-                                                finalScreenshotPath = publicUrl
-                                                compositeSuccess = true
-                                                success = true
-                                                console.log(`[Nexus Assembly] Fixed! Composite uploaded via ${key === sbServiceKey ? 'Service' : 'Anon'} Key: ${publicUrl}`)
-                                                break
-                                            } else {
-                                                lastStatusCode = uploadRes.status
-                                                lastErrorBody = await uploadRes.text()
-                                                console.warn(`[Nexus Assembly] Upload attempt with key ${key.substring(0, 5)}... failed (${lastStatusCode})`)
+                                    try {
+                                        const uploadRes = await fetch(
+                                            `${sbUrl}/storage/v1/object/screenshots/${uploadPath}`,
+                                            {
+                                                method: 'POST',
+                                                headers: {
+                                                    'Authorization': `Bearer ${key}`,
+                                                    'Content-Type': 'image/png',
+                                                    'x-upsert': 'true'
+                                                },
+                                                body: new Uint8Array(compositeBuffer)
                                             }
-                                        } catch (e) {
-                                            console.error('[Nexus Assembly] Fetch error:', e)
-                                        }
-                                    }
+                                        )
 
-                                    if (!success) {
-                                        compositionError = `Erro no upload (${lastStatusCode}): ${lastErrorBody} (Keys tried: SERVICE:${sbServiceKey.substring(0, 6)}... ANON:${sbAnonKey.substring(0, 6)}...)`
+                                        if (uploadRes.ok) {
+                                            const publicUrl = `${sbUrl}/storage/v1/object/public/screenshots/${uploadPath}`
+                                            finalScreenshotPath = publicUrl
+                                            compositeSuccess = true
+                                            success = true
+                                            console.log(`[Nexus Assembly] Fixed! Composite uploaded via ${key === sbServiceKey ? 'Service' : 'Anon'} Key: ${publicUrl}`)
+                                            break
+                                        } else {
+                                            lastStatusCode = uploadRes.status
+                                            lastErrorBody = await uploadRes.text()
+                                            console.warn(`[Nexus Assembly] Upload attempt with key ${key.substring(0, 5)}... failed (${lastStatusCode})`)
+                                        }
+                                    } catch (e) {
+                                        console.error('[Nexus Assembly] Fetch error:', e)
                                     }
-                                } else {
-                                    compositionError = "Campos de composição (box) incompletos no PI 000"
+                                }
+
+                                if (!success) {
+                                    compositionError = `Erro no upload (${lastStatusCode}): ${lastErrorBody} (Keys tried: SERVICE:${sbServiceKey.substring(0, 6)}... ANON:${sbAnonKey.substring(0, 6)}...)`
                                 }
                             }
                         } catch (err) {
