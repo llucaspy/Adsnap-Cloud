@@ -57,7 +57,24 @@ export async function compositeWithSharp(
 async function fetchImage(url: string): Promise<Buffer> {
     if (!url) throw new Error('Empty URL provided to fetchImage');
     
-    // If it's already a public URL or valid absolute URL
+    // Fallback prioritário: Se for URL do Supabase, usa o SDK para baixar o arquivo diretamente
+    if (url.includes('supabase.co/storage/v1/object/public/screenshots/')) {
+        try {
+            const { supabase } = await import('./supabase');
+            const path = url.split('screenshots/')[1];
+            if (path) {
+                console.log(`[RasterService] Downloading directly from Supabase: ${path}`);
+                const { data, error } = await supabase.storage.from('screenshots').download(path);
+                if (error) throw error;
+                const arrayBuffer = await data.arrayBuffer();
+                return Buffer.from(arrayBuffer);
+            }
+        } catch (err) {
+            console.warn(`[RasterService] Supabase SDK download failed, falling back to fetch:`, err);
+        }
+    }
+
+    // Default: HTTP Fetch
     try {
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);

@@ -341,7 +341,10 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                                 }
                             }
                         } catch (err) {
-                            console.error('[Nexus Assembly] Composition failed:', err)
+                            const errorMsg = err instanceof Error ? err.message : String(err)
+                            console.error('[Nexus Assembly] Composition failed:', errorMsg)
+                            results.push({ url: url, success: true, format: format, client: targetCampaign.client, baseFound: false, error: `Falha na composição: ${errorMsg}` })
+                            // Continua para salvar o criativo original como fallback
                         }
                     }
 
@@ -360,7 +363,14 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                         data: { status: 'SUCCESS', lastCaptureAt: new Date() }
                     })
 
-                    results.push({ url: url, success: true, format: format, client: targetCampaign.client, baseFound: !!baseCaptureId, compositeUrl: finalScreenshotPath })
+                    results.push({ 
+                        url: url, 
+                        success: true, 
+                        format: format, 
+                        client: targetCampaign.client, 
+                        baseFound: compositeSuccess, 
+                        compositeUrl: finalScreenshotPath 
+                    })
                 } else {
                     results.push({ url: url, success: false, format: format, error: 'Campanha não encontrada' })
                 }
@@ -370,10 +380,15 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
             const baseCount = results.filter(r => r.baseFound).length
             
             const lastCompositeUrl = results.find(r => r.baseFound)?.compositeUrl
+            const failure = results.find(r => r.error && r.error.includes('Falha na composição'))
             
             let message = successCount > 0 
-                ? `✅ Protocolo de montagem finalizado!\n- ${successCount} criativos processados para o dia ${targetDateStr}.\n- ${baseCount > 0 ? `Composição visual realizada com sucesso em ${baseCount} caso(s).` : `❌ **Nesta data (${targetDateStr}) não temos print modelo (PI 000) capturado.** Os criativos foram salvos isoladamente no histórico.`}\n- Clientes: ${Array.from(new Set(results.filter(r => r.success).map(r => r.client))).join(', ')}`
+                ? `✅ Protocolo de montagem finalizado!\n- ${successCount} criativos processados para o dia ${targetDateStr}.\n- ${baseCount > 0 ? `Composição visual realizada com sucesso em ${baseCount} caso(s).` : `❌ **Nesta data (${targetDateStr}) não temos print modelo (PI 000) capturado ou houve falha na fusão.**`}`
                 : `⚠️ Formatos não reconhecidos no sistema ou sem PI 000 configurado para ${targetDateStr}.`
+
+            if (failure) {
+                message += `\n\n⚠️ **Nota Técnica:** ${failure.error}. (O criativo foi salvo mas a montagem falhou).`
+            }
 
             // Se houver montagem, mostra a última no chat para conferência imediata
             if (lastCompositeUrl) {
