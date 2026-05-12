@@ -148,41 +148,52 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
                                             {formatDate(new Date(capture.createdAt), "HH:mm '•' dd MMM", { locale: ptBR })}
                                         </p>
                                     </div>
+                                    <div className={`relative ${capture.isAssembly ? 'aspect-video' : 'aspect-[3/4]'} rounded-2xl overflow-hidden transition-all duration-500 transform-gpu group-hover:rotate-y-12 group-hover:scale-105 border border-white/5 group-hover:border-white/30 shadow-2xl bg-bg-tertiary`}>
+                                        {/* Status Chip */}
+                                        <div className="absolute top-4 left-4 z-20 flex flex-col gap-2">
+                                            <div className="px-3 py-1 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 flex items-center gap-2">
+                                                <div className={`w-1.5 h-1.5 rounded-full ${capture.isAssembly ? 'bg-accent' : 'bg-success'} animate-pulse`} />
+                                                <span className="text-[8px] font-black text-white/80 uppercase tracking-widest">
+                                                    {capture.isAssembly ? 'Visual Assembly' : 'Live Capture'}
+                                                </span>
+                                            </div>
+                                        </div>
 
-                                    <div className="absolute inset-0 z-0 bg-bg-tertiary">
-                                        {capture.isAssembly && capture.baseCaptureId ? (
-                                            <>
+                                        <div className="absolute inset-0 z-0 bg-bg-tertiary">
+                                            {capture.isAssembly && capture.baseCaptureId ? (
+                                                <>
+                                                    <CaptureImage
+                                                        src={`/api/captures/${capture.baseCaptureId}`}
+                                                        alt="Background"
+                                                        className="w-full h-full object-contain bg-black"
+                                                    />
+                                                    {capture.campaign?.compositionBox && (
+                                                        <div 
+                                                            className="absolute pointer-events-none transition-transform duration-700 group-hover:scale-110"
+                                                            style={{
+                                                                left: `${((typeof capture.campaign.compositionBox === 'string' ? JSON.parse(capture.campaign.compositionBox).x : capture.campaign.compositionBox.x) / 1920) * 100}%`,
+                                                                top: `${((typeof capture.campaign.compositionBox === 'string' ? JSON.parse(capture.campaign.compositionBox).y : capture.campaign.compositionBox.y) / 1080) * 100}%`,
+                                                                width: `${((typeof capture.campaign.compositionBox === 'string' ? JSON.parse(capture.campaign.compositionBox).width : capture.campaign.compositionBox.width) / 1920) * 100}%`,
+                                                                height: `${((typeof capture.campaign.compositionBox === 'string' ? JSON.parse(capture.campaign.compositionBox).height : capture.campaign.compositionBox.height) / 1080) * 100}%`,
+                                                                zIndex: 5
+                                                            }}
+                                                        >
+                                                            <CaptureImage
+                                                                src={`/api/captures/${capture.id}`}
+                                                                alt="Creative Overlay"
+                                                                className="w-full h-full object-contain"
+                                                            />
+                                                        </div>
+                                                    )}
+                                                </>
+                                            ) : (
                                                 <CaptureImage
-                                                    src={`/api/captures/${capture.baseCaptureId}`}
-                                                    alt="Background"
-                                                    className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-700"
+                                                    src={`/api/captures/${capture.id}`}
+                                                    alt={capture.campaign.client}
+                                                    className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                                                 />
-                                                {capture.campaign?.compositionBox && (
-                                                    <div 
-                                                        className="absolute pointer-events-none transition-transform duration-700 group-hover:scale-110"
-                                                        style={{
-                                                            left: `${(capture.campaign.compositionBox.x / 1920) * 100}%`,
-                                                            top: `${(capture.campaign.compositionBox.y / 1080) * 100}%`,
-                                                            width: `${(capture.campaign.compositionBox.width / 1920) * 100}%`,
-                                                            height: `${(capture.campaign.compositionBox.height / 1080) * 100}%`,
-                                                            zIndex: 5
-                                                        }}
-                                                    >
-                                                        <CaptureImage
-                                                            src={`/api/captures/${capture.id}`}
-                                                            alt="Creative Overlay"
-                                                            className="w-full h-full object-contain"
-                                                        />
-                                                    </div>
-                                                )}
-                                            </>
-                                        ) : (
-                                            <CaptureImage
-                                                src={`/api/captures/${capture.id}`}
-                                                alt={capture.campaign.client}
-                                                className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-                                            />
-                                        )}
+                                            )}
+                                        </div>
                                     </div>
 
                                     {/* Gradient border on hover */}

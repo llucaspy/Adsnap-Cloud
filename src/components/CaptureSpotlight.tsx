@@ -15,22 +15,22 @@ export function CaptureSpotlight({ captures }: { captures: any[] }) {
                         key={`${capture.id}-${i}`}
                         className="flex-shrink-0 w-64 group relative perspective-1000"
                     >
-                        <div className="relative aspect-[3/4] rounded-2xl overflow-hidden transition-all duration-500 transform-gpu group-hover:rotate-y-12 group-hover:scale-105 border border-white/5 group-hover:border-white/30 shadow-2xl bg-bg-tertiary">
+                        <div className={`relative ${capture.isAssembly ? 'aspect-video' : 'aspect-[3/4]'} rounded-2xl overflow-hidden transition-all duration-500 transform-gpu group-hover:rotate-y-12 group-hover:scale-105 border border-white/5 group-hover:border-white/30 shadow-2xl bg-bg-tertiary`}>
                             {capture.isAssembly && capture.baseCaptureId ? (
                                 <>
                                     <CaptureImage
                                         src={`/api/captures/${capture.baseCaptureId}`}
                                         alt="Background"
-                                        className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-700"
+                                        className="w-full h-full object-contain bg-black transition-all duration-700"
                                     />
                                     {capture.campaign?.compositionBox && (
                                         <div 
                                             className="absolute pointer-events-none"
                                             style={{
-                                                left: `${(capture.campaign.compositionBox.x / 1920) * 100}%`,
-                                                top: `${(capture.campaign.compositionBox.y / 1080) * 100}%`,
-                                                width: `${(capture.campaign.compositionBox.width / 1920) * 100}%`,
-                                                height: `${(capture.campaign.compositionBox.height / 1080) * 100}%`,
+                                                left: `${((typeof capture.campaign.compositionBox === 'string' ? JSON.parse(capture.campaign.compositionBox).x : capture.campaign.compositionBox.x) / 1920) * 100}%`,
+                                                top: `${((typeof capture.campaign.compositionBox === 'string' ? JSON.parse(capture.campaign.compositionBox).y : capture.campaign.compositionBox.y) / 1080) * 100}%`,
+                                                width: `${((typeof capture.campaign.compositionBox === 'string' ? JSON.parse(capture.campaign.compositionBox).width : capture.campaign.compositionBox.width) / 1920) * 100}%`,
+                                                height: `${((typeof capture.campaign.compositionBox === 'string' ? JSON.parse(capture.campaign.compositionBox).height : capture.campaign.compositionBox.height) / 1080) * 100}%`,
                                                 zIndex: 5
                                             }}
                                         >
