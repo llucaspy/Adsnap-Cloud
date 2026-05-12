@@ -14,6 +14,8 @@ import prisma from '@/lib/prisma'
 import { createGmailClientFromEnv, searchEmails } from '@/lib/gmail'
 import { nexusBrain } from '@/lib/gemini'
 import * as brain from '@/lib/nexusBrain'
+import { compositeWithSharp } from '@/lib/rasterService'
+import { supabase } from '@/lib/supabase'
 
 console.log('[Gemini Module] Carregado!')
 
@@ -273,6 +275,8 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                     if (baseCapture) {
                         baseCaptureId = baseCapture.id
                         console.log(`[Nexus Assembly] Found Base Print: ${baseCapture.id} for date ${targetDateStr}`)
+                    } else {
+                        console.warn(`[Nexus Assembly] No PI 000 capture found for ${targetDateStr} for format ${format}`)
                     }
                 }
 
@@ -297,12 +301,56 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                 }
 
                 if (targetCampaign) {
+                    let finalScreenshotPath = url
+                    let compositeSuccess = false
+
+                    // If we found a base print, perform COMPOSITION now (Server-side)
+                    if (baseCaptureId) {
+                        try {
+                            const baseCapture = await prisma.capture.findUnique({ where: { id: baseCaptureId } })
+                            if (baseCapture && baseCapture.screenshotPath && campaign) {
+                                const box = (campaign as any).compositionBox
+                                if (box && (box as any).width) {
+                                    console.log(`[Nexus Assembly] Rendering composite via Sharp for ${targetCampaign.client}...`)
+                                    const compositeBuffer = await compositeWithSharp(
+                                        baseCapture.screenshotPath,
+                                        url,
+                                        box
+                                    )
+
+                                    // Upload to Supabase
+                                    const filename = `assembly_${targetCampaign.id}_${Date.now()}.png`
+                                    const { data: uploadData, error: uploadError } = await supabase.storage
+                                        .from('screenshots')
+                                        .upload(`assemblies/${filename}`, compositeBuffer, {
+                                            contentType: 'image/png',
+                                            upsert: true
+                                        })
+
+                                    if (!uploadError) {
+                                        const { data: { publicUrl } } = supabase.storage
+                                            .from('screenshots')
+                                            .getPublicUrl(`assemblies/${filename}`)
+                                        
+                                        finalScreenshotPath = publicUrl
+                                        compositeSuccess = true
+                                        console.log(`[Nexus Assembly] Composite uploaded: ${publicUrl}`)
+                                    } else {
+                                        console.error('[Nexus Assembly] Upload error:', uploadError)
+                                    }
+                                }
+                            }
+                        } catch (err) {
+                            console.error('[Nexus Assembly] Composition failed:', err)
+                        }
+                    }
+
                     await prisma.capture.create({
                         data: {
                             campaignId: targetCampaign.id,
-                            screenshotPath: url,
+                            screenshotPath: finalScreenshotPath,
                             status: 'SUCCESS',
-                            isAssembly: true,
+                            isAssembly: compositeSuccess, // Only true if composition worked
                             baseCaptureId: baseCaptureId
                         }
                     })
@@ -323,8 +371,8 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
             
             return {
                 message: successCount > 0 
-                    ? `✅ Protocolo de montagem finalizado!\n- ${successCount} criativos vinculados para o dia ${targetDateStr}.\n- ${baseCount > 0 ? `Composição visual vinculada em ${baseCount} casos.` : '⚠️ Print de fundo (PI 000) não encontrado para esta data.'}\n- Clientes: ${Array.from(new Set(results.filter(r => r.success).map(r => r.client))).join(', ')}`
-                    : `⚠️ Formatos não reconhecidos no sistema. Verifique se existem campanhas ou templates (PI 000) para estes tamanhos.`,
+                    ? `✅ Protocolo de montagem finalizado!\n- ${successCount} criativos processados para o dia ${targetDateStr}.\n- ${baseCount > 0 ? `Composição visual realizada com sucesso em ${baseCount} caso(s).` : `❌ **Nesta data (${targetDateStr}) não temos print modelo (PI 000) capturado.** Os criativos foram salvos isoladamente no histórico.`}\n- Clientes: ${Array.from(new Set(results.filter(r => r.success).map(r => r.client))).join(', ')}`
+                    : `⚠️ Formatos não reconhecidos no sistema ou sem PI 000 configurado para ${targetDateStr}.`,
                 success: successCount > 0,
                 actionPerformed: 'CAPTURE' as const
             }

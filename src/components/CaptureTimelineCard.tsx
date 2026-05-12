@@ -95,40 +95,11 @@ export function CaptureTimelineCard({ capture }: CaptureTimelineCardProps) {
 
             <div className={`relative ${capture.isAssembly ? 'aspect-video' : 'aspect-[16/10]'} overflow-hidden bg-bg-tertiary`}>
                 {/* Background (Base Print) or Main Screenshot */}
-                {capture.isAssembly && capture.baseCaptureId ? (
-                    <>
-                        <CaptureImage
-                            src={`/api/captures/${capture.baseCaptureId}`}
-                            alt="Background"
-                            className="w-full h-full object-contain bg-black transition-transform duration-1000"
-                        />
-                        {/* Overlay Creative (Banner) */}
-                        {capture.campaign?.compositionBox && (
-                            <div 
-                                className="absolute pointer-events-none transition-transform duration-1000 group-hover:scale-105"
-                                style={{
-                                    left: `${((typeof capture.campaign.compositionBox === 'string' ? JSON.parse(capture.campaign.compositionBox).x : capture.campaign.compositionBox.x) / 1920) * 100}%`,
-                                    top: `${((typeof capture.campaign.compositionBox === 'string' ? JSON.parse(capture.campaign.compositionBox).y : capture.campaign.compositionBox.y) / 1080) * 100}%`,
-                                    width: `${((typeof capture.campaign.compositionBox === 'string' ? JSON.parse(capture.campaign.compositionBox).width : capture.campaign.compositionBox.width) / 1920) * 100}%`,
-                                    height: `${((typeof capture.campaign.compositionBox === 'string' ? JSON.parse(capture.campaign.compositionBox).height : capture.campaign.compositionBox.height) / 1080) * 100}%`,
-                                    zIndex: 5
-                                }}
-                            >
-                                <CaptureImage
-                                    src={`/api/captures/${capture.id}`}
-                                    alt="Creative Overlay"
-                                    className="w-full h-full object-contain"
-                                />
-                            </div>
-                        )}
-                    </>
-                ) : (
-                    <CaptureImage
-                        src={`/api/captures/${capture.id}`}
-                        alt={capture.campaign.campaignName}
-                        className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105"
-                    />
-                )}
+                <CaptureImage
+                    src={`/api/captures/${capture.id}`}
+                    alt={capture.campaign.campaignName}
+                    className={`w-full h-full ${capture.isAssembly ? 'object-contain' : 'object-cover'} transition-transform duration-1000 group-hover:scale-105`}
+                />
 
                 {/* Status Indicator Chip */}
                 <div className="absolute top-4 left-4 z-10 flex flex-col gap-2">

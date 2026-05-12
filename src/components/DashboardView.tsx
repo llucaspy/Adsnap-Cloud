@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState } from 'react'
-import { CheckCircle2, Activity, TrendingUp, AlertCircle, Image as ImageIcon, Sparkles, ShieldCheck, Box } from 'lucide-react'
+import { Activity, TrendingUp, AlertCircle, Image as ImageIcon, Sparkles, ShieldCheck, Box } from 'lucide-react'
 import { format as formatDate } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { CaptureImage } from './CaptureImage'
@@ -139,7 +139,7 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
                                             className="text-sm font-bold truncate"
                                             style={{ color: 'var(--text-primary)' }}
                                         >
-                                            {capture.campaign.client}
+                                            {capture.campaign?.client || 'Untitled'}
                                         </p>
                                         <p
                                             className="text-xs"
@@ -160,39 +160,11 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
                                         </div>
 
                                         <div className="absolute inset-0 z-0 bg-bg-tertiary">
-                                            {capture.isAssembly && capture.baseCaptureId ? (
-                                                <>
-                                                    <CaptureImage
-                                                        src={`/api/captures/${capture.baseCaptureId}`}
-                                                        alt="Background"
-                                                        className="w-full h-full object-contain bg-black"
-                                                    />
-                                                    {capture.campaign?.compositionBox && (
-                                                        <div 
-                                                            className="absolute pointer-events-none transition-transform duration-700 group-hover:scale-110"
-                                                            style={{
-                                                                left: `${((typeof capture.campaign.compositionBox === 'string' ? JSON.parse(capture.campaign.compositionBox).x : capture.campaign.compositionBox.x) / 1920) * 100}%`,
-                                                                top: `${((typeof capture.campaign.compositionBox === 'string' ? JSON.parse(capture.campaign.compositionBox).y : capture.campaign.compositionBox.y) / 1080) * 100}%`,
-                                                                width: `${((typeof capture.campaign.compositionBox === 'string' ? JSON.parse(capture.campaign.compositionBox).width : capture.campaign.compositionBox.width) / 1920) * 100}%`,
-                                                                height: `${((typeof capture.campaign.compositionBox === 'string' ? JSON.parse(capture.campaign.compositionBox).height : capture.campaign.compositionBox.height) / 1080) * 100}%`,
-                                                                zIndex: 5
-                                                            }}
-                                                        >
-                                                            <CaptureImage
-                                                                src={`/api/captures/${capture.id}`}
-                                                                alt="Creative Overlay"
-                                                                className="w-full h-full object-contain"
-                                                            />
-                                                        </div>
-                                                    )}
-                                                </>
-                                            ) : (
-                                                <CaptureImage
-                                                    src={`/api/captures/${capture.id}`}
-                                                    alt={capture.campaign.client}
-                                                    className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-                                                />
-                                            )}
+                                            <CaptureImage
+                                                src={`/api/captures/${capture.id}`}
+                                                alt={capture.isAssembly ? "Montagem" : "Banner"}
+                                                className={`w-full h-full ${capture.isAssembly ? 'object-contain' : 'object-cover'} group-hover:scale-105 transition-transform duration-700`}
+                                            />
                                         </div>
                                     </div>
 

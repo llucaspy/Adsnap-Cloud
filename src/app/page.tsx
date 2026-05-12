@@ -29,7 +29,7 @@ export default async function PresentationHome() {
         where: { status: 'SUCCESS' },
         take: 10,
         orderBy: { createdAt: 'desc' },
-        include: { campaign: true }
+        include: { campaign: true, baseCapture: true }
       }).catch(() => [])
     ])
 

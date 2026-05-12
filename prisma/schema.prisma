@@ -49,18 +49,20 @@ model Campaign {
 }
 
 model Capture {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   campaignId     String
   screenshotPath String
-  status         String   @default("SUCCESS")
+  status         String    @default("SUCCESS")
   auditNotes     String?
-  createdAt      DateTime @default(now())
-  isAssembly     Boolean  @default(false)
-  baseCaptureId  String?
-  aiAuditStatus  String?  @default("PENDING")
+  createdAt      DateTime  @default(now())
+  aiAuditStatus  String?   @default("PENDING")
   aiDiagnostic   String?
   aiScore        Int?
-  campaign       Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  baseCaptureId  String?
+  isAssembly     Boolean   @default(false)
+  baseCapture    Capture?  @relation("AssemblyBase", fields: [baseCaptureId], references: [id])
+  assemblies     Capture[] @relation("AssemblyBase")
+  campaign       Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 }
 
 model Settings {

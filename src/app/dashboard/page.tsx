@@ -20,7 +20,7 @@ export default async function DashboardPage() {
             where: { status: 'SUCCESS' },
             take: 8,
             orderBy: { createdAt: 'desc' },
-            include: { campaign: true }
+            include: { campaign: true, baseCapture: true }
         })
     ])
 
