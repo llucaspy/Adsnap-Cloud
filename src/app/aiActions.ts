@@ -341,32 +341,52 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
 
                                     // Upload to Supabase via REST API (bypass SDK JWT issues)
                                     const filename = `assembly_${targetCampaign.id}_${Date.now()}.png`
-                                    const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-                                    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+                                    const sbUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim()
+                                    const sbServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
+                                    const sbAnonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim()
                                     const uploadPath = `assemblies/${filename}`
                                     
-                                    const uploadRes = await fetch(
-                                        `${sbUrl}/storage/v1/object/screenshots/${uploadPath}`,
-                                        {
-                                            method: 'POST',
-                                            headers: {
-                                                'Authorization': `Bearer ${sbKey}`,
-                                                'Content-Type': 'image/png',
-                                                'x-upsert': 'true'
-                                            },
-                                            body: new Uint8Array(compositeBuffer)
-                                        }
-                                    )
+                                    // Try with Service Role first, fallback to Anon Key
+                                    let success = false
+                                    let lastStatusCode = 0
+                                    let lastErrorBody = ''
 
-                                    if (uploadRes.ok) {
-                                        const publicUrl = `${sbUrl}/storage/v1/object/public/screenshots/${uploadPath}`
-                                        finalScreenshotPath = publicUrl
-                                        compositeSuccess = true
-                                        console.log(`[Nexus Assembly] Composite uploaded: ${publicUrl}`)
-                                    } else {
-                                        const errBody = await uploadRes.text()
-                                        console.error('[Nexus Assembly] Upload error:', uploadRes.status, errBody)
-                                        compositionError = `Erro no upload (${uploadRes.status}): ${errBody}`
+                                    for (const key of [sbServiceKey, sbAnonKey]) {
+                                        if (!key) continue
+                                        
+                                        try {
+                                            const uploadRes = await fetch(
+                                                `${sbUrl}/storage/v1/object/screenshots/${uploadPath}`,
+                                                {
+                                                    method: 'POST',
+                                                    headers: {
+                                                        'Authorization': `Bearer ${key}`,
+                                                        'Content-Type': 'image/png',
+                                                        'x-upsert': 'true'
+                                                    },
+                                                    body: new Uint8Array(compositeBuffer)
+                                                }
+                                            )
+
+                                            if (uploadRes.ok) {
+                                                const publicUrl = `${sbUrl}/storage/v1/object/public/screenshots/${uploadPath}`
+                                                finalScreenshotPath = publicUrl
+                                                compositeSuccess = true
+                                                success = true
+                                                console.log(`[Nexus Assembly] Fixed! Composite uploaded via ${key === sbServiceKey ? 'Service' : 'Anon'} Key: ${publicUrl}`)
+                                                break
+                                            } else {
+                                                lastStatusCode = uploadRes.status
+                                                lastErrorBody = await uploadRes.text()
+                                                console.warn(`[Nexus Assembly] Upload attempt with key ${key.substring(0, 5)}... failed (${lastStatusCode})`)
+                                            }
+                                        } catch (e) {
+                                            console.error('[Nexus Assembly] Fetch error:', e)
+                                        }
+                                    }
+
+                                    if (!success) {
+                                        compositionError = `Erro no upload (${lastStatusCode}): ${lastErrorBody} (Keys tried: SERVICE:${sbServiceKey.substring(0, 6)}... ANON:${sbAnonKey.substring(0, 6)}...)`
                                     }
                                 } else {
                                     compositionError = "Campos de composição (box) incompletos no PI 000"
