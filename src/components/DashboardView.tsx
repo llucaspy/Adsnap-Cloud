@@ -152,7 +152,7 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
                                     <div className="absolute inset-0 z-0 bg-bg-tertiary">
                                         {capture.isAssembly && capture.baseCaptureId ? (
                                             <>
-                                                <img
+                                                <CaptureImage
                                                     src={`/api/captures/${capture.baseCaptureId}`}
                                                     alt="Background"
                                                     className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-700"
@@ -168,8 +168,8 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
                                                             zIndex: 5
                                                         }}
                                                     >
-                                                        <img
-                                                            src={capture.screenshotPath}
+                                                        <CaptureImage
+                                                            src={`/api/captures/${capture.id}`}
                                                             alt="Creative Overlay"
                                                             className="w-full h-full object-contain"
                                                         />

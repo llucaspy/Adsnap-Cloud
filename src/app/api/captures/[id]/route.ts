@@ -3,7 +3,6 @@ import prisma from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
 import fs from 'fs'
-import path from 'path'
 
 export async function GET(
     request: NextRequest,
@@ -20,9 +19,20 @@ export async function GET(
             return new NextResponse('Capture not found', { status: 404 })
         }
 
-        // If screenshotPath is a URL (Supabase), redirect to it
+        // If screenshotPath is a URL (Supabase), proxy it
         if (capture.screenshotPath.startsWith('http')) {
-            return NextResponse.redirect(capture.screenshotPath)
+            const response = await fetch(capture.screenshotPath)
+            if (!response.ok) {
+                console.error(`[API] Failed to fetch from Supabase: ${capture.screenshotPath}`)
+                return new NextResponse('Error fetching from storage', { status: response.status })
+            }
+            const blob = await response.blob()
+            return new NextResponse(blob, {
+                headers: {
+                    'Content-Type': response.headers.get('Content-Type') || 'image/png',
+                    'Cache-Control': 'public, max-age=31536000, immutable',
+                },
+            })
         }
 
         // Check if local file exists
