@@ -219,7 +219,7 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
         console.log('[Nexus FastPath] Triggering Assembly Handler...')
         
         const urlPattern = /https?:\/\/[^\s,]+/g
-        const urls = prompt.match(urlPattern) || []
+        let urls: string[] = prompt.match(urlPattern) || []
         
         const dateMatch = prompt.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/)
         let targetDateStr = new Date().toLocaleDateString('pt-BR')
@@ -229,13 +229,37 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
             const day = parseInt(dateMatch[1])
             const month = parseInt(dateMatch[2]) - 1
             const year = dateMatch[3] ? (dateMatch[3].length === 2 ? 2000 + parseInt(dateMatch[3]) : parseInt(dateMatch[3])) : new Date().getFullYear()
-            queryDate = new Date(year, month, day)
+            // Important: Use UTC to avoid local timezone shifts during DB queries
+            queryDate = new Date(Date.UTC(year, month, day, 12, 0, 0))
             targetDateStr = `${day.toString().padStart(2, '0')}/${(month + 1).toString().padStart(2, '0')}/${year}`
         }
         
-        // Start/End of day for Prisma date query
-        const startOfDay = new Date(queryDate.setHours(0, 0, 0, 0))
-        const endOfDay = new Date(queryDate.setHours(23, 59, 59, 999))
+        // Start/End of day in UTC for consistent Prisma filtering
+        const startOfDay = new Date(queryDate.getTime())
+        startOfDay.setUTCHours(0, 0, 0, 0)
+        const endOfDay = new Date(queryDate.getTime())
+        endOfDay.setUTCHours(23, 59, 59, 999)
+
+        if (urls.length === 0) {
+            console.log(`[Nexus Assembly] No URLs in prompt. Searching database for creatives on ${targetDateStr}...`);
+            const dbCreatives = await prisma.capture.findMany({
+                where: {
+                    status: 'SUCCESS',
+                    isAssembly: false,
+                    campaign: {
+                        pi: { not: '000' },
+                        isArchived: false
+                    },
+                    createdAt: {
+                        gte: startOfDay,
+                        lte: endOfDay
+                    }
+                },
+                select: { screenshotPath: true }
+            });
+            urls = dbCreatives.map(c => c.screenshotPath);
+            console.log(`[Nexus Assembly] Found ${urls.length} candidates in DB.`);
+        }
 
         if (urls.length > 0) {
             const results = []
@@ -277,24 +301,49 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                     })
                 }
 
-                // Find Base Print (Background) for this PI 000 (Date Agnostic - Latest Success)
+                // Find Base Print (Background) for this PI 000 (Strict Date Filtering)
                 let baseCaptureId: string | null = null
                 let templateDetails = ''
                 
                 if (campaign) {
-                    const baseCapture = await prisma.capture.findFirst({
+                    // Try to find a template EXACTLY in the requested date range
+                    let baseCapture = await prisma.capture.findFirst({
                         where: {
                             campaignId: campaign.id,
-                            status: 'SUCCESS'
+                            status: 'SUCCESS',
+                            createdAt: {
+                                gte: startOfDay,
+                                lte: endOfDay
+                            }
                         },
                         orderBy: { createdAt: 'desc' }
                     })
 
+                    // Fallback Quality: If no template in requested date, pick the NEXT BEST (Latest before target date)
+                    // NEVER grab a future print (e.g. if user asked for 11/05, don't grab 12/05)
+                    if (!baseCapture) {
+                        console.log(`[Nexus Assembly] No template found exactly on ${targetDateStr}. Searching for latest prior to date...`)
+                        baseCapture = await prisma.capture.findFirst({
+                            where: {
+                                campaignId: campaign.id,
+                                status: 'SUCCESS',
+                                createdAt: {
+                                    lt: startOfDay // Strictly BEFORE the requested date
+                                }
+                            },
+                            orderBy: { createdAt: 'desc' }
+                        })
+                    }
+
                     if (baseCapture) {
                         baseCaptureId = baseCapture.id
-                        console.log(`[Nexus Assembly] Using Latest Base Print: ${baseCapture.id} (from ${baseCapture.createdAt})`)
+                        const templateDateStr = baseCapture.createdAt.toLocaleDateString('pt-BR')
+                        console.log(`[Nexus Assembly] Using Base Print: ${baseCapture.id} (from ${templateDateStr})`)
+                        if (templateDateStr !== targetDateStr) {
+                            templateDetails = `(Usando template anterior de ${templateDateStr}, pois não existe print PI 000 em ${targetDateStr})`
+                        }
                     } else {
-                        templateDetails = `(PI 000 achado ID:${campaign.id}, mas sem prints de SUCESSO)`
+                        templateDetails = `(ERRO: PI 000 achado ID:${campaign.id}, mas nenhum print de SUCESSO foi feito ANTES ou DURANTE ${targetDateStr})`
                     }
                 } else {
                     templateDetails = `(Nenhum PI '000' achado para ${w}x${h})`
