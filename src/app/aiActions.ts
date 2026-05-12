@@ -339,26 +339,34 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                                         box
                                     )
 
-                                    // Upload to Supabase
+                                    // Upload to Supabase via REST API (bypass SDK JWT issues)
                                     const filename = `assembly_${targetCampaign.id}_${Date.now()}.png`
-                                    const { data: uploadData, error: uploadError } = await supabase.storage
-                                        .from('screenshots')
-                                        .upload(`assemblies/${filename}`, compositeBuffer, {
-                                            contentType: 'image/png',
-                                            upsert: true
-                                        })
+                                    const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
+                                    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+                                    const uploadPath = `assemblies/${filename}`
+                                    
+                                    const uploadRes = await fetch(
+                                        `${sbUrl}/storage/v1/object/screenshots/${uploadPath}`,
+                                        {
+                                            method: 'POST',
+                                            headers: {
+                                                'Authorization': `Bearer ${sbKey}`,
+                                                'Content-Type': 'image/png',
+                                                'x-upsert': 'true'
+                                            },
+                                            body: new Uint8Array(compositeBuffer)
+                                        }
+                                    )
 
-                                    if (!uploadError) {
-                                        const { data: { publicUrl } } = supabase.storage
-                                            .from('screenshots')
-                                            .getPublicUrl(`assemblies/${filename}`)
-                                        
+                                    if (uploadRes.ok) {
+                                        const publicUrl = `${sbUrl}/storage/v1/object/public/screenshots/${uploadPath}`
                                         finalScreenshotPath = publicUrl
                                         compositeSuccess = true
                                         console.log(`[Nexus Assembly] Composite uploaded: ${publicUrl}`)
                                     } else {
-                                        console.error('[Nexus Assembly] Upload error:', uploadError)
-                                        compositionError = `Erro no upload: ${uploadError.message}`
+                                        const errBody = await uploadRes.text()
+                                        console.error('[Nexus Assembly] Upload error:', uploadRes.status, errBody)
+                                        compositionError = `Erro no upload (${uploadRes.status}): ${errBody}`
                                     }
                                 } else {
                                     compositionError = "Campos de composição (box) incompletos no PI 000"
