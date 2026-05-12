@@ -1,10 +1,11 @@
 'use client'
 
 import React, { useTransition, useState } from 'react'
-import { Clock, Trash2, Link as LinkIcon, ExternalLink, Loader2, Eye, Gauge, ShieldCheck, AlertCircle } from 'lucide-react'
+import { Clock, Trash2, Loader2, Eye, Gauge } from 'lucide-react'
 import { format } from 'date-fns'
 import Link from 'next/link'
 import { deleteCapture, runVisionAudit } from '@/app/actions'
+import { CaptureImage } from './CaptureImage'
 
 interface CaptureTimelineCardProps {
     capture: any
@@ -96,7 +97,7 @@ export function CaptureTimelineCard({ capture }: CaptureTimelineCardProps) {
                 {/* Background (Base Print) or Main Screenshot */}
                 {capture.isAssembly && capture.baseCaptureId ? (
                     <>
-                        <img
+                        <CaptureImage
                             src={`/api/captures/${capture.baseCaptureId}`}
                             alt="Background"
                             className="w-full h-full object-cover transition-transform duration-1000"
@@ -113,8 +114,8 @@ export function CaptureTimelineCard({ capture }: CaptureTimelineCardProps) {
                                     zIndex: 5
                                 }}
                             >
-                                <img
-                                    src={capture.screenshotPath}
+                                <CaptureImage
+                                    src={`/api/captures/${capture.id}`}
                                     alt="Creative Overlay"
                                     className="w-full h-full object-contain"
                                 />
@@ -122,7 +123,7 @@ export function CaptureTimelineCard({ capture }: CaptureTimelineCardProps) {
                         )}
                     </>
                 ) : (
-                    <img
+                    <CaptureImage
                         src={`/api/captures/${capture.id}`}
                         alt={capture.campaign.campaignName}
                         className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105"
