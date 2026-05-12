@@ -442,7 +442,7 @@ export function NexusChat() {
             console.log('[Nexus UI] Sending command to Vercel brain...')
             const response = await Promise.race([
                 processNexusCommand(finalMsg),
-                new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 25000))
+                new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 60000))
             ])
             
             clearTimeout(safetyTimer)
