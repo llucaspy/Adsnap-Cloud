@@ -31,21 +31,28 @@ export async function detectAdBoxViaVision(imageUrl: string, format: string): Pr
         if (!res.ok) throw new Error(`Failed to fetch image: ${res.statusText}`);
         const originalBuffer = Buffer.from(await res.arrayBuffer());
 
-        const VISION_WIDTH = 1024;
+        const VISION_WIDTH = 960; // Exact 2.0 scale factor for 1920p (1920/960 = 2)
         const processedImage = await sharp(originalBuffer)
             .resize(VISION_WIDTH)
-            .jpeg({ quality: 80 })
+            .jpeg({ quality: 85 })
             .toBuffer();
         
         const base64Image = processedImage.toString('base64');
         const scaleFactor = 1920 / VISION_WIDTH;
 
-        const prompt = `Analise esta captura de tela.
-        Identifique o retângulo vermelho que marca o espaço do anúncio ${format}.
-        Retorne APENAS um objeto JSON com as coordenadas [x, y, width, height] desse retângulo em pixels.
+        const prompt = `Analise esta captura de tela de um portal de notícias.
+        O sistema marcou os espaços de publicidade com retângulos vermelhos.
         
-        IMPORTANTE: O arquivo de imagem agora tem largura de ${VISION_WIDTH}px.
-        Responda as coordenadas BASEADAS NOS PIXELS REAIS DESTA IMAGEM que você está vendo agora.`;
+        Sua tarefa: Localize o retângulo vermelho que corresponde ao formato ${format}.
+        
+        REGRAS CRÍTICAS:
+        1. Se houver mais de um, escolha o que está mais bem posicionado para um banner ${format} (geralmente o topo ou meio da página).
+        2. Ignore retângulos muito pequenos ou de formatos diferentes.
+        3. Retorne as coordenadas [x, y, width, height] da ÁREA INTERNA do retângulo vermelho (desconsidere a espessura da linha vermelha).
+        4. Retorne APENAS o JSON.
+        
+        IMPORTANTE: A imagem que você está vendo tem ${VISION_WIDTH}px de largura.
+        Responda as coordenadas baseadas exatamente nos pixels que você vê agora.`;
 
         const apiResponse = await fetch(OPENROUTER_URL, {
             method: 'POST',
@@ -82,7 +89,7 @@ export async function detectAdBoxViaVision(imageUrl: string, format: string): Pr
         try {
             const rawResult = JSON.parse(content.replace(/```json|```/g, ''));
             
-            // 2. Scale coordinates back to 1920p original resolution
+            // 2. Scale coordinates back to 1920p original resolution (Exactly 2.0x)
             const scaledResult: AdBox = {
                 x: Math.round(rawResult.x * scaleFactor),
                 y: Math.round(rawResult.y * scaleFactor),
@@ -90,7 +97,7 @@ export async function detectAdBoxViaVision(imageUrl: string, format: string): Pr
                 height: Math.round(rawResult.height * scaleFactor)
             };
 
-            console.log(`[VisionService] Detected and scaled box:`, scaledResult);
+            console.log(`[VisionService] Detected (Prompt Refined) and scaled box:`, scaledResult);
             return scaledResult;
         } catch (e) {
             console.error('[VisionService] Parse error:', content);

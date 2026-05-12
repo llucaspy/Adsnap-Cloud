@@ -349,6 +349,16 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                                     if (visionBox) {
                                         console.log(`[Nexus Assembly] Vision detected precise alignment:`, visionBox);
                                         activeBox = visionBox;
+                                        
+                                        // Audit log for checking vision accuracy
+                                        await prisma.nexusLog.create({
+                                            data: {
+                                                level: 'INFO',
+                                                message: `Nexus Vision detectou slot ${targetCampaign.format} em [x:${visionBox.x}, y:${visionBox.y}] no template.`,
+                                                details: JSON.stringify(visionBox),
+                                                campaignId: targetCampaign.id
+                                            }
+                                        });
                                     } else {
                                         console.warn('[Nexus Assembly] Vision detection failed, using database defaults');
                                     }
