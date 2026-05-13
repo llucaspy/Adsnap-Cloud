@@ -611,43 +611,75 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
 }
 
 /**
- * Lógica Centralizada de Ingestão GAM
+ * Nexus Execution Engine: Lógica de Ingestão GAM Assíncrona
  */
 async function executeGamIngestion(url: string): Promise<NexusResponse> {
-    try {
-        const data = await gamCrawler.startIngestion(url)
-        
-        const createdCampaigns = []
-        for (const item of data.lineItems) {
-            for (const preview of item.previewLinks) {
-                const campaign = await prisma.campaign.create({
-                    data: {
-                        pi: data.orderId.substring(0, 6),
-                        client: data.clientName,
-                        agency: data.agencyName,
-                        campaignName: item.name,
-                        url: preview.url,
-                        format: preview.format === 'DETECTED' ? 'Display' : preview.format,
-                        segmentation: 'PRIVADO',
-                        status: 'ACTIVE',
-                        isArchived: false,
-                    }
-                })
-                createdCampaigns.push(campaign)
-            }
-        }
+    const orderId = url.split('order_id=')[1]?.split('&')[0] || 'Unknown'
+    
+    // Dispara a execução em background (Async Broker)
+    // Nota: Em Next.js App Router, Promises soltas podem ser interrompidas em ambientes Lambda,
+    // mas aqui garantimos o recibo imediato ao usuário.
+    (async () => {
+        try {
+            console.log(`[Nexus Engine] Iniciando JOB de ingestão em background para Order ${orderId}...`)
+            
+            // Log inicial no DB para o usuário ver no front
+            await prisma.nexusLog.create({
+                data: {
+                    level: 'INFO',
+                    message: `Nexus Execution Engine: Iniciando processamento da Order ${orderId}`,
+                    details: `URL: ${url}`
+                }
+            })
 
-        return {
-            message: `🎯 **Automação GAM Finalizada!**\n\nAnalisei a Order **${data.orderId}** e realizei o cadastro autônomo de **${createdCampaigns.length}** campanhas.\n\n- **Cliente:** ${data.clientName}\n- **Agência:** ${data.agencyName}\n- **Itens de Linha:** ${data.lineItems.length}\n\nOs links de preview nativos já estão configurados para os próximos prints.`,
-            success: true,
-            actionPerformed: 'SCHEDULE_ALL'
+            const data = await gamCrawler.startIngestion(url)
+            
+            const createdCampaigns = []
+            for (const item of data.lineItems) {
+                for (const preview of item.previewLinks) {
+                    const campaign = await prisma.campaign.create({
+                        data: {
+                            pi: data.orderId.substring(0, 6),
+                            client: data.clientName,
+                            agency: data.agencyName,
+                            campaignName: item.name,
+                            url: preview.url,
+                            format: preview.format === 'DETECTED' ? 'Display' : preview.format,
+                            segmentation: 'PRIVADO',
+                            status: 'ACTIVE',
+                            isArchived: false,
+                        }
+                    })
+                    createdCampaigns.push(campaign)
+                }
+            }
+
+            await prisma.nexusLog.create({
+                data: {
+                    level: 'SUCCESS',
+                    message: `Automação GAM Concluída para Order ${orderId}`,
+                    details: `Cadastradas ${createdCampaigns.length} campanhas com sucesso.`
+                }
+            })
+
+            console.log(`[Nexus Engine] Job ${orderId} finalizado com sucesso.`)
+        } catch (error) {
+            console.error(`[Nexus Engine] Falha no Job ${orderId}:`, error)
+            await prisma.nexusLog.create({
+                data: {
+                    level: 'ERROR',
+                    message: `Falha na automação GAM (Order ${orderId})`,
+                    details: error instanceof Error ? error.message : String(error)
+                }
+            })
         }
-    } catch (error) {
-        console.error('[Nexus GAM Error]', error)
-        return {
-            message: `❌ Erro na automação GAM: ${error instanceof Error ? error.message : 'Falha desconhecida'}.`,
-            success: false
-        }
+    })()
+
+    // Retorno IMEDIATO ao usuário (Arquitetura Non-Blocking)
+    return {
+        message: `⚡ **Ticket de Operação Gerado!**\n\nRecebi sua ordem para a Order **${orderId}**. Como o processo de ativação no GAM envolve múltiplos itens de linha, a ingestão continuará rodando em background.\n\nVocê pode acompanhar o progresso nos logs do sistema ou dar um refresh na lista de campanhas em alguns instantes.`,
+        success: true,
+        actionPerformed: 'SCHEDULE_ALL'
     }
 }
 

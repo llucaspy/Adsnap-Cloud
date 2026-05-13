@@ -1,0 +1,212 @@
+// ==========================================
+// ARQUIVO 1: src/app/aiActions.ts
+// Lógica de Roteamento Determinístico (FastPath v5) e Ações de AdOps
+// ==========================================
+'use server'
+
+import {
+    archiveCampaign,
+    updateCampaign,
+    runCapture,
+    runAllCaptures,
+    getSettings,
+    updateSettings,
+    stopAllCaptures,
+    scheduleAllCampaigns
+} from './actions'
+import prisma from '@/lib/prisma'
+import { createGmailClientFromEnv, searchEmails } from '@/lib/gmail'
+import { nexusBrain } from '@/lib/gemini'
+import * as brain from '@/lib/nexusBrain'
+import { compositeWithSharp } from '@/lib/rasterService'
+import { supabase } from '@/lib/supabase'
+import { gamCrawler } from '@/lib/gamCrawlerService'
+
+export interface NexusResponse {
+    message: string
+    success: boolean
+    actionPerformed?: 'CAPTURE' | 'CAPTURE_ALL' | 'ARCHIVE' | 'UPDATE_URL' | 'REGISTRATION_PREVIEW' | 'UPDATE_FORMATS' | 'STOP_CAPTURES' | 'SCHEDULE_ALL' | 'DOWNLOAD_ZIP' | 'DOWNLOAD_FILE'
+    data?: unknown
+}
+
+/**
+ * Lógica Centralizada de Ingestão GAM
+ */
+async function executeGamIngestion(url: string): Promise<NexusResponse> {
+    try {
+        const data = await gamCrawler.startIngestion(url)
+        
+        const createdCampaigns = []
+        for (const item of data.lineItems) {
+            for (const preview of item.previewLinks) {
+                const campaign = await prisma.campaign.create({
+                    data: {
+                        pi: data.orderId.substring(0, 6),
+                        client: data.clientName,
+                        agency: data.agencyName,
+                        campaignName: item.name,
+                        url: preview.url,
+                        format: preview.format === 'DETECTED' ? 'Display' : preview.format,
+                        segmentation: 'PRIVADO',
+                        status: 'ACTIVE',
+                        isArchived: false,
+                    }
+                })
+                createdCampaigns.push(campaign)
+            }
+        }
+
+        return {
+            message: `🎯 **Automação GAM Finalizada!**\n\nAnalisei a Order **${data.orderId}** e realizei o cadastro autônomo de **${createdCampaigns.length}** campanhas.\n\n- **Cliente:** ${data.clientName}\n- **Agência:** ${data.agencyName}\n- **Itens de Linha:** ${data.lineItems.length}\n\nOs links de preview nativos já estão configurados para os próximos prints.`,
+            success: true,
+            actionPerformed: 'SCHEDULE_ALL'
+        }
+    } catch (error) {
+        console.error('[Nexus GAM Error]', error)
+        return {
+            message: `❌ Erro na automação GAM: ${error instanceof Error ? error.message : 'Falha desconhecida'}.`,
+            success: false
+        }
+    }
+}
+
+export async function processNexusCommand(prompt: string): Promise<NexusResponse> {
+    const text = prompt.toLowerCase().trim()
+
+    // --- [ROTEADOR DETERMINÍSTICO v5.0] ---
+    // URLs do GAM têm prioridade absoluta sobre o LLM para evitar alucinações.
+    const gamOrderPattern = /https:\/\/admanager\.google\.com\/.*?order_id=(\d+)/i
+    const gamMatch = prompt.match(gamOrderPattern)
+    
+    if (gamMatch) {
+        console.log('[Nexus FastPath v5] Link de Order GAM detectado! Ignorando LLM e disparando RPA...')
+        return await executeGamIngestion(gamMatch[0])
+    }
+
+    try {
+        // --- 1. FAST PATH OPÉRACIONAL (Pre-AI) ---
+        // (Aqui rodam comandos curtos como "status", "tirar print PI 123", etc.)
+        
+        // --- 2. NEURAL BRAIN (v5 XML Router) ---
+        const brainResult = await nexusBrain(prompt)
+        
+        if (brainResult?.success) {
+            const toolAction = brainResult.action || brainResult.actionPerformed
+            if ((toolAction === 'GAM_INGEST' || toolAction === 'GAM_AUTONOMOUS_INGEST') && (brainResult.params?.url || brainResult.data?.url)) {
+                return await executeGamIngestion(brainResult.params?.url || brainResult.data?.url)
+            }
+
+            return {
+                message: brainResult.message || brainResult.answer || "Operação concluída.",
+                success: true,
+                actionPerformed: brainResult.actionPerformed,
+                data: brainResult.data
+            }
+        }
+
+        return { message: "Desculpe, tive um problema nos circuitos neurais.", success: false }
+    } catch (error) {
+        console.error('Nexus AI Error:', error)
+        return { message: `Erro interno: ${error}`, success: false }
+    }
+}
+
+// ==========================================
+// ARQUIVO 2: src/lib/gemini.ts
+// Núcleo Neural (OpenRouter Cascade) e XML Protocol
+// ==========================================
+export async function nexusBrain(prompt: string): Promise<NexusBrainResult> {
+    const apiKey = process.env.OPENROUTER_API_KEY
+    const MODELS = [ /* Cascade de modelos free aqui */ ]
+
+    const systemPrompt = `[NEXUS OPERATIONAL CORE v5.0]
+    Você é o OPERADOR NEURAL da Adsnap Cloud. Você NÃO é um assistente de texto. Você é um despachante de comandos técnicos.
+    
+    DIRETRIZES DE OPERAÇÃO:
+    - Se o usuário fornecer uma URL do Google Ad Manager (admanager.google.com), você DEVE obrigatoriamente usar a ferramenta <GAM_INGEST>.
+    - Responda SEMPRE usando a estrutura XML abaixo para ações técnicas.
+    - Nunca use frases como "Não consigo acessar" ou "Não tenho permissão". Você opera ferramentas reais em background.
+
+    ESTRUTURA DE COMANDO (XML):
+    <nexus_action>
+      <tool>NOME_DA_FERRAMENTA</tool>
+      <params>
+        <url>URL_SE_NECESSARIO</url>
+      </params>
+      <answer>Mensagem técnica de confirmação para o humano.</answer>
+    </nexus_action>`
+
+    const rawResult = await callOpenRouter(prompt) // Chama cascade de modelos
+
+    // 1. XML Parser (v5 Alpha Resilience)
+    const xmlMatch = rawResult.match(/<nexus_action>([\s\S]*?)<\/nexus_action>/)
+    if (xmlMatch) {
+        const content = xmlMatch[1]
+        const tool = content.match(/<tool>(.*?)<\/tool>/)?.[1]
+        const answer = content.match(/<answer>([\s\S]*?)<\/answer>/)?.[1]
+        const url = content.match(/<url>(.*?)<\/url>/)?.[1]
+
+        if (tool) {
+            return {
+                action: tool,
+                params: { url },
+                answer: answer || 'Comando recebido pelo núcleo operacional.',
+                success: true
+            }
+        }
+    }
+    
+    return { message: rawResult, success: true }
+}
+
+// ==========================================
+// ARQUIVO 3: src/lib/gamCrawlerService.ts
+// Automação Playwright (RPA)
+// ==========================================
+import { chromium, BrowserContext, Page } from 'playwright';
+
+export class GamCrawlerService {
+    private userDataDir = path.join(process.cwd(), '.gam-session');
+    
+    async startIngestion(orderUrl: string): Promise<GamOrderData> {
+        const browser = await chromium.launchPersistentContext(this.userDataDir, { headless: true });
+        const page = await browser.newPage();
+        
+        try {
+            await this.ensureLogin(page);
+            await page.goto(orderUrl, { waitUntil: 'networkidle' });
+            
+            // Extração de metadados e navegação profunda...
+            // (Login -> Order -> Line Item -> Creative -> Render Site -> Grab Preview URL)
+        } finally {
+            await browser.close();
+        }
+    }
+}
+
+// ==========================================
+// ARQUIVO 4: src/app/api/nexus/chat/route.ts
+// Unificação do Endpoint de Comunicação
+// ==========================================
+import { NextResponse } from 'next/server'
+
+export async function POST(req: Request) {
+    try {
+        const { message, sessionId } = await req.json()
+        const { processNexusCommand } = await import('@/app/aiActions')
+        const prisma = (await import('@/lib/prisma')).default
+
+        // 1. Persistência USER
+        await prisma.nexusMessage.create({ data: { role: 'user', content: message, sessionId } })
+
+        // 2. Processamento Unificado (v5 Alpha)
+        const result = await processNexusCommand(message)
+
+        // 3. Persistência ASSISTANT
+        await prisma.nexusMessage.create({ data: { role: 'assistant', content: result.message, sessionId } })
+
+        return NextResponse.json(result)
+    } catch (error) {
+        return NextResponse.json({ error: String(error) }, { status: 500 })
+    }
+}

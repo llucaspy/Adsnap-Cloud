@@ -23,7 +23,14 @@ export class GamCrawlerService {
         
         const browser = await chromium.launchPersistentContext(this.userDataDir, {
             headless: true,
-            viewport: { width: 1280, height: 720 }
+            viewport: { width: 1366, height: 768 },
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            timezoneId: 'America/Sao_Paulo',
+            args: [
+                '--disable-blink-features=AutomationControlled',
+                '--no-sandbox',
+                '--disable-setuid-sandbox'
+            ]
         });
 
         const page = await browser.newPage();
