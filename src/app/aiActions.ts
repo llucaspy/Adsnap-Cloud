@@ -610,61 +610,58 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
     return null
 }
 
+/**
+ * Lógica Centralizada de Ingestão GAM
+ */
+async function executeGamIngestion(url: string): Promise<NexusResponse> {
+    try {
+        const data = await gamCrawler.startIngestion(url)
+        
+        const createdCampaigns = []
+        for (const item of data.lineItems) {
+            for (const preview of item.previewLinks) {
+                const campaign = await prisma.campaign.create({
+                    data: {
+                        pi: data.orderId.substring(0, 6),
+                        client: data.clientName,
+                        agency: data.agencyName,
+                        campaignName: item.name,
+                        url: preview.url,
+                        format: preview.format === 'DETECTED' ? 'Display' : preview.format,
+                        segmentation: 'PRIVADO',
+                        status: 'ACTIVE',
+                        isArchived: false,
+                    }
+                })
+                createdCampaigns.push(campaign)
+            }
+        }
+
+        return {
+            message: `🎯 **Automação GAM Finalizada!**\n\nAnalisei a Order **${data.orderId}** e realizei o cadastro autônomo de **${createdCampaigns.length}** campanhas.\n\n- **Cliente:** ${data.clientName}\n- **Agência:** ${data.agencyName}\n- **Itens de Linha:** ${data.lineItems.length}\n\nOs links de preview nativos já estão configurados para os próximos prints.`,
+            success: true,
+            actionPerformed: 'SCHEDULE_ALL'
+        }
+    } catch (error) {
+        console.error('[Nexus GAM Error]', error)
+        return {
+            message: `❌ Erro na automação GAM: ${error instanceof Error ? error.message : 'Falha desconhecida'}.`,
+            success: false
+        }
+    }
+}
+
 export async function processNexusCommand(prompt: string): Promise<NexusResponse> {
     console.time('NexusTotal')
     console.log('[Nexus AI Action] Recebido prompt:', prompt)
     const text = prompt.toLowerCase()
 
-    // --- NEW: GAM AUTONOMOUS INGESTION (Highest Priority) ---
-    // Regex mais flexível para capturar links do GAM independente de parâmetros extras
     const gamOrderPattern = /https:\/\/admanager\.google\.com\/(\d+).*?order_id=(\d+)/i
     const gamMatch = prompt.match(gamOrderPattern)
     
     if (gamMatch) {
-        console.log('[Nexus GAM] Link de Order detectado via Regex!', gamMatch[0])
-        const networkCode = gamMatch[1]
-        const orderId = gamMatch[2]
-        const orderUrl = gamMatch[0]
-        
-        try {
-            // Feedback imediato no console
-            console.log(`[Nexus GAM] Iniciando crawler para Network: ${networkCode}, Order: ${orderId}`)
-            const data = await gamCrawler.startIngestion(orderUrl)
-            
-            // Cadastrar campanhas no banco de dados
-            const createdCampaigns = []
-            for (const item of data.lineItems) {
-                // Se o item tem previews, cadastramos um por formato (ou o principal)
-                for (const preview of item.previewLinks) {
-                    const campaign = await prisma.campaign.create({
-                        data: {
-                            pi: data.orderId.substring(0, 6), // Usar IDs reais se possível
-                            client: data.clientName,
-                            agency: data.agencyName,
-                            campaignName: item.name,
-                            url: preview.url,
-                            format: preview.format === 'DETECTED' ? 'Display' : preview.format,
-                            segmentation: 'PRIVADO',
-                            status: 'ACTIVE',
-                            isArchived: false,
-                        }
-                    })
-                    createdCampaigns.push(campaign)
-                }
-            }
-
-            return {
-                message: `🎯 **Automação GAM Finalizada!**\n\nAnalisei a Order **${data.orderId}** e realizei o cadastro autônomo de **${createdCampaigns.length}** campanhas.\n\n- **Cliente:** ${data.clientName}\n- **Agência:** ${data.agencyName}\n- **Itens de Linha:** ${data.lineItems.length}\n\nOs links de preview nativos já estão configurados para os próximos prints.`,
-                success: true,
-                actionPerformed: 'SCHEDULE_ALL'
-            }
-        } catch (error) {
-            console.error('[Nexus GAM Error]', error)
-            return {
-                message: `❌ Erro na automação GAM: ${error instanceof Error ? error.message : 'Falha desconhecida'}.`,
-                success: false
-            }
-        }
+        console.log('[Nexus GAM] Link de Order detectado via FastPath Regex!', gamMatch[0])
+        return await executeGamIngestion(gamMatch[0])
     }
 
     try {
@@ -694,6 +691,14 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
         console.timeEnd('NexusAI')
         
         if (brainResult?.success) {
+            console.log('[Nexus AI] Brain Decision:', brainResult.action)
+            
+            // Caso a IA decida usar o GAM via Tool Use
+            if (brainResult.action === 'GAM_AUTONOMOUS_INGEST' && brainResult.params?.url) {
+                console.log('[Nexus AI] Triggering GAM Ingestion via Brain Decision...')
+                return await executeGamIngestion(brainResult.params.url)
+            }
+
             console.timeEnd('NexusTotal')
             return {
                 message: brainResult.message || brainResult.answer || "Processamento concluído.",
