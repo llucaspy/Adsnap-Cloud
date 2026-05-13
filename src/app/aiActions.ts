@@ -614,7 +614,7 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
  * Nexus Execution Engine: Lógica de Ingestão GAM Assíncrona
  */
 async function executeGamIngestion(url: string): Promise<NexusResponse> {
-    const orderId = url.split('order_id=')[1]?.split('&')[0] || 'Unknown'
+    const orderId = url.split('order_id=')[1]?.split('&')[0] || 'Unknown';
     
     // Dispara a execução em background (Async Broker)
     // Nota: Em Next.js App Router, Promises soltas podem ser interrompidas em ambientes Lambda,
