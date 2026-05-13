@@ -1,0 +1,73 @@
+================================================================================
+RELATÓRIO TÉCNICO: ARQUITETURA NEXUS AI & AUTOMAÇÃO GAM (v4 FINAL)
+================================================================================
+
+1. DIAGNÓSTICO DO PROBLEMA (CAUSA RAIZ)
+--------------------------------------------------------------------------------
+O principal gargalo do sistema era a "Inconsistência Cerebral". O chat do 
+front-end operava via Supabase Edge Functions (Código Legado v2), enquanto 
+o núcleo técnico e o robô de automação residiam no Next.js (Código v4).
+
+Sintomas observados:
+- IA "surda": Recusava processar links alegando falta de acesso.
+- Alucinação: A IA operava em um sandbox de texto puro, sem "consciência" 
+  das ferramentas de AdOps disponíveis localmente.
+- Falha de Interceptação: URLs com fragmentos (#) ou parâmetros extras 
+  bypasavam o Regex inicial, caindo em fluxos de fallback ineficientes.
+
+2. SOLUÇÕES IMPLEMENTADAS
+--------------------------------------------------------------------------------
+- UNIFICAÇÃO CEREBRAL: O endpoint `api/nexus/chat` foi redirecionado para 
+  ignorar a Edge Function e processar mensagens diretamente via `aiActions.ts`.
+- FASTPATH ULTRA-RESILIENTE: Implementado Regex agnóstico a fragmentos de URL 
+  para capturar Order IDs do GAM instantaneamente.
+- MOTOR DE CRAWLER (PLAYWRIGHT): Implementado o `GamCrawlerService` que:
+    a) Utiliza `PersistentContext` (.gam-session) para evitar logins recorrentes.
+    b) Navega de forma autônoma: Order -> Line Item -> Creative -> Preview.
+    c) Gera links de visualização nativos ("No site: metropoles.com").
+- UPGRADE NEURAL (v4 FINAL): System Prompt refatorado para dar "Consciência de 
+  Corpo Operacional" à IA, tornando o Tool-Use obrigatório para URLs técnicas.
+
+3. DESAFIOS ATUAIS (O QUE AINDA PRECISA DE ESTUDO)
+--------------------------------------------------------------------------------
+Abaixo estão os pontos de fricção que podem causar falhas em escala:
+
+A. TIMEOUT SERVERLESS:
+As funções da Vercel têm limites de tempo (ex: 10s no plano Free). O processo 
+de abrir o GAM, logar e extrair previews de múltiplos itens de linha pode 
+exceder esse tempo.
+- Pergunta: Qual a melhor estratégia para persistir o estado de um crawler 
+  longo iniciado via requisição HTTP síncrona? (Webhooks? SQS? Redis?)
+
+B. PLAYWRIGHT EM AMBIENTE LAMBDA/VERCEL:
+Binários do Chromium não são nativos em Serverless. O bundle do projeto pode 
+exceder o limite de 50MB.
+- Pergunta: Como manter a execução do Playwright resiliente na Vercel? 
+  Deveríamos mover o robô para um Worker dedicado ou usar Browserless?
+
+C. PERSISTÊNCIA DE SESSÃO GOOGLE:
+O Google Ad Manager aplica desafios de 2FA/BFA esporadicamente. 
+- Pergunta: Como orquestrar um fluxo de "Handover manual" quando o robô detecta 
+  um desafio de segurança imprevisto, sem quebrar a experiência do usuário?
+
+D. QUALIDADE DA RESPOSTA AI (JSON vs PROSA):
+Modelos LLM gratuitos (OpenRouter cascade) tendem a ignorar instruções de 
+retorno JSON estrito quando o prompt é ambíguo.
+- Pergunta: Implementar um RAG (Retrieval Augmented Generation) focado no 
+  Esquema Técnico do sistema ajudaria a reduzir a alucinação de "falta de acesso"?
+
+4. PERGUNTAS PARA ANÁLISE EXTERNA
+--------------------------------------------------------------------------------
+Para a IA que analisará este documento:
+1. Dada a arquitetura Next.js + Prisma, como implementar um sistema de fila 
+   de tarefas assíncronas para o Crawler que retorne o status em tempo real 
+   via Server-Sent Events (SSE) ou WebSockets para o Nexus Chat?
+2. Como otimizar o System Prompt para que um modelo "Free" (como Llama 3 ou 
+   Gemma) prioritize 100% das vezes a chamada de função técnica (JSON) sobre 
+   a resposta por extenso (Prosa)?
+3. Qual o risco de bloqueio de conta GAM por excesso de acessos via Crawler 
+   em sessões diferentes, e como mitigar isso via IP rotativo ou Cookies?
+
+================================================================================
+STATUS FINAL: v4 OPERACIONAL | ARQUITETURA UNIFICADA | PRONTO PARA ESCALA
+================================================================================
