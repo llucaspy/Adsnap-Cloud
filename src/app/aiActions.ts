@@ -203,7 +203,8 @@ function isOperationalCommand(text: string): boolean {
         'campanha', 'ver pi', 'detalhe',
         'alerta', 'avise', 'notifique',
         'formato', 'agendar', 'schedule',
-        'montagem', 'preparar', 'gerar print'
+        'montagem', 'preparar', 'gerar print',
+        'admanager', 'gam', 'google ad manager'
     ]
     
     if (t.length < 30) {
@@ -615,14 +616,19 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
     const text = prompt.toLowerCase()
 
     // --- NEW: GAM AUTONOMOUS INGESTION (Highest Priority) ---
-    const gamOrderPattern = /https:\/\/admanager\.google\.com\/\d+#delivery\/order\/order_overview\/order_id=(\d+)/
+    // Regex mais flexível para capturar links do GAM independente de parâmetros extras
+    const gamOrderPattern = /https:\/\/admanager\.google\.com\/(\d+).*?order_id=(\d+)/i
     const gamMatch = prompt.match(gamOrderPattern)
     
     if (gamMatch) {
-        console.log('[Nexus GAM] Link de Order detectado! Iniciando crawler...')
+        console.log('[Nexus GAM] Link de Order detectado via Regex!', gamMatch[0])
+        const networkCode = gamMatch[1]
+        const orderId = gamMatch[2]
         const orderUrl = gamMatch[0]
         
         try {
+            // Feedback imediato no console
+            console.log(`[Nexus GAM] Iniciando crawler para Network: ${networkCode}, Order: ${orderId}`)
             const data = await gamCrawler.startIngestion(orderUrl)
             
             // Cadastrar campanhas no banco de dados
