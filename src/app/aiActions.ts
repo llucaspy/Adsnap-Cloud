@@ -656,11 +656,11 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
     console.log('[Nexus AI Action] Recebido prompt:', prompt)
     const text = prompt.toLowerCase()
 
-    const gamOrderPattern = /https:\/\/admanager\.google\.com\/(\d+).*?order_id=(\d+)/i
+    const gamOrderPattern = /https:\/\/admanager\.google\.com\/.*?order_id=(\d+)/i
     const gamMatch = prompt.match(gamOrderPattern)
     
     if (gamMatch) {
-        console.log('[Nexus GAM] Link de Order detectado via FastPath Regex!', gamMatch[0])
+        console.log('[Nexus GAM] Link de Order detectado via FastPath (v4)!', gamMatch[0])
         return await executeGamIngestion(gamMatch[0])
     }
 
