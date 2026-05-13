@@ -16,7 +16,7 @@ export interface GamOrderData {
 }
 
 export class GamCrawlerService {
-    private userDataDir = path.join(process.cwd(), '.gam-session');
+    private userDataDir = path.join('/tmp', '.gam-session');
     
     async startIngestion(orderUrl: string): Promise<GamOrderData> {
         console.log(`[Nexus GAM] Iniciando ingestão para: ${orderUrl}`);
