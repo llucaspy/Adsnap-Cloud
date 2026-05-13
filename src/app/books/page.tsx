@@ -10,12 +10,28 @@ import { ActiveCampaigns } from '@/components/ActiveCampaigns'
 export const revalidate = 30
 
 export default async function BooksPage() {
+    // Limitar a 30 dias para evitar scan completo da tabela
+    const thirtyDaysAgo = new Date()
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+
     const captures = await prisma.capture.findMany({
         where: {
             status: 'SUCCESS',
-            campaign: { isArchived: false }
+            campaign: { isArchived: false },
+            createdAt: { gte: thirtyDaysAgo }
         },
-        include: { campaign: true },
+        select: {
+            id: true,
+            createdAt: true,
+            screenshotPath: true,
+            campaign: {
+                select: {
+                    pi: true,
+                    client: true,
+                    campaignName: true,
+                }
+            }
+        },
         orderBy: { createdAt: 'desc' }
     })
 
@@ -195,6 +211,7 @@ export default async function BooksPage() {
                                         campaignName={piGroup.campaignName}
                                         captureCount={piGroup.captures.length}
                                         thumbnailId={piGroup.captures[0].id}
+                                        thumbnailUrl={piGroup.captures[0].screenshotPath}
                                         date={group.dateKey}
                                     />
                                 ))}

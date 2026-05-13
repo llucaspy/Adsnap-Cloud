@@ -10,11 +10,12 @@ interface PIFolderCardProps {
     campaignName: string
     captureCount: number
     thumbnailId: string
+    thumbnailUrl?: string
     date: string
     accentColor?: string
 }
 
-export function PIFolderCard({ pi, client, campaignName, captureCount, thumbnailId, date }: PIFolderCardProps) {
+export function PIFolderCard({ pi, client, campaignName, captureCount, thumbnailId, thumbnailUrl, date }: PIFolderCardProps) {
     return (
         <Link
             href={`/books/${pi}?date=${date}`}
@@ -23,8 +24,11 @@ export function PIFolderCard({ pi, client, campaignName, captureCount, thumbnail
             {/* Thumbnail */}
             <div className="relative aspect-video overflow-hidden bg-white/[0.02]">
                 <img
-                    src={`/api/captures/${thumbnailId}`}
+                    src={thumbnailUrl && thumbnailUrl.startsWith('http') 
+                        ? `${thumbnailUrl}?width=300&quality=60` 
+                        : `/api/captures/${thumbnailId}`}
                     alt={client}
+                    loading="lazy"
                     className="w-full h-full object-cover opacity-50 group-hover:opacity-80 transition-opacity duration-500 group-hover:scale-105 transform transition-transform"
                     onError={(e) => {
                         (e.target as HTMLImageElement).style.display = 'none'
