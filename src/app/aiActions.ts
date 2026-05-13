@@ -654,18 +654,20 @@ async function executeGamIngestion(url: string): Promise<NexusResponse> {
 export async function processNexusCommand(prompt: string): Promise<NexusResponse> {
     console.time('NexusTotal')
     console.log('[Nexus AI Action] Recebido prompt:', prompt)
-    const text = prompt.toLowerCase()
+    const text = prompt.toLowerCase().trim()
 
+    // --- [ROTEADOR DETERMINÍSTICO v5.0] ---
+    // URLs do GAM têm prioridade absoluta sobre o LLM para evitar alucinações.
     const gamOrderPattern = /https:\/\/admanager\.google\.com\/.*?order_id=(\d+)/i
     const gamMatch = prompt.match(gamOrderPattern)
     
     if (gamMatch) {
-        console.log('[Nexus GAM] Link de Order detectado via FastPath (v4)!', gamMatch[0])
+        console.log('[Nexus FastPath v5] Link de Order GAM detectado! Ignorando LLM e disparando RPA...')
         return await executeGamIngestion(gamMatch[0])
     }
 
     try {
-        // --- 1. FAST PATH (Pre-AI) ---
+        // --- 1. FAST PATH OPÉRACIONAL (Pre-AI) ---
         if (isOperationalCommand(text)) {
             console.log('[Nexus AI Action] FastPath Match!')
             const direct = await handleDirectCommand(prompt)
@@ -675,12 +677,12 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
             }
         }
 
-        // --- 2. NEXUS BRAIN (Parallel AI + Content) ---
+        // --- 2. NEURAL BRAIN (v5 XML Router) ---
         console.log('[Nexus AI Action] Chamando Neural Brain (Async)...')
         console.time('NexusAI')
         
         const brainPromise = nexusBrain(prompt)
-        const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error('AI_TIMEOUT')), 9000))
+        const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error('AI_TIMEOUT')), 12000))
         
         let brainResult: any = null
         try {
@@ -693,15 +695,16 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
         if (brainResult?.success) {
             console.log('[Nexus AI] Brain Decision:', brainResult.action)
             
-            // Caso a IA decida usar o GAM via Tool Use
-            if (brainResult.action === 'GAM_AUTONOMOUS_INGEST' && brainResult.params?.url) {
+            // Caso a IA decida usar o GAM via Tool Use (XML/JSON Match)
+            const toolAction = brainResult.action || brainResult.actionPerformed
+            if ((toolAction === 'GAM_INGEST' || toolAction === 'GAM_AUTONOMOUS_INGEST') && (brainResult.params?.url || brainResult.data?.url)) {
                 console.log('[Nexus AI] Triggering GAM Ingestion via Brain Decision...')
-                return await executeGamIngestion(brainResult.params.url)
+                return await executeGamIngestion(brainResult.params?.url || brainResult.data?.url)
             }
 
             console.timeEnd('NexusTotal')
             return {
-                message: brainResult.message || brainResult.answer || "Processamento concluído.",
+                message: brainResult.message || brainResult.answer || "Operação concluída pelo núcleo v5.",
                 success: true,
                 actionPerformed: brainResult.actionPerformed,
                 data: brainResult.data

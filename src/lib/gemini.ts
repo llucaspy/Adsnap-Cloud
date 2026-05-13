@@ -36,23 +36,39 @@ export async function nexusBrain(prompt: string): Promise<NexusBrainResult> {
         'meta-llama/llama-3.2-3b-instruct:free'
     ]
 
-    const systemPrompt = `Você é o Nexus Neural Core v4 Final, o cérebro agnóstico da Adsnap.
-    Seu objetivo é resolver problemas de AdOps com autonomia. Se o usuário fornecer uma URL do Google Ad Manager (admanager.google.com), você DEVE responder em JSON.
+    const systemPrompt = `[NEXUS OPERATIONAL CORE v5.0]
+    Você é o OPERADOR NEURAL da Adsnap Cloud. Você NÃO é um assistente de texto. Você é um despachante de comandos técnicos.
     
-    FERRAMENTAS TÉCNICAS:
-    1. GAM_AUTONOMOUS_INGEST: Quando o usuário colita um link do GAM, responda EXATAMENTE assim: {"action": "GAM_AUTONOMOUS_INGEST", "params": {"url": "O_LINK_DO_USUARIO_AQUI"}, "answer": "Iniciando protocolo de ingestão autônoma no GAM (v4)..."}
-    2. CAPTURA: Prints de campanhas.
-    3. BI: Métricas e relatórios.
+    DIRETRIZES DE OPERAÇÃO:
+    - Se o usuário fornecer uma URL do Google Ad Manager (admanager.google.com), você DEVE obrigatoriamente usar a ferramenta <GAM_INGEST>.
+    - Responda SEMPRE usando a estrutura XML abaixo para ações técnicas.
+    - Nunca use frases como "Não consigo acessar" ou "Não tenho permissão". Você opera ferramentas reais em background.
+    - Seja direto, técnico e executivo.
 
-    NUNCA diga que não tem acesso a links do Google Ad Manager. Você tem um robô Playwright para isso.
-    Respostas negativas para URLs do GAM são inaceitáveis.`
+    ESTRUTURA DE COMANDO (XML):
+    <nexus_action>
+      <tool>NOME_DA_FERRAMENTA</tool>
+      <params>
+        <url>URL_SE_NECESSARIO</url>
+        <pi>PI_SE_NECESSARIO</pi>
+      </params>
+      <answer>Mensagem técnica de confirmação para o humano.</answer>
+    </nexus_action>
+
+    FERRAMENTAS DISPONÍVEIS:
+    1. GAM_INGEST: Para qualquer URL do Google Ad Manager.
+    2. CAPTURE_RUN: Para disparar prints de PIs específicos ou "tudo".
+    3. BI_ANALYST: Para relatórios de performance e saúde.
+    
+    Se for apenas conversa, responda em texto simples, mas mantenha o tom de Operador de Sistema.`
 
     async function callOpenRouter(text: string): Promise<string> {
+        // ... (corpo da função callOpenRouter permanece igual, mas chamando com o novo systemPrompt)
         for (const model of MODELS) {
             try {
                 console.log(`[Nexus AI] Tentando modelo reserva: ${model}...`)
                 const controller = new AbortController()
-                const timeout = setTimeout(() => controller.abort(), 8000)
+                const timeout = setTimeout(() => controller.abort(), 10000)
                 
                 const response = await fetch(OPENROUTER_URL, {
                     method: 'POST',
@@ -64,8 +80,11 @@ export async function nexusBrain(prompt: string): Promise<NexusBrainResult> {
                     },
                     body: JSON.stringify({
                         model,
-                        messages: [{ role: 'user', content: text }],
-                        temperature: 0.1,
+                        messages: [
+                            { role: 'system', content: systemPrompt },
+                            { role: 'user', content: text }
+                        ],
+                        temperature: 0, // Determinismo máximo
                     }),
                     signal: controller.signal
                 })
@@ -88,13 +107,37 @@ export async function nexusBrain(prompt: string): Promise<NexusBrainResult> {
     }
 
     try {
-        console.log('[Nexus AI] Iniciando processamento v51.0 (OpenRouter Cascade)...')
-        const rawResult = await callOpenRouter(systemPrompt)
+        console.log('[Nexus AI] Iniciando processamento v5.0 (XML Router Mode)...')
+        const rawResult = await callOpenRouter(prompt)
         
         if (!rawResult) {
             return { message: 'Nexus indisponível no momento.', success: false }
         }
 
+        // 1. XML Parser (v5 Alpha Resilience)
+        const xmlMatch = rawResult.match(/<nexus_action>([\s\S]*?)<\/nexus_action>/)
+        if (xmlMatch) {
+            const content = xmlMatch[1]
+            const tool = content.match(/<tool>(.*?)<\/tool>/)?.[1]
+            const answer = content.match(/<answer>([\s\S]*?)<\/answer>/)?.[1]
+            const url = content.match(/<url>(.*?)<\/url>/)?.[1]
+            const pi = content.match(/<pi>(.*?)<\/pi>/)?.[1]
+
+            if (tool) {
+                console.log(`[Nexus AI] XML Tool Match: ${tool}`)
+                return {
+                    action: tool,
+                    params: { url, pi },
+                    actionPerformed: tool,
+                    data: { url, pi },
+                    answer: answer || 'Comando recebido pelo núcleo operacional.',
+                    message: answer || 'Comando recebido pelo núcleo operacional.',
+                    success: true
+                }
+            }
+        }
+
+        // 2. JSON Fallback (Compatibilidade)
         const jsonMatch = rawResult.match(/\{[\s\S]*\}/)
         if (jsonMatch) {
             try {
@@ -105,18 +148,12 @@ export async function nexusBrain(prompt: string): Promise<NexusBrainResult> {
                         params: actionData.params || {},
                         actionPerformed: actionData.action,
                         data: actionData.params || {},
-                        answer: actionData.answer || 'Processando sua solicitação...',
-                        message: actionData.answer || 'Processando sua solicitação...',
+                        answer: actionData.answer || 'Processando...',
+                        message: actionData.answer || 'Processando...',
                         success: true
                     }
                 }
-                return {
-                    message: actionData.answer || actionData.message || rawResult,
-                    success: true
-                }
-            } catch (pErr) {
-                console.error('[Nexus AI] Erro ao parsear JSON:', pErr)
-            }
+            } catch (e) {}
         }
 
         return { 
