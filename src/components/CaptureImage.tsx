@@ -28,6 +28,7 @@ export function CaptureImage({ src, alt, className }: CaptureImageProps) {
             src={src}
             alt={alt}
             className={className}
+            loading="lazy"
             onError={() => setHasError(true)}
         />
     )
