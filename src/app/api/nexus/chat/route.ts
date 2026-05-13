@@ -12,32 +12,36 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: 'message and sessionId are required' }, { status: 400 })
         }
 
-        // Get authenticated user info
-        const { getSession } = await import('@/lib/auth')
-        const session = await getSession()
-        const callerRole = session?.role || 'guest'
-        const callerEmail = session?.email || 'anonymous'
+        const { processNexusCommand } = await import('@/app/aiActions')
+        const prisma = (await import('@/lib/prisma')).default
 
-        // Invoke the Edge Function
-        const edgeFnUrl = `${SUPABASE_URL}/functions/v1/nexus-chat`
-        
-        const response = await fetch(edgeFnUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-            },
-            body: JSON.stringify({ 
-                message, 
-                sessionId, 
-                callerRole, 
-                callerEmail 
-            }),
+        // 1. Salvar mensagem do usuário
+        await prisma.nexusMessage.create({
+            data: {
+                role: 'user',
+                content: message,
+                sessionId: sessionId,
+                metadata: {}
+            }
         })
 
-        const data = await response.json()
-        
-        return NextResponse.json(data)
+        // 2. Processar comando via Cérebro Unificado (aiActions)
+        const result = await processNexusCommand(message)
+
+        // 3. Salvar resposta da IA
+        await prisma.nexusMessage.create({
+            data: {
+                role: 'assistant',
+                content: result.message,
+                sessionId: sessionId,
+                metadata: {
+                    actionPerformed: result.actionPerformed,
+                    success: result.success
+                }
+            }
+        })
+
+        return NextResponse.json(result)
     } catch (error) {
         console.error('[Nexus API] Error:', error)
         return NextResponse.json(
