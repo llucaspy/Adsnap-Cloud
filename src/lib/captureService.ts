@@ -209,6 +209,60 @@ const FIND_BANNER_SCRIPT = `
     }
 `;
 
+interface MeasuredAdBox {
+    source: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
+const measureAdBoxesInPage = new Function('el', `
+    const boxes = [];
+    const nodes = Array.from(el.querySelectorAll('iframe, img, ins'));
+    nodes.push(el);
+
+    for (let index = 0; index < nodes.length; index++) {
+        const target = nodes[index];
+        const rect = target.getBoundingClientRect();
+        const style = window.getComputedStyle(target);
+        const isVisible = rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+
+        if (!isVisible) continue;
+
+        boxes.push({
+            source: target === el ? 'selector' : target.tagName.toLowerCase() + '#' + (index + 1),
+            x: rect.x + window.scrollX,
+            y: rect.y + window.scrollY,
+            width: rect.width,
+            height: rect.height
+        });
+    }
+
+    return boxes;
+`) as (el: Element) => MeasuredAdBox[];
+
+function matchesExpectedDimension(box: MeasuredAdBox, targetW: number, targetH: number) {
+    if (!box.width || !box.height || !targetW || !targetH) return false;
+
+    const widthTolerance = targetW <= 320 ? 0.30 : 0.12;
+    const heightTolerance = targetH <= 100 ? 0.25 : 0.12;
+    const widthDiff = Math.abs(box.width - targetW) / targetW;
+    const heightDiff = Math.abs(box.height - targetH) / targetH;
+
+    if (targetH <= 100 && heightDiff <= heightTolerance && box.width >= targetW && box.width <= targetW * 1.4) {
+        return true;
+    }
+
+    return widthDiff <= widthTolerance && heightDiff <= heightTolerance;
+}
+
+function describeMeasuredBoxes(boxes: MeasuredAdBox[]) {
+    return boxes
+        .map(box => `${box.source}:${Math.round(box.width)}x${Math.round(box.height)}`)
+        .join(', ') || 'sem boxes visiveis';
+}
+
 // ============================================================================
 // MAIN CAPTURE EXECUTION
 // ============================================================================
@@ -328,7 +382,24 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
             });
             await page.waitForTimeout(8000);
         } else {
-            console.log('[Nexus] Desktop detectado. Wait manual...');
+            console.log('[Nexus] Desktop detectado. Realizando warm-up de slots...');
+            await page.waitForTimeout(5000);
+            await page.evaluate(async () => {
+                return new Promise<void>((resolve) => {
+                    let totalHeight = 0;
+                    const distance = 350;
+                    const timer = setInterval(() => {
+                        window.scrollBy(0, distance);
+                        totalHeight += distance;
+
+                        if (totalHeight > 4500) {
+                            clearInterval(timer);
+                            window.scrollTo(0, 0);
+                            resolve();
+                        }
+                    }, 70);
+                });
+            });
             await page.waitForTimeout(5000);
         }
 
@@ -361,14 +432,16 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
                     }
                 }
 
-                const finalBox = await locator.boundingBox();
+                const measuredBoxes = await locator.evaluate(measureAdBoxesInPage);
 
-                if (finalBox && finalBox.width > 0 && finalBox.height > 0) {
-                    console.log(`[Nexus] Seletor encontrado! (${Math.round(finalBox.width)}x${Math.round(finalBox.height)})`);
-                    await nexusLogStore.addLog('Nexus: Seletor validado com sucesso', 'SUCCESS', `Dim: ${Math.round(finalBox.width)}x${Math.round(finalBox.height)}`, campaignId);
+                const matchingBox = measuredBoxes.find(candidate => matchesExpectedDimension(candidate, targetW, targetH));
+
+                if (matchingBox) {
+                    console.log(`[Nexus] Seletor validado! ${matchingBox.source} (${Math.round(matchingBox.width)}x${Math.round(matchingBox.height)})`);
+                    await nexusLogStore.addLog('Nexus: Seletor validado com dimensao correta', 'SUCCESS', `Dim: ${Math.round(matchingBox.width)}x${Math.round(matchingBox.height)} | Esperado: ${targetW}x${targetH}`, campaignId);
 
                     const viewportHeight = isMobile ? 722 : 928;
-                    const targetScrollY = Math.max(0, finalBox.y + (finalBox.height / 2) - (viewportHeight / 2));
+                    const targetScrollY = Math.max(0, matchingBox.y + (matchingBox.height / 2) - (viewportHeight / 2));
 
                     await page.evaluate((y) => window.scrollTo(0, y), targetScrollY);
                     await page.waitForTimeout(3000);
@@ -379,8 +452,10 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
                     const finalImage = await compositeStudioImage(screenshotBuffer, campaign.url, isMobile);
                     return await saveCapture(campaign, finalImage, campaignId);
                 } else {
-                    console.log('[Nexus] Box inválido para seletor.');
-                    await nexusLogStore.addLog('Nexus: Seletor localizado mas sem área visível', 'ERROR', undefined, campaignId);
+                    const measured = describeMeasuredBoxes(measuredBoxes);
+                    console.log(`[Nexus] Seletor localizado com dimensao errada. Esperado ${targetW}x${targetH}; medido: ${measured}`);
+                    await nexusLogStore.addLog('Nexus: Seletor localizado com dimensao errada', 'INFO', `Esperado ${targetW}x${targetH}; medido: ${measured}`, campaignId);
+                    throw new Error(`Dimensao do seletor nao corresponde ao formato (${measured})`);
                 }
             } catch (selError) {
                 const msg = selError instanceof Error ? selError.message : String(selError);

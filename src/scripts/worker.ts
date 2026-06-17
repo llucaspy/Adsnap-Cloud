@@ -66,7 +66,7 @@ async function checkGmail() {
 }
 
 /**
- * Resets campaigns that are stuck in PROCESSING or QUEUED for too long.
+ * Requeues campaigns that are stuck in PROCESSING for too long.
  */
 async function cleanupStuckCampaigns() {
     console.log('[Nexus Worker] Verificando campanhas travadas...')
@@ -74,18 +74,18 @@ async function cleanupStuckCampaigns() {
 
     const stuck = await prisma.campaign.updateMany({
         where: {
-            status: { in: ['PROCESSING', 'QUEUED'] },
+            status: 'PROCESSING',
             updatedAt: { lt: oneHourAgo },
             isArchived: false
         },
         data: {
-            status: 'PENDING'
+            status: 'QUEUED'
         }
     })
 
     if (stuck.count > 0) {
-        console.log(`[Nexus Worker] Resetadas ${stuck.count} campanhas travadas.`)
-        await nexusLogStore.addLog(`Nexus: Resetadas ${stuck.count} campanhas que estavam travadas há mais de 1h.`, 'SYSTEM')
+        console.log(`[Nexus Worker] Reenfileiradas ${stuck.count} campanhas travadas.`)
+        await nexusLogStore.addLog(`Nexus: Reenfileiradas ${stuck.count} campanhas que estavam em processamento ha mais de 1h.`, 'SYSTEM')
     }
 }
 
@@ -153,13 +153,25 @@ async function runWorkerCycle() {
 
     // 3. Campaign Capture
     try {
-        const campaigns = await prisma.campaign.findMany({
+        const queuedCampaigns = await prisma.campaign.findMany({
             where: {
-                status: { in: ['PENDING', 'QUEUED', 'AUTOCONFIG'] },
+                status: 'QUEUED',
                 isArchived: false
             },
+            orderBy: { updatedAt: 'asc' },
             take: 20
         })
+
+        const autoconfigCampaigns = queuedCampaigns.length >= 20 ? [] : await prisma.campaign.findMany({
+            where: {
+                status: 'AUTOCONFIG',
+                isArchived: false
+            },
+            orderBy: { updatedAt: 'asc' },
+            take: 20 - queuedCampaigns.length
+        })
+
+        const campaigns = [...queuedCampaigns, ...autoconfigCampaigns]
 
         if (campaigns.length > 0) {
             console.log(`[Nexus Worker] Encontradas ${campaigns.length} campanhas/montagens para processar.`)
@@ -168,7 +180,7 @@ async function runWorkerCycle() {
             for (const campaign of campaigns) {
                 // Atomic claim
                 const claim = await prisma.campaign.updateMany({
-                    where: { id: campaign.id, status: { in: ['PENDING', 'QUEUED', 'AUTOCONFIG'] } },
+                    where: { id: campaign.id, status: { in: ['QUEUED', 'AUTOCONFIG'] } },
                     data: { status: 'PROCESSING', updatedAt: new Date() }
                 })
 
@@ -196,7 +208,7 @@ async function runWorkerCycle() {
                     console.error(`[Nexus Worker] Erro em ${campaign.pi}:`, err)
                     await prisma.campaign.update({
                         where: { id: campaign.id },
-                        data: { status: 'PENDING' }
+                        data: { status: 'QUEUED' }
                     })
                 }
             }
