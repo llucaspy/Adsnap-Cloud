@@ -3,6 +3,8 @@
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { nexusLogStore } from '@/lib/nexusLogStore'
+import type { GamImportDraft } from '@/lib/gamImportPlanner'
+import { createCampaignsFromGamDraft as writeCampaignsFromGamDraft } from '@/lib/gamImportWriter'
 
 export async function getNexusActivity() {
     try {
@@ -143,7 +145,16 @@ export async function createMultipleCampaigns(payload: {
     flightEnd: string | null
     isScheduled: boolean
     scheduledTimes: string
-    mediaEntries: { url: string; device: string; format: string; externalChannelId?: string; isMultiChannel?: boolean; allowedChannels?: string }[]
+    mediaEntries: {
+        url: string
+        device: string
+        format: string
+        externalChannelId?: string
+        isMultiChannel?: boolean
+        allowedChannels?: string
+        externalCampaignId?: string
+        externalAuthUrl?: string
+    }[]
 }) {
     const {
         agency, client, campaignName, pi, segmentation,
@@ -181,6 +192,8 @@ export async function createMultipleCampaigns(payload: {
                 externalChannelId: entry.externalChannelId || null,
                 isMultiChannel: entry.isMultiChannel || false,
                 allowedChannels: entry.allowedChannels || '[]',
+                externalCampaignId: entry.externalCampaignId || null,
+                externalAuthUrl: entry.externalAuthUrl || null,
             },
         })
         results.push(campaign)
@@ -190,6 +203,75 @@ export async function createMultipleCampaigns(payload: {
     revalidatePath('/monitoring')
     revalidatePath('/adops')
     return { success: true, count: results.length }
+}
+
+export async function createCampaignsFromGamDraftAction(draft: GamImportDraft) {
+    const result = await writeCampaignsFromGamDraft(prisma, draft)
+
+    await nexusLogStore.addLog(
+        `Nexus GAM: ${result.created} campanha(s) criada(s), ${result.skipped} duplicada(s), ${result.blocked} bloqueada(s).`,
+        result.blocked > 0 ? 'INFO' : 'SUCCESS',
+        JSON.stringify({ orderId: draft.orderId, campaignIds: result.campaignIds })
+    )
+
+    revalidatePath('/')
+    revalidatePath('/campaigns')
+    revalidatePath('/monitoring')
+    revalidatePath('/adops')
+
+    return { success: true, ...result }
+}
+
+export async function requestGamImportDraft(orderUrl: string) {
+    const url = orderUrl.trim()
+    if (!/^https:\/\/admanager\.google\.com\/.+order_id=\d+/i.test(url)) {
+        throw new Error('Informe um link de Order valido do Google Ad Manager.')
+    }
+
+    const orderId = url.match(/order_id=(\d+)/i)?.[1] || 'Unknown'
+
+    await prisma.nexusLog.create({
+        data: {
+            level: 'JOB_GAM_PENDING',
+            message: `Nexus GAM: rascunho solicitado para Order ${orderId}`,
+            details: JSON.stringify({ orderUrl: url, mode: 'draft' }),
+        },
+    })
+
+    const triggered = await triggerNexusWorker()
+    if (!triggered) {
+        await nexusLogStore.addLog('Nexus GAM: rascunho enfileirado, mas worker nao foi disparado automaticamente.', 'INFO')
+    }
+
+    revalidatePath('/campaigns')
+    return { success: true, orderId, triggered }
+}
+
+export async function getGamImportDrafts() {
+    const logs = await prisma.nexusLog.findMany({
+        where: { level: { in: ['JOB_GAM_REVIEW', 'JOB_GAM_ERROR', 'JOB_GAM_RUNNING', 'JOB_GAM_PENDING'] } },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+    })
+
+    return logs.map(log => {
+        let draft: GamImportDraft | null = null
+        try {
+            if (log.level === 'JOB_GAM_REVIEW' && log.details) {
+                draft = JSON.parse(log.details) as GamImportDraft
+            }
+        } catch {
+            draft = null
+        }
+
+        return {
+            id: log.id,
+            level: log.level,
+            message: log.message,
+            createdAt: log.createdAt.toISOString(),
+            draft,
+        }
+    })
 }
 
 export async function archiveCampaign(id: string, isArchived: boolean = true) {

@@ -217,6 +217,65 @@ async function runWorkerCycle() {
         console.error('[Nexus Worker] Erro no ciclo de captura:', err)
     }
 
+    // 4. GAM Ingestion Jobs (supervised draft)
+    try {
+        const crawlerModule = await import('../lib/gamCrawlerService')
+        const plannerModule = await import('../lib/gamImportPlanner')
+        const gamCrawler = (crawlerModule as any).gamCrawler || (crawlerModule as any).default?.gamCrawler
+        const buildGamImportDraft = (plannerModule as any).buildGamImportDraft || (plannerModule as any).default?.buildGamImportDraft
+
+        if (!gamCrawler || !buildGamImportDraft) {
+            throw new Error('Modulos GAM indisponiveis no worker.')
+        }
+
+        const jobs = await prisma.nexusLog.findMany({
+            where: { level: 'JOB_GAM_PENDING' },
+            take: 5
+        })
+
+        for (const job of jobs) {
+            console.log(`[Nexus Worker] Executando Job de Ingestão: ${job.message}`)
+
+            // Mark as Running
+            await prisma.nexusLog.update({
+                where: { id: job.id },
+                data: { level: 'JOB_GAM_RUNNING' }
+            })
+
+            try {
+                const details = job.details || ''
+                const parsed = details.trim().startsWith('{') ? JSON.parse(details) : { orderUrl: details }
+                const url = parsed.orderUrl || parsed.url || details
+                if (!url || !url.startsWith('http')) throw new Error('URL de job invalida')
+
+                const data = await gamCrawler.startIngestion(url)
+                const settings = await prisma.settings.findUnique({ where: { id: 1 } })
+                const bannerFormats = JSON.parse(settings?.bannerFormats || '[]')
+                const draft = buildGamImportDraft(data, bannerFormats)
+
+                await prisma.nexusLog.update({
+                    where: { id: job.id },
+                    data: {
+                        level: 'JOB_GAM_REVIEW',
+                        message: `Rascunho GAM pronto: ${draft.client} (${draft.mediaEntries.length} formato(s), ${draft.blockedItems.length} bloqueado(s))`,
+                        details: JSON.stringify(draft)
+                    }
+                })
+            } catch (jobErr) {
+                console.error('[Nexus Worker] Falha no Job GAM:', jobErr)
+                await prisma.nexusLog.update({
+                    where: { id: job.id },
+                    data: {
+                        level: 'JOB_GAM_ERROR',
+                        message: `Erro: ${jobErr instanceof Error ? jobErr.message : String(jobErr)}`
+                    }
+                })
+            }
+        }
+    } catch (err) {
+        console.error('[Nexus Worker] Erro nos Jobs GAM:', err)
+    }
+
     // 4. Telegram Performance Alerts (Simplified)
     try {
         const settings = await prisma.settings.findUnique({ where: { id: 1 } })

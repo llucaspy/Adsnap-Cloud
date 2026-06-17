@@ -1,147 +1,328 @@
-import { chromium, BrowserContext, Page } from 'playwright';
-import path from 'path';
+import { chromium, Page } from 'playwright'
+import path from 'path'
+import type { GamCreativePreview, GamLineItemImport, GamOrderImport } from './gamImportPlanner'
 
-export interface GamLineItem {
-    id: string;
-    name: string;
-    formats: string[];
-    previewLinks: { format: string; url: string }[];
+function unique<T>(items: T[], getKey: (item: T) => string) {
+    const seen = new Set<string>()
+    return items.filter(item => {
+        const key = getKey(item)
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+    })
 }
 
-export interface GamOrderData {
-    orderId: string;
-    clientName: string;
-    agencyName: string;
-    lineItems: GamLineItem[];
+function parseOrderId(orderUrl: string) {
+    return orderUrl.match(/order_id=(\d+)/i)?.[1] || 'Unknown'
+}
+
+function parseNetworkCode(orderUrl: string) {
+    return orderUrl.match(/admanager\.google\.com\/(\d+)/i)?.[1] || process.env.GAM_NETWORK_CODE || ''
+}
+
+function parseCreativeId(value: string) {
+    return value.match(/creative_id=(\d+)/i)?.[1] || value.match(/creativeId=(\d+)/i)?.[1] || ''
+}
+
+function parseLineItemId(value: string) {
+    return value.match(/line_item_id=(\d+)/i)?.[1] || value.match(/lineItemId=(\d+)/i)?.[1] || ''
+}
+
+function parseFirstSize(text: string) {
+    const match = text.match(/\b([1-9]\d{1,3})\s*x\s*([1-9]\d{1,3})\b/i)
+    if (!match) return null
+    return { width: Number(match[1]), height: Number(match[2]) }
+}
+
+function extractDateRange(text: string) {
+    const isoDates = [...text.matchAll(/\b(20\d{2}-\d{2}-\d{2})\b/g)].map(match => match[1])
+    if (isoDates.length >= 2) return { flightStart: isoDates[0], flightEnd: isoDates[1] }
+
+    const brDates = [...text.matchAll(/\b(\d{1,2}\/\d{1,2}\/20\d{2})\b/g)].map(match => match[1])
+    if (brDates.length >= 2) return { flightStart: brDates[0], flightEnd: brDates[1] }
+
+    return { flightStart: null, flightEnd: null }
+}
+
+async function firstText(page: Page, selectors: string[]) {
+    for (const selector of selectors) {
+        const value = await page.locator(selector).first().innerText({ timeout: 1500 }).catch(() => '')
+        if (value.trim()) return value.trim()
+    }
+    return ''
+}
+
+async function clickFirstText(page: Page, pattern: RegExp) {
+    const locator = page.getByText(pattern).first()
+    if (await locator.count().catch(() => 0)) {
+        await locator.click({ timeout: 3000 }).catch(() => null)
+        return true
+    }
+    return false
+}
+
+async function fillVisibleInput(page: Page, value: string) {
+    const inputs = await page.locator('input:visible').all()
+    for (const input of inputs) {
+        const type = await input.getAttribute('type').catch(() => '')
+        if (type === 'hidden') continue
+
+        const current = await input.inputValue().catch(() => '')
+        if (current.includes('google_preview')) continue
+
+        await input.fill(value, { timeout: 1500 }).catch(() => null)
+        const after = await input.inputValue().catch(() => '')
+        if (after === value) return true
+    }
+
+    return false
 }
 
 export class GamCrawlerService {
-    private userDataDir = path.join('/tmp', '.gam-session');
-    
-    async startIngestion(orderUrl: string): Promise<GamOrderData> {
-        console.log(`[Nexus GAM] Iniciando ingestão para: ${orderUrl}`);
-        
+    private userDataDir = process.env.GAM_USER_DATA_DIR || path.join(process.cwd(), '.gam-session')
+
+    async startIngestion(orderUrl: string): Promise<GamOrderImport> {
+        console.log(`[Nexus GAM] Iniciando ingestao para: ${orderUrl}`)
+
         const browser = await chromium.launchPersistentContext(this.userDataDir, {
-            headless: true,
+            headless: process.env.GAM_HEADLESS !== 'false',
             viewport: { width: 1366, height: 768 },
             userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             timezoneId: 'America/Sao_Paulo',
             args: [
                 '--disable-blink-features=AutomationControlled',
                 '--no-sandbox',
-                '--disable-setuid-sandbox'
-            ]
-        });
+                '--disable-setuid-sandbox',
+            ],
+        })
 
-        const page = await browser.newPage();
-        
+        const page = await browser.newPage()
+
         try {
-            // 1. Login Flow
-            await this.ensureLogin(page);
-            
-            // 2. Navigate to Order
-            await page.goto(orderUrl, { waitUntil: 'networkidle' });
-            
-            // 3. Extract Order Metadata (Client, Agency)
-            const clientName = await page.locator('span[data-testid="order-advertiser-name"]').first().innerText().catch(() => 'Cliente Desconhecido');
-            const agencyName = await page.locator('span[data-testid="order-agency-name"]').first().innerText().catch(() => 'Agência Desconhecida');
-            const orderId = orderUrl.split('order_id=')[1]?.split('&')[0] || 'Unknown';
+            await this.ensureLogin(page)
+            await page.goto(orderUrl, { waitUntil: 'domcontentloaded', timeout: 90000 })
+            await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => null)
+            await page.waitForTimeout(5000)
 
-            // 4. Discover Line Items
-            const lineItemLinks = await page.locator('a[href*="#delivery/line item/"]').all();
-            const discoveredItems: GamLineItem[] = [];
+            const orderText = await page.locator('body').innerText({ timeout: 10000 }).catch(() => '')
+            const orderName = await firstText(page, [
+                '[data-testid="order-name"]',
+                'h1',
+                '[role="heading"]',
+            ])
 
-            console.log(`[Nexus GAM] Encontrados ${lineItemLinks.length} possíveis itens de linha.`);
+            const clientName =
+                await firstText(page, [
+                    'span[data-testid="order-advertiser-name"]',
+                    '[data-testid*="advertiser"]',
+                ]) || this.extractAdvertiserFromText(orderText)
 
-            for (const link of lineItemLinks) {
-                const href = await link.getAttribute('href') || '';
-                const id = href.split('line_item_id=')[1]?.split('&')[0];
-                const name = await link.innerText();
+            const agencyName =
+                await firstText(page, [
+                    'span[data-testid="order-agency-name"]',
+                    '[data-testid*="agency"]',
+                ]) || this.extractAgencyFromText(orderName || orderText)
 
-                if (id && !discoveredItems.find(i => i.id === id)) {
-                    discoveredItems.push({ id, name, formats: [], previewLinks: [] });
-                }
-            }
+            const discoveredItems = await this.discoverLineItems(page, parseNetworkCode(orderUrl))
 
-            // 5. Process Each Line Item (Deep Scrape)
             for (const item of discoveredItems) {
-                await this.processLineItem(page, item);
+                await this.processLineItem(page, parseNetworkCode(orderUrl), item)
             }
+
+            const range = extractDateRange(orderText)
 
             return {
-                orderId,
-                clientName,
+                orderId: parseOrderId(orderUrl),
+                orderName,
+                orderUrl,
+                clientName: clientName || 'Cliente Desconhecido',
                 agencyName,
-                lineItems: discoveredItems
-            };
-
+                flightStart: range.flightStart,
+                flightEnd: range.flightEnd,
+                lineItems: discoveredItems,
+            }
         } finally {
-            await browser.close();
+            await browser.close()
         }
     }
 
     private async ensureLogin(page: Page) {
-        await page.goto('https://admanager.google.com/home');
-        
-        // Verifica se já está logado
-        if (page.url().includes('signin/identifier') || page.url().includes('accounts.google.com')) {
-            console.log('[Nexus GAM] Sessão não encontrada. Realizando login...');
-            
-            await page.fill('input[type="email"]', process.env.GAM_USER || '');
-            await page.click('#identifierNext');
-            await page.waitForTimeout(2000);
-            
-            await page.fill('input[type="password"]', process.env.GAM_PASS || '');
-            await page.click('#passwordNext');
-            
-            // Aguarda redirecionamento ou desafio
-            await page.waitForTimeout(5000);
-            
-            if (page.url().includes('challenge')) {
-                throw new Error('DESAFIO_BFA_DETECTADO: Por favor, realize o login manual no servidor uma vez.');
-            }
-        } else {
-            console.log('[Nexus GAM] Sessão persistente ativa.');
+        await page.goto('https://admanager.google.com/home', { waitUntil: 'domcontentloaded', timeout: 90000 })
+        await page.waitForTimeout(2500)
+
+        if (!page.url().includes('accounts.google.com') && !page.url().includes('signin')) {
+            console.log('[Nexus GAM] Sessao persistente ativa.')
+            return
+        }
+
+        const user = process.env.GAM_USER
+        const pass = process.env.GAM_PASS
+
+        if (!user || !pass) {
+            throw new Error('Sessao GAM nao autenticada. Abra uma sessao local ou informe GAM_USER/GAM_PASS apenas no ambiente de execucao.')
+        }
+
+        console.log('[Nexus GAM] Sessao nao encontrada. Realizando login supervisionado...')
+
+        await page.fill('input[type="email"]', user, { timeout: 10000 })
+        await page.click('#identifierNext')
+        await page.waitForTimeout(3000)
+
+        await page.fill('input[type="password"]', pass, { timeout: 10000 })
+        await page.click('#passwordNext')
+        await page.waitForTimeout(8000)
+
+        if (page.url().includes('challenge')) {
+            throw new Error('DESAFIO_2FA_DETECTADO: conclua o login manualmente nesta sessao antes de rodar a importacao.')
         }
     }
 
-    private async processLineItem(page: Page, item: GamLineItem) {
-        const url = `https://admanager.google.com/${process.env.GAM_NETWORK_CODE}#delivery/line%20item/line_item_overview/line_item_id=${item.id}`;
-        console.log(`[Nexus GAM] Processando Line Item: ${item.name} (${item.id})`);
-        
-        await page.goto(url, { waitUntil: 'networkidle' });
-        
-        // Clica na aba de Criativos
-        await page.click('div[role="tab"]:has-text("Criativos")');
-        await page.waitForTimeout(2000);
+    private extractAdvertiserFromText(text: string) {
+        return text.match(/Anunciante\s+([^\n]+)/i)?.[1]?.trim()
+            || text.match(/Advertiser\s+([^\n]+)/i)?.[1]?.trim()
+            || ''
+    }
 
-        // Pega o primeiro criativo ativo para gerar o preview
-        const firstCreative = page.locator('a[href*="creative_id="]').first();
-        if (await firstCreative.count() > 0) {
-            await firstCreative.click();
-            await page.waitForTimeout(2000);
-            
-            // Vai para a aba Visualizar
-            await page.click('div[role="tab"]:has-text("Visualizar")');
-            await page.waitForTimeout(2000);
-            
-            // Seleciona "No site"
-            await page.click('div:has-text("No site")');
-            await page.waitForTimeout(1000);
-            
-            // Insira metropoles.com
-            const urlInput = page.locator('input[placeholder*="site"]');
-            await urlInput.fill('metropoles.com');
-            await page.click('button:has-text("Mostrar URL")');
-            await page.waitForTimeout(2000);
-            
-            // Captura a URL final
-            const previewUrl = await page.locator('input[readonly]').inputValue();
-            item.previewLinks.push({ format: "DETECTED", url: previewUrl });
-            
-            console.log(`[Nexus GAM] Link de Preview gerado para ${item.name}`);
+    private extractAgencyFromText(text: string) {
+        if (/estadual/i.test(text)) return 'ESTADUAL'
+        if (/federal/i.test(text)) return 'FEDERAL'
+        return text.match(/Ag[eê]ncia\s+([^\n]+)/i)?.[1]?.trim()
+            || text.match(/Agency\s+([^\n]+)/i)?.[1]?.trim()
+            || ''
+    }
+
+    private async discoverLineItems(page: Page, networkCode: string): Promise<GamLineItemImport[]> {
+        const links = await page.locator('a[href*="line_item_id="], a[href*="lineItemId="]').evaluateAll(nodes => {
+            return nodes.map(node => ({
+                href: (node as HTMLAnchorElement).href || node.getAttribute('href') || '',
+                text: (node.textContent || '').trim(),
+            }))
+        }).catch(() => [])
+
+        const items = unique(links.map(link => {
+            const id = parseLineItemId(link.href)
+            return {
+                id,
+                name: link.text || `Line item ${id}`,
+                creatives: [],
+            } satisfies GamLineItemImport
+        }).filter(item => item.id), item => item.id)
+
+        console.log(`[Nexus GAM] Encontrados ${items.length} itens de linha.`)
+
+        if (items.length > 0) return items
+
+        const currentId = parseLineItemId(page.url())
+        if (currentId) {
+            return [{
+                id: currentId,
+                name: `Line item ${currentId}`,
+                creatives: [],
+            }]
+        }
+
+        const fallbackUrl = `https://admanager.google.com/${networkCode}#delivery/order/order_overview/order_id=${parseOrderId(page.url())}`
+        console.log(`[Nexus GAM] Nenhum item por link. Fallback: ${fallbackUrl}`)
+        return []
+    }
+
+    private async processLineItem(page: Page, networkCode: string, item: GamLineItemImport) {
+        const url = `https://admanager.google.com/${networkCode}#delivery/line%20item/line_item_overview/line_item_id=${item.id}`
+        console.log(`[Nexus GAM] Processando Line Item: ${item.name} (${item.id})`)
+
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 })
+        await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => null)
+        await page.waitForTimeout(4000)
+
+        const lineItemText = await page.locator('body').innerText({ timeout: 10000 }).catch(() => '')
+        const range = extractDateRange(lineItemText)
+        item.flightStart = range.flightStart
+        item.flightEnd = range.flightEnd
+
+        await clickFirstText(page, /Criativos|Creatives/i)
+        await page.waitForTimeout(2500)
+
+        const creativeLinks = await page.locator('a[href*="creative_id="], a[href*="creativeId="]').evaluateAll(nodes => {
+            return nodes.map(node => ({
+                href: (node as HTMLAnchorElement).href || node.getAttribute('href') || '',
+                text: (node.textContent || '').trim(),
+            }))
+        }).catch(() => [])
+
+        const creatives = unique(creativeLinks.map(link => ({
+            creativeId: parseCreativeId(link.href),
+            href: link.href,
+            name: link.text,
+        })).filter(creative => creative.creativeId), creative => creative.creativeId)
+
+        console.log(`[Nexus GAM] Criativos encontrados no line item ${item.id}: ${creatives.length}`)
+
+        for (const creative of creatives) {
+            const preview = await this.processCreative(page, networkCode, item.id, creative.href, creative.creativeId, creative.name)
+            if (preview) item.creatives.push(preview)
+        }
+    }
+
+    private async processCreative(
+        page: Page,
+        networkCode: string,
+        lineItemId: string,
+        href: string,
+        creativeId: string,
+        name?: string
+    ): Promise<GamCreativePreview | null> {
+        const creativeUrl = href.startsWith('http')
+            ? href
+            : `https://admanager.google.com/${networkCode}${href.startsWith('#') ? href : `#${href}`}`
+
+        console.log(`[Nexus GAM] Gerando preview do criativo ${creativeId}`)
+        await page.goto(creativeUrl, { waitUntil: 'domcontentloaded', timeout: 90000 })
+        await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => null)
+        await page.waitForTimeout(3500)
+
+        const creativeText = await page.locator('body').innerText({ timeout: 10000 }).catch(() => '')
+        const size = parseFirstSize(creativeText)
+
+        if (!size) {
+            console.log(`[Nexus GAM] Tamanho nao encontrado para criativo ${creativeId}`)
+            return null
+        }
+
+        await clickFirstText(page, /Visualizar|Preview/i)
+        await page.waitForTimeout(2000)
+        await clickFirstText(page, /No site|On site|Site ativo|Live site/i)
+        await page.waitForTimeout(1000)
+
+        const previewBaseUrl = size.width === 320 && (size.height === 50 || size.height === 100)
+            ? 'metropoles.com/saude'
+            : 'metropoles.com'
+
+        await fillVisibleInput(page, previewBaseUrl)
+        await clickFirstText(page, /Mostrar URL|Gerar URL|Show URL|Generate URL/i)
+        await page.waitForTimeout(2500)
+
+        const previewUrl = await page.locator('input[readonly], textarea[readonly], input[value*="google_preview"], textarea:has-text("google_preview")')
+            .first()
+            .inputValue({ timeout: 3000 })
+            .catch(async () => {
+                const text = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+                return text.match(/https?:\/\/[^\s"']*google_preview[^\s"']*/i)?.[0] || ''
+            })
+
+        if (!previewUrl || !previewUrl.includes('google_preview')) {
+            console.log(`[Nexus GAM] Preview nao encontrado para criativo ${creativeId}`)
+            return null
+        }
+
+        return {
+            creativeId,
+            name,
+            width: size.width,
+            height: size.height,
+            previewUrl,
+            previewBaseUrl,
         }
     }
 }
 
-export const gamCrawler = new GamCrawlerService();
+export const gamCrawler = new GamCrawlerService()

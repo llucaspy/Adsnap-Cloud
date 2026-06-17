@@ -1,13 +1,15 @@
 'use client'
 
-import { createMultipleCampaigns, getSettings } from '@/app/actions'
+import { createMultipleCampaigns, getGamImportDrafts, getSettings, requestGamImportDraft } from '@/app/actions'
+import type { GamImportDraft } from '@/lib/gamImportPlanner'
 import { useTransition, useState, useEffect } from 'react'
 import {
     Plus, Globe, Smartphone, Monitor, Calendar,
     Clock, ChevronRight, ChevronLeft, Check,
     Building2, User2, Hash, Layers, Sparkles,
     CalendarRange, Shield, Landmark, Building, Users,
-    ChevronDown, Trash2, X
+    ChevronDown, Trash2, X, Wand2, RefreshCw, FileCheck2,
+    AlertTriangle
 } from 'lucide-react'
 import { MultiTimePicker } from './MultiTimePicker'
 
@@ -18,6 +20,8 @@ interface MediaEntry {
     externalChannelId: string
     isMultiChannel: boolean
     allowedChannels: string
+    externalCampaignId?: string
+    externalAuthUrl?: string
 }
 
 interface StepProps {
@@ -42,8 +46,18 @@ const SEGMENTATIONS = [
 export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[] }) {
     const [step, setStep] = useState(1)
     const [isPending, startTransition] = useTransition()
+    const [isGamPending, startGamTransition] = useTransition()
     const [bannerFormats, setBannerFormats] = useState<any[]>([])
     const [mediaEntries, setMediaEntries] = useState<MediaEntry[]>([])
+    const [gamOrderUrl, setGamOrderUrl] = useState('')
+    const [gamStatus, setGamStatus] = useState('')
+    const [gamDrafts, setGamDrafts] = useState<Array<{
+        id: string
+        level: string
+        message: string
+        createdAt: string
+        draft: GamImportDraft | null
+    }>>([])
     const [formData, setFormData] = useState({
         agency: '',
         client: '',
@@ -70,12 +84,61 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
         fetchFormats()
     }, [])
 
+    async function refreshGamDrafts() {
+        const drafts = await getGamImportDrafts()
+        setGamDrafts(drafts)
+        return drafts
+    }
+
+    useEffect(() => {
+        refreshGamDrafts().catch(() => null)
+    }, [])
+
     const updateFields = (fields: Partial<typeof formData>) => {
         setFormData(prev => ({ ...prev, ...fields }))
     }
 
     const next = () => setStep(s => Math.min(s + 1, 4))
     const back = () => setStep(s => Math.max(s - 1, 1))
+
+    function loadGamDraft(draft: GamImportDraft) {
+        setFormData({
+            agency: draft.agency,
+            client: draft.client,
+            campaignName: draft.campaignName,
+            pi: draft.pi,
+            segmentation: draft.segmentation,
+            flightStart: draft.flightStart || '',
+            flightEnd: draft.flightEnd || '',
+            isScheduled: draft.isScheduled,
+            scheduledTimes: draft.scheduledTimes,
+        })
+        setMediaEntries(draft.mediaEntries.map(entry => ({
+            url: entry.url,
+            device: entry.device,
+            format: entry.format,
+            externalChannelId: '',
+            isMultiChannel: false,
+            allowedChannels: '[]',
+            externalCampaignId: entry.externalCampaignId,
+            externalAuthUrl: draft.orderUrl || '',
+        })))
+        setGamStatus(`Rascunho carregado: ${draft.mediaEntries.length} formato(s).`)
+        setStep(4)
+    }
+
+    async function handleRequestGamDraft() {
+        startGamTransition(async () => {
+            try {
+                setGamStatus('Solicitando rascunho...')
+                const result = await requestGamImportDraft(gamOrderUrl)
+                setGamStatus(result.triggered ? `Order ${result.orderId} enviada ao worker.` : `Order ${result.orderId} enfileirada.`)
+                await refreshGamDrafts()
+            } catch (error) {
+                setGamStatus((error as Error).message)
+            }
+        })
+    }
 
     async function handleFinalSubmit() {
         startTransition(async () => {
@@ -96,7 +159,9 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
                         format: e.format,
                         externalChannelId: e.externalChannelId,
                         isMultiChannel: e.isMultiChannel,
-                        allowedChannels: e.allowedChannels
+                        allowedChannels: e.allowedChannels,
+                        externalCampaignId: e.externalCampaignId,
+                        externalAuthUrl: e.externalAuthUrl
                     })),
                 })
                 alert(`${result.count} campanha(s) ativada(s) com sucesso!`)
@@ -125,6 +190,18 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
                     maskComposite: 'exclude',
                     WebkitMaskComposite: 'xor'
                 }}
+            />
+
+            {/* Progress Header */}
+            <GamImportPanel
+                orderUrl={gamOrderUrl}
+                onOrderUrlChange={setGamOrderUrl}
+                onRequestDraft={handleRequestGamDraft}
+                onRefresh={refreshGamDrafts}
+                onLoadDraft={loadGamDraft}
+                isPending={isGamPending}
+                status={gamStatus}
+                drafts={gamDrafts}
             />
 
             {/* Progress Header */}
@@ -193,6 +270,105 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
                     />
                 )}
             </div>
+        </div>
+    )
+}
+
+function GamImportPanel({ orderUrl, onOrderUrlChange, onRequestDraft, onRefresh, onLoadDraft, isPending, status, drafts }: {
+    orderUrl: string
+    onOrderUrlChange: (value: string) => void
+    onRequestDraft: () => void
+    onRefresh: () => Promise<any>
+    onLoadDraft: (draft: GamImportDraft) => void
+    isPending: boolean
+    status: string
+    drafts: Array<{ id: string; level: string; message: string; createdAt: string; draft: GamImportDraft | null }>
+}) {
+    const readyDrafts = drafts.filter(item => item.draft)
+
+    return (
+        <div
+            className="px-8 pt-8 pb-6 relative z-10 space-y-4"
+            style={{ borderBottom: '1px solid var(--border)' }}
+        >
+            <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                    <div
+                        className="w-10 h-10 rounded-lg flex items-center justify-center"
+                        style={{ background: 'var(--accent-muted)', color: 'var(--accent-light)' }}
+                    >
+                        <Wand2 size={18} />
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>Importar GAM</h3>
+                        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Rascunho supervisionado</p>
+                    </div>
+                </div>
+                <button
+                    onClick={() => onRefresh()}
+                    className="w-10 h-10 rounded-lg flex items-center justify-center transition-all"
+                    style={{ background: 'var(--bg-tertiary)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
+                    title="Atualizar"
+                >
+                    <RefreshCw size={16} />
+                </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-3">
+                <div className="relative">
+                    <Globe className="absolute left-4 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--text-muted)' }} />
+                    <input
+                        value={orderUrl}
+                        onChange={event => onOrderUrlChange(event.target.value)}
+                        placeholder="https://admanager.google.com/...order_id=..."
+                        className="w-full rounded-xl p-4 pl-12 outline-none transition-all font-medium"
+                        style={{ background: 'var(--bg-tertiary)', border: '2px solid transparent', color: 'var(--text-primary)' }}
+                    />
+                </div>
+                <button
+                    onClick={onRequestDraft}
+                    disabled={isPending || !orderUrl.trim()}
+                    className="px-5 py-4 rounded-xl transition-all flex items-center justify-center gap-2 font-bold text-sm disabled:opacity-40"
+                    style={{ background: 'var(--accent-muted)', color: 'var(--accent-light)', border: '1px solid var(--accent)' }}
+                >
+                    <FileCheck2 size={18} />
+                    {isPending ? 'Gerando...' : 'Gerar rascunho'}
+                </button>
+            </div>
+
+            {status && (
+                <p className="text-xs font-bold" style={{ color: status.includes('valido') || status.includes('Erro') ? '#f59e0b' : 'var(--text-secondary)' }}>
+                    {status}
+                </p>
+            )}
+
+            {readyDrafts.length > 0 && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    {readyDrafts.slice(0, 4).map(item => item.draft && (
+                        <button
+                            key={item.id}
+                            onClick={() => onLoadDraft(item.draft!)}
+                            className="p-4 rounded-xl text-left transition-all hover:-translate-y-0.5"
+                            style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
+                        >
+                            <div className="flex items-center justify-between gap-3 mb-2">
+                                <span className="font-bold text-sm truncate" style={{ color: 'var(--text-primary)' }}>
+                                    {item.draft.client}
+                                </span>
+                                {item.draft.blockedItems.length > 0 && (
+                                    <span className="flex items-center gap-1 text-[10px] font-black" style={{ color: '#f59e0b' }}>
+                                        <AlertTriangle size={12} />
+                                        {item.draft.blockedItems.length}
+                                    </span>
+                                )}
+                            </div>
+                            <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>
+                                PI {item.draft.pi} · {item.draft.mediaEntries.length} formato(s)
+                            </p>
+                        </button>
+                    ))}
+                </div>
+            )}
         </div>
     )
 }
@@ -504,7 +680,9 @@ function StepMedia({ formData, updateFields, next, back, bannerFormats = [], med
             format: currentFormat,
             externalChannelId: currentChannelId,
             isMultiChannel: false,
-            allowedChannels: '[]'
+            allowedChannels: '[]',
+            externalCampaignId: '',
+            externalAuthUrl: ''
         }])
         // Reset format and channel, keep URL and device for convenience
         setCurrentFormat('')

@@ -48,6 +48,8 @@ next-env.d.ts
 *.db
 *.db-journal
 .nexus-logs
+.gam-session/
+tmp_gam_dev*.log
 
 /Comprovantes
 
