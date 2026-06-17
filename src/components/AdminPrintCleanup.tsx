@@ -22,6 +22,9 @@ type CleanupResult = {
     deletedStorageFiles: number
     failedStorageFiles: number
     deletedLocalFiles: number
+    processedCaptures?: number
+    remainingCaptures?: number
+    hasMore?: boolean
     message?: string
 }
 
@@ -42,6 +45,7 @@ export function AdminPrintCleanup() {
     const [errorMessage, setErrorMessage] = useState('')
     const [isPreviewing, setIsPreviewing] = useState(false)
     const [isDeleting, setIsDeleting] = useState(false)
+    const [cleanupTotal, setCleanupTotal] = useState(0)
 
     const validationMessage = useMemo(() => {
         if (!startDate || !endDate) return 'Selecione as duas datas'
@@ -54,6 +58,7 @@ export function AdminPrintCleanup() {
         setResult(null)
         setConfirmation('')
         setErrorMessage('')
+        setCleanupTotal(0)
     }
 
     const handlePreview = async () => {
@@ -89,25 +94,61 @@ export function AdminPrintCleanup() {
 
         setIsDeleting(true)
         setErrorMessage('')
-        setResult(null)
+        setCleanupTotal(preview.captureCount)
+
+        const aggregate: CleanupResult = {
+            deletedCaptures: 0,
+            deletedStorageFiles: 0,
+            failedStorageFiles: 0,
+            deletedLocalFiles: 0,
+            processedCaptures: 0,
+            remainingCaptures: preview.captureCount,
+            hasMore: true
+        }
+        setResult(aggregate)
 
         try {
-            const response = await fetch('/api/admin/prints/cleanup', {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    startDate,
-                    endDate,
-                    confirmation
-                })
-            })
-            const data = await response.json() as CleanupResult | { error?: string }
+            let hasMore = true
 
-            if (!response.ok) {
-                throw new Error('error' in data && data.error ? data.error : 'Erro ao apagar prints')
+            while (hasMore) {
+                const response = await fetch('/api/admin/prints/cleanup', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        startDate,
+                        endDate,
+                        confirmation
+                    })
+                })
+                const data = await response.json() as CleanupResult | { error?: string }
+
+                if (!response.ok) {
+                    throw new Error('error' in data && data.error ? data.error : 'Erro ao apagar prints')
+                }
+
+                const batch = data as CleanupResult
+                aggregate.deletedCaptures += batch.deletedCaptures
+                aggregate.deletedStorageFiles += batch.deletedStorageFiles
+                aggregate.failedStorageFiles += batch.failedStorageFiles
+                aggregate.deletedLocalFiles += batch.deletedLocalFiles
+                aggregate.processedCaptures = (aggregate.processedCaptures ?? 0) + (batch.processedCaptures ?? batch.deletedCaptures)
+                aggregate.remainingCaptures = batch.remainingCaptures ?? 0
+                aggregate.hasMore = Boolean(batch.hasMore)
+
+                setResult({ ...aggregate })
+                setPreview((current) => current
+                    ? {
+                        ...current,
+                        captureCount: batch.remainingCaptures ?? 0,
+                        storageFileCount: Math.max(0, current.storageFileCount - batch.deletedStorageFiles),
+                        localFileCount: Math.max(0, current.localFileCount - batch.deletedLocalFiles)
+                    }
+                    : current
+                )
+
+                hasMore = Boolean(batch.hasMore)
             }
 
-            setResult(data as CleanupResult)
             setPreview(null)
             setConfirmation('')
         } catch (error) {
@@ -118,6 +159,9 @@ export function AdminPrintCleanup() {
     }
 
     const canDelete = Boolean(preview && preview.captureCount > 0 && confirmation === 'APAGAR' && !isDeleting)
+    const cleanupProgress = cleanupTotal > 0 && result?.remainingCaptures !== undefined
+        ? Math.round(((cleanupTotal - result.remainingCaptures) / cleanupTotal) * 100)
+        : 0
 
     return (
         <section className="rounded-[12px] border border-white/8 bg-white/[0.04] p-5 md:p-6 shadow-[rgba(0,0,0,0.30)_0px_8px_24px_0px] backdrop-blur-[16px]">
@@ -258,6 +302,21 @@ export function AdminPrintCleanup() {
                                         Apagar prints
                                     </button>
                                 </div>
+
+                                {isDeleting && (
+                                    <div className="mt-4">
+                                        <div className="flex items-center justify-between text-[12px] font-medium text-white/40">
+                                            <span>{result?.deletedCaptures ?? 0} removidos</span>
+                                            <span>{result?.remainingCaptures ?? preview.captureCount} restantes</span>
+                                        </div>
+                                        <div className="mt-2 h-1.5 overflow-hidden rounded-[4px] bg-white/[0.06]">
+                                            <div
+                                                className="h-full rounded-[4px] bg-[#ef4444] transition-all duration-300"
+                                                style={{ width: `${cleanupProgress}%` }}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -266,7 +325,9 @@ export function AdminPrintCleanup() {
 
             {result && (
                 <div className="mt-5 rounded-[8px] border border-[#22c55e]/20 bg-[rgba(34,197,94,0.10)] px-4 py-3 text-[13px] font-medium text-[#22c55e]">
-                    {result.message || `${result.deletedCaptures} prints removidos. ${result.deletedStorageFiles} arquivos apagados do Supabase${result.failedStorageFiles ? `, ${result.failedStorageFiles} falharam` : ''}.`}
+                    {isDeleting
+                        ? `${result.deletedCaptures} prints removidos ate agora. ${result.remainingCaptures ?? 0} restantes.`
+                        : result.message || `${result.deletedCaptures} prints removidos. ${result.deletedStorageFiles} arquivos apagados do Supabase${result.failedStorageFiles ? `, ${result.failedStorageFiles} falharam` : ''}.`}
                 </div>
             )}
         </section>

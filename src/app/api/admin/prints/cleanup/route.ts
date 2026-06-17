@@ -11,6 +11,7 @@ export const runtime = 'nodejs'
 const BRT_OFFSET_MS = 3 * 60 * 60 * 1000
 const DATE_PARAM_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 const STORAGE_BATCH_SIZE = 1000
+const DELETE_BATCH_SIZE = 150
 
 type CleanupBody = {
     startDate?: string
@@ -83,12 +84,16 @@ function extractStoragePath(screenshotPath: string) {
     }
 }
 
-async function getCapturesForRange(start: Date, end: Date) {
+function getRangeWhere(start: Date, end: Date) {
+    return {
+        createdAt: { gte: start, lte: end },
+        screenshotPath: { not: '' }
+    }
+}
+
+async function getCapturesForRange(start: Date, end: Date, take?: number) {
     return prisma.capture.findMany({
-        where: {
-            createdAt: { gte: start, lte: end },
-            screenshotPath: { not: '' }
-        },
+        where: getRangeWhere(start, end),
         select: {
             id: true,
             screenshotPath: true,
@@ -99,7 +104,8 @@ async function getCapturesForRange(start: Date, end: Date) {
                 }
             }
         },
-        orderBy: { createdAt: 'asc' }
+        orderBy: { createdAt: 'asc' },
+        take
     })
 }
 
@@ -161,7 +167,7 @@ export async function DELETE(request: NextRequest) {
         }
 
         const { startValue, endValue, start, end } = getRangeBounds(body.startDate, body.endDate)
-        const captures = await getCapturesForRange(start, end)
+        const captures = await getCapturesForRange(start, end, DELETE_BATCH_SIZE)
 
         if (captures.length === 0) {
             return NextResponse.json({
@@ -170,6 +176,9 @@ export async function DELETE(request: NextRequest) {
                 deletedStorageFiles: 0,
                 failedStorageFiles: 0,
                 deletedLocalFiles: 0,
+                processedCaptures: 0,
+                remainingCaptures: 0,
+                hasMore: false,
                 message: 'Nenhum print encontrado nesse periodo.'
             })
         }
@@ -225,15 +234,28 @@ export async function DELETE(request: NextRequest) {
             return !storagePath || deletedStoragePaths.has(storagePath)
         })
 
+        if (capturesToDelete.length === 0) {
+            return NextResponse.json(
+                { error: 'Falha ao apagar arquivos do Supabase. Nenhum registro foi removido.' },
+                { status: 502 }
+            )
+        }
+
         await prisma.capture.deleteMany({
             where: {
                 id: { in: capturesToDelete.map((capture) => capture.id) }
             }
         })
 
-        revalidatePath('/books')
-        revalidatePath('/admin')
-        revalidatePath('/')
+        const remainingCaptures = await prisma.capture.count({
+            where: getRangeWhere(start, end)
+        })
+
+        if (remainingCaptures === 0) {
+            revalidatePath('/books')
+            revalidatePath('/admin')
+            revalidatePath('/')
+        }
 
         return NextResponse.json({
             success: true,
@@ -242,7 +264,10 @@ export async function DELETE(request: NextRequest) {
             deletedCaptures: capturesToDelete.length,
             deletedStorageFiles,
             failedStorageFiles,
-            deletedLocalFiles
+            deletedLocalFiles,
+            processedCaptures: captures.length,
+            remainingCaptures,
+            hasMore: remainingCaptures > 0
         })
     } catch (error) {
         console.error('[Admin Cleanup] Delete error:', error)
