@@ -1,4 +1,5 @@
 import prisma from '@/lib/prisma'
+import type { Prisma } from '@prisma/client'
 import { Library, Download, Calendar, FolderOpen } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -6,8 +7,44 @@ import Link from 'next/link'
 import { BackToTopButton } from '@/components/BackToTopButton'
 import { PIFolderCard } from '@/components/PIFolderCard'
 import { ActiveCampaigns } from '@/components/ActiveCampaigns'
+import { PrintRangeDownload } from '@/components/PrintRangeDownload'
 
 export const revalidate = 30
+
+type BookCapture = Prisma.CaptureGetPayload<{
+    select: {
+        id: true
+        createdAt: true
+        screenshotPath: true
+        campaign: {
+            select: {
+                pi: true
+                client: true
+                campaignName: true
+            }
+        }
+    }
+}>
+
+type PiCaptureGroup = {
+    pi: string
+    client: string
+    campaignName: string
+    captures: BookCapture[]
+}
+
+type TimelineDayDraft = {
+    date: Date
+    dateKey: string
+    label: string
+    weekDay: string
+    fullDate: string
+    piGroups: Record<string, PiCaptureGroup>
+}
+
+type TimelineDay = TimelineDayDraft & {
+    sortedPiGroups: PiCaptureGroup[]
+}
 
 export default async function BooksPage() {
     // Limitar a 30 dias para evitar scan completo da tabela
@@ -36,7 +73,7 @@ export default async function BooksPage() {
     })
 
     // Group by day + PI (BRT)
-    const groupedCaptures = captures.reduce((acc: any, capture: any) => {
+    const groupedCaptures = captures.reduce<Record<string, TimelineDayDraft>>((acc, capture) => {
         const brtTime = new Date(capture.createdAt.getTime() - (3 * 60 * 60 * 1000))
         const dateKey = brtTime.toISOString().split('T')[0]
 
@@ -66,15 +103,15 @@ export default async function BooksPage() {
     }, {})
 
     const timeline = Object.values(groupedCaptures)
-        .sort((a: any, b: any) => b.date.getTime() - a.date.getTime()) as any[]
+        .sort((a, b) => b.date.getTime() - a.date.getTime())
+        .map((day): TimelineDay => ({
+            ...day,
+            sortedPiGroups: Object.values(day.piGroups).sort((a, b) => a.pi.localeCompare(b.pi))
+        }))
 
-    timeline.forEach((day: any) => {
-        day.sortedPiGroups = Object.values(day.piGroups).sort(
-            (a: any, b: any) => a.pi.localeCompare(b.pi)
-        )
-    })
-
-    const totalFolders = timeline.reduce((sum: number, g: any) => sum + g.sortedPiGroups.length, 0)
+    const totalFolders = timeline.reduce((sum, g) => sum + g.sortedPiGroups.length, 0)
+    const latestDateKey = timeline[0]?.dateKey
+    const oldestDateKey = timeline[timeline.length - 1]?.dateKey
 
     return (
         <div className="pb-24 animate-fade-in">
@@ -113,6 +150,12 @@ export default async function BooksPage() {
             {/* Divider */}
             <div className="h-px bg-gradient-to-r from-white/10 via-white/5 to-transparent mb-10" />
 
+            <PrintRangeDownload
+                minDate={oldestDateKey}
+                maxDate={latestDateKey}
+                totalPrints={captures.length}
+            />
+
             {/* ── ACTIVE CAMPAIGNS (QUICK ACCESS) ──────────────── */}
             <ActiveCampaigns />
 
@@ -124,7 +167,7 @@ export default async function BooksPage() {
                             Ir para
                         </span>
                         <div className="flex items-center gap-0.5 pl-2">
-                            {timeline.slice(0, 10).map((group: any) => (
+                            {timeline.slice(0, 10).map((group) => (
                                 <a
                                     key={group.fullDate}
                                     href={`#day-${group.dateKey}`}
@@ -155,7 +198,7 @@ export default async function BooksPage() {
                 </div>
             ) : (
                 <div className="space-y-16">
-                    {timeline.map((group: any) => (
+                    {timeline.map((group) => (
                         <section
                             key={group.dateKey}
                             id={`day-${group.dateKey}`}
@@ -193,7 +236,7 @@ export default async function BooksPage() {
 
                                 {/* Download ZIP */}
                                 <a
-                                    href={`/api/books/download?date=${format(group.date, 'yyyy-MM-dd')}`}
+                                    href={`/api/books/download?date=${group.dateKey}`}
                                     className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-xl bg-white/[0.03] border border-white/8 hover:border-white/18 hover:bg-white/[0.06] text-white/50 hover:text-white font-bold text-[10px] uppercase tracking-widest transition-all group"
                                 >
                                     <Download size={14} className="group-hover:scale-110 transition-transform" />
@@ -203,7 +246,7 @@ export default async function BooksPage() {
 
                             {/* ─ Folder grid ─ */}
                             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                                {group.sortedPiGroups.map((piGroup: any) => (
+                                {group.sortedPiGroups.map((piGroup) => (
                                     <PIFolderCard
                                         key={`${group.dateKey}-${piGroup.pi}`}
                                         pi={piGroup.pi}
