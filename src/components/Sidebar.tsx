@@ -1,6 +1,6 @@
 'use client'
 
-import { LayoutDashboard, Activity, TrendingUp, PlusCircle, Library, Archive, Settings, Sparkles, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database, MessageCircle, Mail, Menu, X } from 'lucide-react'
+import { LayoutDashboard, Activity, PlusCircle, Library, Archive, Settings, Sparkles, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database, MessageCircle, Menu, X } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
@@ -63,10 +63,6 @@ export function Sidebar() {
             .catch(() => setUser(null))
     }, [])
 
-    // Close sidebar on navigation (mobile)
-    useEffect(() => {
-        setIsOpen(false)
-    }, [pathname])
 
     const handleLogout = async () => {
         try {
@@ -81,18 +77,15 @@ export function Sidebar() {
     const baseMenuItems = [
         { icon: Sparkles, label: 'Nexus Zero', href: '/' },
         { icon: LayoutDashboard, label: 'Resumo', href: '/dashboard' },
-        { icon: TrendingUp, label: 'Dashboard AdOps', href: '/adops' },
         { icon: Activity, label: 'Monitoramento', href: '/monitoring' },
         { icon: PlusCircle, label: 'Novo Setup', href: '/campaigns' },
         { icon: Library, label: 'Books', href: '/books' },
         { icon: Archive, label: 'Arquivado', href: '/archive' },
-        { icon: Mail, label: 'Disparo de E-mails', href: '/email-dispatch' },
     ]
 
     const menuItems = user?.role === 'admin'
         ? [
             ...baseMenuItems,
-            { icon: Sparkles, label: 'Montagem de Prints', href: '/admin/assembly' },
             { icon: ShieldCheck, label: 'Admin', href: '/admin' }
         ]
         : baseMenuItems
@@ -176,6 +169,7 @@ export function Sidebar() {
                             <Link
                                 key={item.href}
                                 href={item.href}
+                                onClick={() => setIsOpen(false)}
                                 className="flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all duration-300 group relative overflow-hidden"
                                 style={{
                                     background: isActive ? 'rgba(255,255,255,0.07)' : 'transparent',
@@ -221,6 +215,7 @@ export function Sidebar() {
                 >
                     <Link
                         href="/settings"
+                        onClick={() => setIsOpen(false)}
                         className="flex items-center gap-3 px-4 py-3 w-full rounded-xl transition-all group"
                         style={{
                             color: pathname === '/settings' ? '#ffffff' : 'var(--text-muted)',
