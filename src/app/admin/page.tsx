@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { getSession } from '@/lib/auth'
 import { AdminView } from '@/components/AdminView'
 import { MetricsDashboard } from '@/components/MetricsDashboard'
+import { AdminPrintCleanup } from '@/components/AdminPrintCleanup'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,6 +25,10 @@ export default async function AdminPage() {
             </header>
 
             <MetricsDashboard />
+
+            <div className="h-px w-full bg-white/5" />
+
+            <AdminPrintCleanup />
 
             <div className="h-px w-full bg-white/5" />
 
