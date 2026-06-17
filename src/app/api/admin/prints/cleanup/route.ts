@@ -10,7 +10,7 @@ export const runtime = 'nodejs'
 
 const BRT_OFFSET_MS = 3 * 60 * 60 * 1000
 const DATE_PARAM_PATTERN = /^\d{4}-\d{2}-\d{2}$/
-const STORAGE_BATCH_SIZE = 1000
+const STORAGE_BATCH_SIZE = 50
 const DELETE_BATCH_SIZE = 150
 
 type CleanupBody = {
@@ -109,6 +109,49 @@ async function getCapturesForRange(start: Date, end: Date, take?: number) {
     })
 }
 
+async function removeStoragePaths(storagePaths: string[]) {
+    if (storagePaths.length === 0) {
+        return {
+            deletedStorageFiles: 0,
+            failedStorageFiles: 0,
+            deletedStoragePaths: new Set<string>()
+        }
+    }
+
+    const supabase = getSupabase()
+    const deletedStoragePaths = new Set<string>()
+    let failedStorageFiles = 0
+
+    for (let index = 0; index < storagePaths.length; index += STORAGE_BATCH_SIZE) {
+        const batch = storagePaths.slice(index, index + STORAGE_BATCH_SIZE)
+        const { error } = await supabase.storage.from('screenshots').remove(batch)
+
+        if (!error) {
+            batch.forEach((storagePath) => deletedStoragePaths.add(storagePath))
+            continue
+        }
+
+        console.error('[Admin Cleanup] Storage batch delete error:', error)
+
+        for (const storagePath of batch) {
+            const { error: singleError } = await supabase.storage.from('screenshots').remove([storagePath])
+
+            if (singleError) {
+                console.error('[Admin Cleanup] Storage single delete error:', storagePath, singleError)
+                failedStorageFiles += 1
+            } else {
+                deletedStoragePaths.add(storagePath)
+            }
+        }
+    }
+
+    return {
+        deletedStorageFiles: deletedStoragePaths.size,
+        failedStorageFiles,
+        deletedStoragePaths
+    }
+}
+
 export async function GET(request: NextRequest) {
     try {
         await requireAdmin()
@@ -195,26 +238,11 @@ export async function DELETE(request: NextRequest) {
                 .map((capture) => capture.screenshotPath)
         ))
 
-        let deletedStorageFiles = 0
-        let failedStorageFiles = 0
-        const deletedStoragePaths = new Set<string>()
-
-        if (storagePaths.length > 0) {
-            const supabase = getSupabase()
-
-            for (let index = 0; index < storagePaths.length; index += STORAGE_BATCH_SIZE) {
-                const batch = storagePaths.slice(index, index + STORAGE_BATCH_SIZE)
-                const { error } = await supabase.storage.from('screenshots').remove(batch)
-
-                if (error) {
-                    console.error('[Admin Cleanup] Storage delete error:', error)
-                    failedStorageFiles += batch.length
-                } else {
-                    deletedStorageFiles += batch.length
-                    batch.forEach((storagePath) => deletedStoragePaths.add(storagePath))
-                }
-            }
-        }
+        const {
+            deletedStorageFiles,
+            failedStorageFiles,
+            deletedStoragePaths
+        } = await removeStoragePaths(storagePaths)
 
         let deletedLocalFiles = 0
 
@@ -236,8 +264,8 @@ export async function DELETE(request: NextRequest) {
 
         if (capturesToDelete.length === 0) {
             return NextResponse.json(
-                { error: 'Falha ao apagar arquivos do Supabase. Nenhum registro foi removido.' },
-                { status: 502 }
+                { error: 'O Supabase recusou a exclusao dos arquivos desse lote. Nenhum registro foi removido.' },
+                { status: 409 }
             )
         }
 
