@@ -76,6 +76,13 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: 'Nenhum parametro (date, pi ou intervalo) fornecido' }, { status: 400 })
     }
 
+    if (hasDateRange) {
+        return NextResponse.json(
+            { error: 'Downloads por intervalo sao gerados pela pagina Books para evitar timeout na Vercel' },
+            { status: 409 }
+        )
+    }
+
     try {
         let whereClause: Prisma.CaptureWhereInput = {
             status: 'SUCCESS',
@@ -83,31 +90,10 @@ export async function GET(req: NextRequest) {
             campaign: { isArchived: false }
         }
         let zipFilename = 'prints.zip'
-        let isRangeDownload = false
 
         if (pi) {
             whereClause = { ...whereClause, campaign: { isArchived: false, pi } }
             zipFilename = `campanha-PI-${pi}.zip`
-        } else if (hasDateRange) {
-            if (!startDateStr || !endDateStr) {
-                return NextResponse.json({ error: 'Informe startDate e endDate para baixar por intervalo' }, { status: 400 })
-            }
-
-            const { value: startValue } = parseDateParam(startDateStr, 'startDate')
-            const { value: endValue } = parseDateParam(endDateStr, 'endDate')
-            const startBounds = getBrtDayBounds(startValue)
-            const endBounds = getBrtDayBounds(endValue)
-
-            if (startBounds.start.getTime() > endBounds.end.getTime()) {
-                return NextResponse.json({ error: 'A data inicial nao pode ser maior que a data final' }, { status: 400 })
-            }
-
-            whereClause = {
-                ...whereClause,
-                createdAt: { gte: startBounds.start, lte: endBounds.end }
-            }
-            zipFilename = `prints-${startValue}_a_${endValue}.zip`
-            isRangeDownload = true
         } else if (dateStr) {
             const { value } = parseDateParam(dateStr, 'date')
             const { start, end } = getBrtDayBounds(value)
@@ -171,10 +157,6 @@ export async function GET(req: NextRequest) {
                     if (pi) {
                         const dateFolder = getBrtDateKey(capture.createdAt);
                         filePath = `${dateFolder}/${fileName}`;
-                    } else if (isRangeDownload) {
-                        const dateFolder = getBrtDateKey(capture.createdAt);
-                        const piFolder = `PI ${campaign.pi} - ${safeClient}${safeCampaign ? ` - ${safeCampaign}` : ''}`;
-                        filePath = `${dateFolder}/${piFolder}/${fileName}`;
                     } else {
                         const piFolder = `PI ${campaign.pi} - ${safeClient}${safeCampaign ? ` - ${safeCampaign}` : ''}`;
                         filePath = `${piFolder}/${fileName}`;
