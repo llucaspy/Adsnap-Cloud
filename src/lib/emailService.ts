@@ -194,7 +194,7 @@ function buildEmailHtml(params: {
         <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; color: #171717;">
             <div style="background: #0f0f0f; color: #ffffff; padding: 28px; border-radius: 8px 8px 0 0;">
                 <p style="margin: 0 0 8px; font-size: 12px; color: #a3a3a3;">ADSNAP CLOUD</p>
-                <h1 style="margin: 0; font-size: 22px;">Relatorio final de prints</h1>
+                <h1 style="margin: 0; font-size: 22px;">Prints finais</h1>
                 <p style="margin: 8px 0 0; color: #d4d4d4;">Campanha de Governo Federal</p>
             </div>
             <div style="border: 1px solid #e5e5e5; border-top: 0; padding: 28px; border-radius: 0 0 8px 8px;">
@@ -204,7 +204,7 @@ function buildEmailHtml(params: {
                     <tr><td style="padding: 6px 0; font-weight: 700;">Agencia</td><td>${escapeHtml(params.agency)}</td></tr>
                     <tr><td style="padding: 6px 0; font-weight: 700;">Campanha</td><td>${escapeHtml(params.campaignName || '-')}</td></tr>
                     <tr><td style="padding: 6px 0; font-weight: 700;">PI</td><td>${escapeHtml(params.pi)}</td></tr>
-                    <tr><td style="padding: 6px 0; font-weight: 700;">Veiculacao</td><td>${formatBrtDate(params.flightStart)} a ${formatBrtDate(params.flightEnd)}</td></tr>
+
                     <tr><td style="padding: 6px 0; font-weight: 700;">Formatos</td><td>${params.formats.map(escapeHtml).join(', ')}</td></tr>
                     <tr><td style="padding: 6px 0; font-weight: 700;">Anexo</td><td>${partLabel}, ${params.printCount} print(s)</td></tr>
                 </table>
