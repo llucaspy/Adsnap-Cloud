@@ -1270,7 +1270,7 @@ export async function getEmailDispatches() {
 
         if (pi) {
             campaigns = await prisma.campaign.findMany({
-                where: { pi, isArchived: false },
+                where: { pi, segmentation: 'GOV_FEDERAL', isArchived: false },
                 select: {
                     id: true, client: true, agency: true, campaignName: true,
                     format: true, pi: true, device: true,
@@ -1327,6 +1327,7 @@ export async function getCampaignsForDispatch() {
     const campaigns = await prisma.campaign.findMany({
         where: {
             isArchived: false,
+            segmentation: 'GOV_FEDERAL',
             flightEnd: { not: null },
         },
         orderBy: { createdAt: 'desc' },
@@ -1400,6 +1401,14 @@ export async function createEmailDispatch(data: {
         if (!emailRegex.test(email.trim())) {
             throw new Error(`E-mail inválido: ${email}`)
         }
+    }
+
+    const eligibleCampaign = await prisma.campaign.findFirst({
+        where: { pi: data.pi, segmentation: 'GOV_FEDERAL', isArchived: false },
+        select: { id: true },
+    })
+    if (!eligibleCampaign) {
+        throw new Error('Somente campanhas de Governo Federal podem receber relatorios automaticos')
     }
 
     const dispatch = await (prisma as any).emailDispatch.create({

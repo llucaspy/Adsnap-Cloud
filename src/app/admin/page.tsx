@@ -3,6 +3,8 @@ import { getSession } from '@/lib/auth'
 import { AdminView } from '@/components/AdminView'
 import { MetricsDashboard } from '@/components/MetricsDashboard'
 import { AdminPrintCleanup } from '@/components/AdminPrintCleanup'
+import { GovernmentReportAdmin } from '@/components/GovernmentReportAdmin'
+import { getGovernmentReportDashboard } from './government-report-actions'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,6 +15,8 @@ export default async function AdminPage() {
     if (!session || session.role !== 'admin') {
         redirect('/login')
     }
+
+    const governmentReportData = await getGovernmentReportDashboard()
 
     return (
         <div className="space-y-12 animate-fade-in pb-20">
@@ -29,6 +33,10 @@ export default async function AdminPage() {
             <div className="h-px w-full bg-white/5" />
 
             <AdminPrintCleanup />
+
+            <div className="h-px w-full bg-white/5" />
+
+            <GovernmentReportAdmin initialData={governmentReportData} />
 
             <div className="h-px w-full bg-white/5" />
 

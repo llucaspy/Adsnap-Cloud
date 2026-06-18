@@ -83,6 +83,10 @@ model Settings {
   telegramChatId        String?
   telegramAlertsEnabled Boolean   @default(true)
   telegramLastAlertAt   DateTime?
+  governmentReportRecipients String @default("[\"opec.gov@metropoles.com\",\"karoliny.sousa@metropoles.com\"]")
+  governmentReportAutoSend   Boolean @default(false)
+  governmentReportTime       String  @default("09:00")
+  governmentReportAutoSince  DateTime?
 }
 
 model User {
@@ -116,7 +120,18 @@ model EmailDispatch {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   pi           String    @default("")
+  flightEnd    DateTime?
+  triggerMode  String    @default("MANUAL")
+  errorMessage String?
+  emailMessageId String?
+  attachmentCount Int    @default(0)
+  attachmentBytes Int    @default(0)
+  attempts     Int       @default(0)
+  sendVersion  Int       @default(1)
   campaign     Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([pi, flightEnd])
+  @@index([status, isActive, flightEnd])
 }
 
 model NexusMessage {

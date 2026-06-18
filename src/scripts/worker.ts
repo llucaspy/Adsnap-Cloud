@@ -5,6 +5,7 @@ import { nexusLogStore } from '../lib/nexusLogStore'
 import { getGmailClient, fetchRecentEmails } from '../lib/gmail'
 import { classifyEmail } from '../lib/gemini'
 import { processPendingGamJobs } from '../lib/gamJobProcessor'
+import { processGovernmentReportQueue } from '../lib/governmentReportAutomation'
 
 const processedEmailIds = new Set<string>()
 
@@ -218,7 +219,18 @@ async function runWorkerCycle() {
         console.error('[Nexus Worker] Erro no ciclo de captura:', err)
     }
 
-    // 4. GAM Ingestion Jobs (supervised draft)
+    // 4. Government campaign final reports
+    try {
+        await processGovernmentReportQueue(now)
+    } catch (err) {
+        console.error('[Nexus Worker] Erro nos relatorios de Governo Federal:', err)
+        await nexusLogStore.addLog(
+            `Relatorio Governo Federal: falha no ciclo do worker: ${err instanceof Error ? err.message : String(err)}`,
+            'ERROR'
+        )
+    }
+
+    // 5. GAM Ingestion Jobs (supervised draft)
     try {
         await processPendingGamJobs()
 
@@ -288,7 +300,7 @@ async function runWorkerCycle() {
         console.error('[Nexus Worker] Erro nos Jobs GAM:', err)
     }
 
-    // 4. Telegram Performance Alerts (Simplified)
+    // 6. Telegram Performance Alerts (Simplified)
     try {
         const settings = await prisma.settings.findUnique({ where: { id: 1 } })
         if (settings?.telegramAlertsEnabled && brtNow.getHours() >= 9) {
@@ -300,7 +312,7 @@ async function runWorkerCycle() {
                 const { getAggregatedAdOpsMetrics } = await import('../app/adops/actions')
                 const stats = await getAggregatedAdOpsMetrics()
                 // ... (existing alert logic simplified for brevity but kept functional)
-                const critical = stats.campaigns.filter((c: any) => c.status === 'critical')
+                const critical = stats.campaigns.filter(c => c.status === 'critical')
                 if (critical.length > 0) {
                     await sendTelegramAlert('Performance Alert', `🚨 Nexus: Existem ${critical.length} campanhas em estado CRÍTICO.`)
                 }
@@ -311,7 +323,7 @@ async function runWorkerCycle() {
         console.error('[Nexus Worker] Erro nos alertas Telegram:', err)
     }
 
-    // 5. Daily Impression Threshold Alerts (NEW)
+    // 7. Daily Impression Threshold Alerts
     try {
         const thresholdCampaigns = await prisma.campaign.findMany({
             where: {
