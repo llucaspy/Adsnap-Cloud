@@ -78,7 +78,7 @@ function StatusBadge({ status }: { status: string }) {
 
 function formatDate(dateStr: string | null) {
     if (!dateStr) return '—'
-    return new Date(dateStr).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    return new Date(dateStr).toLocaleDateString('pt-BR', { timeZone: 'UTC', day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
 export function EmailDispatchView({ initialDispatches, campaigns }: Props) {

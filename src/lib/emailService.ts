@@ -83,8 +83,10 @@ function escapeHtml(value: string) {
 
 function formatBrtDate(date: Date | null) {
     if (!date) return 'N/A'
+    // Usamos UTC para as datas de veiculação (que não têm horas)
+    // para evitar que atrasem 1 dia ao serem formatadas no fuso local.
     return new Intl.DateTimeFormat('pt-BR', {
-        timeZone: 'America/Sao_Paulo',
+        timeZone: 'UTC',
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
