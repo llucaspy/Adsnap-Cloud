@@ -141,3 +141,16 @@ O operador nao deve precisar abrir GitHub Actions ou logs tecnicos para saber se
 - `JOB_GAM_ERROR`: erro traduzido e opcao de nova tentativa.
 
 Novos pedidos para uma Order que ja esteja `PENDING` ou `RUNNING` reutilizam o job ativo em vez de criar duplicatas.
+
+## Ciclo de vida, depuracao e cancelamento
+
+O rascunho e um artefato temporario e nao deve virar historico permanente:
+
+- ao carregar um rascunho e concluir o cadastro, o job `JOB_GAM_REVIEW` correspondente e removido;
+- rascunhos rejeitados, jobs com erro e jobs cancelados podem ser excluidos manualmente;
+- jobs ativos precisam ser encerrados antes da exclusao;
+- `JOB_GAM_CANCELLED` impede que um crawler atrasado publique resultado depois do cancelamento.
+
+Cada job guarda ate 100 eventos estruturados em `details.executionLogs`, com horario, mensagem e tom. O Novo Setup exibe esses eventos em um depurador lateral que acompanha a fila, autenticacao, descoberta de line items, leitura de criativos e geracao dos previews.
+
+O workflow dedicado recebe `job_id`, usa esse ID no `run-name` e no grupo de concorrencia. Assim, o botao **Encerrar worker** cancela primeiro o job no banco e depois encontra e cancela a execucao exata no GitHub Actions. O worker tambem verifica o estado do job em cada atualizacao de progresso, oferecendo cancelamento cooperativo caso a chamada remota de cancelamento nao encontre o runner.

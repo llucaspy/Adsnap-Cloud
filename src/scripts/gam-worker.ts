@@ -4,7 +4,7 @@ import { processPendingGamJobs } from '../lib/gamJobProcessor'
 
 async function main() {
     console.log('[Nexus GAM] Worker dedicado iniciado.')
-    const count = await processPendingGamJobs()
+    const count = await processPendingGamJobs(5, process.env.GAM_JOB_ID || undefined)
     console.log(`[Nexus GAM] Worker finalizado com ${count} job(s) encontrado(s).`)
 }
 

@@ -12,7 +12,7 @@ export default async function CampaignsPage() {
     const existingPis = existingCampaigns.map(c => c.pi)
 
     return (
-        <div className="max-w-3xl mx-auto space-y-12 animate-slide-up py-8">
+        <div className="max-w-6xl mx-auto space-y-12 animate-slide-up py-8">
             {/* Header */}
             <header className="text-center space-y-6 relative">
                 {/* Background glow */}

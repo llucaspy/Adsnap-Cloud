@@ -1,6 +1,13 @@
 'use client'
 
-import { createMultipleCampaigns, getGamImportDrafts, getSettings, requestGamImportDraft } from '@/app/actions'
+import {
+    cancelGamImportJob,
+    createMultipleCampaigns,
+    deleteGamImportDraft,
+    getGamImportDrafts,
+    getSettings,
+    requestGamImportDraft,
+} from '@/app/actions'
 import type { GamImportDraft } from '@/lib/gamImportPlanner'
 import { useTransition, useState, useEffect, useCallback } from 'react'
 import {
@@ -9,7 +16,7 @@ import {
     Building2, User2, Hash, Layers, Sparkles,
     CalendarRange, Shield, Landmark, Building, Users,
     ChevronDown, Trash2, X, Wand2, RefreshCw, FileCheck2,
-    Loader2, CircleCheck, CircleX, RotateCcw
+    Loader2, CircleCheck, CircleX, RotateCcw, Terminal, Square
 } from 'lucide-react'
 import { MultiTimePicker } from './MultiTimePicker'
 
@@ -31,6 +38,11 @@ interface GamImportJob {
     createdAt: string
     orderId: string
     orderUrl: string
+    executionLogs: Array<{
+        at: string
+        message: string
+        tone: 'info' | 'success' | 'error'
+    }>
     draft: GamImportDraft | null
 }
 
@@ -63,6 +75,8 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
     const [gamStatus, setGamStatus] = useState('')
     const [isGamRefreshing, setIsGamRefreshing] = useState(false)
     const [gamDrafts, setGamDrafts] = useState<GamImportJob[]>([])
+    const [selectedGamJobId, setSelectedGamJobId] = useState<string | null>(null)
+    const [loadedGamJobId, setLoadedGamJobId] = useState<string | null>(null)
     const [formData, setFormData] = useState({
         agency: '',
         client: '',
@@ -94,6 +108,12 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
         try {
             const drafts = await getGamImportDrafts()
             setGamDrafts(drafts)
+            setSelectedGamJobId(current => {
+                if (current && drafts.some(job => job.id === current)) return current
+                return drafts.find(job => job.level === 'JOB_GAM_RUNNING' || job.level === 'JOB_GAM_PENDING')?.id
+                    || drafts[0]?.id
+                    || null
+            })
             return drafts
         } finally {
             setIsGamRefreshing(false)
@@ -121,7 +141,11 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
     const next = () => setStep(s => Math.min(s + 1, 4))
     const back = () => setStep(s => Math.max(s - 1, 1))
 
-    function loadGamDraft(draft: GamImportDraft) {
+    function loadGamDraft(job: GamImportJob) {
+        if (!job.draft) return
+        const draft = job.draft
+        setSelectedGamJobId(job.id)
+        setLoadedGamJobId(job.id)
         setFormData({
             agency: draft.agency,
             client: draft.client,
@@ -152,6 +176,7 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
             try {
                 setGamStatus('Solicitando rascunho...')
                 const result = await requestGamImportDraft(url)
+                setSelectedGamJobId(result.jobId)
                 setGamStatus(result.existing
                     ? `A Order ${result.orderId} ja esta em processamento.`
                     : result.triggered
@@ -171,6 +196,30 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
     function handleRetryGamDraft(orderUrl: string) {
         setGamOrderUrl(orderUrl)
         requestGamDraft(orderUrl)
+    }
+
+    async function handleDeleteGamDraft(jobId: string) {
+        if (!window.confirm('Excluir este rascunho e o historico de execucao?')) return
+        try {
+            await deleteGamImportDraft(jobId)
+            if (selectedGamJobId === jobId) setSelectedGamJobId(null)
+            if (loadedGamJobId === jobId) setLoadedGamJobId(null)
+            setGamStatus('Rascunho excluido.')
+            await refreshGamDrafts()
+        } catch (error) {
+            setGamStatus((error as Error).message)
+        }
+    }
+
+    async function handleStopGamWorker(jobId: string) {
+        if (!window.confirm('Encerrar esta execucao do GAM agora?')) return
+        try {
+            await cancelGamImportJob(jobId)
+            setGamStatus('Worker encerrado. O rascunho pode ser excluido.')
+            await refreshGamDrafts()
+        } catch (error) {
+            setGamStatus((error as Error).message)
+        }
     }
 
     async function handleFinalSubmit() {
@@ -197,6 +246,11 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
                         externalAuthUrl: e.externalAuthUrl
                     })),
                 })
+                if (loadedGamJobId) {
+                    await deleteGamImportDraft(loadedGamJobId)
+                    setLoadedGamJobId(null)
+                    setSelectedGamJobId(null)
+                }
                 alert(`${result.count} campanha(s) ativada(s) com sucesso!`)
                 window.location.reload()
             } catch (error) {
@@ -233,6 +287,10 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
                 onRefresh={refreshGamDrafts}
                 onLoadDraft={loadGamDraft}
                 onRetry={handleRetryGamDraft}
+                onDelete={handleDeleteGamDraft}
+                onStop={handleStopGamWorker}
+                selectedJobId={selectedGamJobId}
+                onSelectJob={setSelectedGamJobId}
                 isPending={isGamPending}
                 isRefreshing={isGamRefreshing}
                 status={gamStatus}
@@ -309,19 +367,39 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
     )
 }
 
-function GamImportPanel({ orderUrl, onOrderUrlChange, onRequestDraft, onRefresh, onLoadDraft, onRetry, isPending, isRefreshing, status, drafts }: {
+function GamImportPanel({
+    orderUrl,
+    onOrderUrlChange,
+    onRequestDraft,
+    onRefresh,
+    onLoadDraft,
+    onRetry,
+    onDelete,
+    onStop,
+    selectedJobId,
+    onSelectJob,
+    isPending,
+    isRefreshing,
+    status,
+    drafts,
+}: {
     orderUrl: string
     onOrderUrlChange: (value: string) => void
     onRequestDraft: () => void
     onRefresh: () => Promise<GamImportJob[]>
-    onLoadDraft: (draft: GamImportDraft) => void
+    onLoadDraft: (job: GamImportJob) => void
     onRetry: (orderUrl: string) => void
+    onDelete: (jobId: string) => Promise<void>
+    onStop: (jobId: string) => Promise<void>
+    selectedJobId: string | null
+    onSelectJob: (jobId: string) => void
     isPending: boolean
     isRefreshing: boolean
     status: string
     drafts: GamImportJob[]
 }) {
     const visibleJobs = drafts.slice(0, 6)
+    const selectedJob = visibleJobs.find(job => job.id === selectedJobId) || visibleJobs[0] || null
 
     const friendlyError = (message: string) => {
         if (message.includes('GAM_SESSION_EXPIRADA')) return 'A sessao do GAM expirou e precisa de novo login supervisionado.'
@@ -342,6 +420,10 @@ function GamImportPanel({ orderUrl, onOrderUrlChange, onRequestDraft, onRefresh,
         if (job.level === 'JOB_GAM_REVIEW') return {
             label: 'Pronto', color: '#22c55e', background: 'rgba(34,197,94,0.10)', icon: CircleCheck,
             detail: `${job.draft?.mediaEntries.length || 0} formato(s) aguardando revisao${job.draft?.blockedItems.length ? `; ${job.draft.blockedItems.length} bloqueado(s)` : ''}.`,
+        }
+        if (job.level === 'JOB_GAM_CANCELLED') return {
+            label: 'Encerrado', color: '#f59e0b', background: 'rgba(245,158,11,0.10)', icon: Square,
+            detail: 'Execucao encerrada pelo usuario.',
         }
         return {
             label: 'Erro', color: '#ef4444', background: 'rgba(239,68,68,0.10)', icon: CircleX,
@@ -407,68 +489,180 @@ function GamImportPanel({ orderUrl, onOrderUrlChange, onRequestDraft, onRefresh,
             )}
 
             {visibleJobs.length > 0 && (
-                <div
-                    className="overflow-hidden"
-                    style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '12px' }}
-                    aria-live="polite"
-                >
-                    {visibleJobs.map((job, index) => {
-                        const presentation = jobPresentation(job)
-                        const StatusIcon = presentation.icon
-                        return (
-                            <div
-                                key={job.id}
-                                className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3"
-                                style={{ borderTop: index === 0 ? 'none' : '1px solid var(--border)' }}
-                            >
+                <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.72fr)] gap-4 items-stretch">
+                    <div
+                        className="overflow-hidden"
+                        style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '12px' }}
+                        aria-live="polite"
+                    >
+                        {visibleJobs.map((job, index) => {
+                            const presentation = jobPresentation(job)
+                            const StatusIcon = presentation.icon
+                            const isSelected = selectedJob?.id === job.id
+                            const canDelete = !['JOB_GAM_PENDING', 'JOB_GAM_RUNNING'].includes(job.level)
+                            return (
                                 <div
-                                    className="w-9 h-9 flex items-center justify-center"
-                                    style={{ color: presentation.color, background: presentation.background, borderRadius: '8px' }}
+                                    key={job.id}
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => onSelectJob(job.id)}
+                                    onKeyDown={event => {
+                                        if (event.key === 'Enter' || event.key === ' ') onSelectJob(job.id)
+                                    }}
+                                    className="grid grid-cols-[auto_minmax(0,1fr)] sm:grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 cursor-pointer transition-colors"
+                                    style={{
+                                        borderTop: index === 0 ? 'none' : '1px solid var(--border)',
+                                        background: isSelected ? 'rgba(124,58,237,0.12)' : 'transparent',
+                                    }}
                                 >
-                                    <StatusIcon size={17} className={job.level === 'JOB_GAM_RUNNING' ? 'animate-spin' : ''} />
-                                </div>
-                                <div className="min-w-0">
-                                    <div className="flex items-center gap-2 min-w-0">
-                                        <span className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
-                                            Order {job.orderId || 'GAM'}
-                                        </span>
-                                        <span
-                                            className="px-2 py-1 text-[10px] font-semibold shrink-0"
-                                            style={{ color: presentation.color, background: presentation.background, borderRadius: '6px' }}
-                                        >
-                                            {presentation.label}
-                                        </span>
+                                    <div
+                                        className="w-9 h-9 flex items-center justify-center"
+                                        style={{ color: presentation.color, background: presentation.background, borderRadius: '8px' }}
+                                    >
+                                        <StatusIcon size={17} className={job.level === 'JOB_GAM_RUNNING' ? 'animate-spin' : ''} />
                                     </div>
-                                    <p className="text-xs truncate mt-1" style={{ color: 'var(--text-muted)' }} title={presentation.detail}>
-                                        {presentation.detail} - {new Date(job.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                                    </p>
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-2 min-w-0">
+                                            <span className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
+                                                Order {job.orderId || 'GAM'}
+                                            </span>
+                                            <span
+                                                className="px-2 py-1 text-[10px] font-semibold shrink-0"
+                                                style={{ color: presentation.color, background: presentation.background, borderRadius: '6px' }}
+                                            >
+                                                {presentation.label}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs truncate mt-1" style={{ color: 'var(--text-muted)' }} title={presentation.detail}>
+                                            {presentation.detail} - {new Date(job.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                        </p>
+                                    </div>
+                                    <div className="col-span-2 sm:col-span-1 flex items-center justify-end gap-2 pr-10 sm:pr-0" onClick={event => event.stopPropagation()}>
+                                        {job.draft ? (
+                                            <button
+                                                onClick={() => onLoadDraft(job)}
+                                                className="px-3 py-2 flex items-center gap-2 text-xs font-semibold transition-colors"
+                                                style={{ color: '#ffffff', background: '#7c3aed', borderRadius: '8px' }}
+                                            >
+                                                Revisar <ChevronRight size={14} />
+                                            </button>
+                                        ) : job.level === 'JOB_GAM_ERROR' && job.orderUrl ? (
+                                            <button
+                                                onClick={() => onRetry(job.orderUrl)}
+                                                disabled={isPending}
+                                                className="w-9 h-9 flex items-center justify-center transition-colors disabled:opacity-40"
+                                                style={{ color: '#ef4444', border: '1px solid rgba(239,68,68,0.28)', borderRadius: '8px' }}
+                                                title="Tentar novamente"
+                                            >
+                                                <RotateCcw size={15} />
+                                            </button>
+                                        ) : null}
+                                        {canDelete && (
+                                            <button
+                                                onClick={() => onDelete(job.id)}
+                                                className="w-9 h-9 flex items-center justify-center transition-colors"
+                                                style={{ color: '#ef4444', border: '1px solid rgba(239,68,68,0.28)', borderRadius: '8px' }}
+                                                title="Excluir rascunho"
+                                            >
+                                                <Trash2 size={15} />
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
-                                {job.draft ? (
-                                    <button
-                                        onClick={() => onLoadDraft(job.draft!)}
-                                        className="px-3 py-2 flex items-center gap-2 text-xs font-semibold transition-colors"
-                                        style={{ color: '#ffffff', background: '#7c3aed', borderRadius: '8px' }}
-                                    >
-                                        Revisar <ChevronRight size={14} />
-                                    </button>
-                                ) : job.level === 'JOB_GAM_ERROR' && job.orderUrl ? (
-                                    <button
-                                        onClick={() => onRetry(job.orderUrl)}
-                                        disabled={isPending}
-                                        className="w-9 h-9 flex items-center justify-center transition-colors disabled:opacity-40"
-                                        style={{ color: '#ef4444', border: '1px solid rgba(239,68,68,0.28)', borderRadius: '8px' }}
-                                        title="Tentar novamente"
-                                    >
-                                        <RotateCcw size={15} />
-                                    </button>
-                                ) : null}
-                            </div>
-                        )
-                    })}
+                            )
+                        })}
+                    </div>
+
+                    <GamJobDebugger job={selectedJob} onStop={onStop} onDelete={onDelete} presentation={selectedJob ? debuggerPresentation(selectedJob) : null} />
                 </div>
             )}
         </div>
     )
+}
+
+function GamJobDebugger({ job, onStop, onDelete, presentation }: {
+    job: GamImportJob | null
+    onStop: (jobId: string) => Promise<void>
+    onDelete: (jobId: string) => Promise<void>
+    presentation: ReturnType<typeof debuggerPresentation> | null
+}) {
+    if (!job || !presentation) return null
+
+    const isActive = job.level === 'JOB_GAM_PENDING' || job.level === 'JOB_GAM_RUNNING'
+    const logs = job.executionLogs.length > 0
+        ? job.executionLogs
+        : [{ at: job.createdAt, message: job.message.replace(/^Nexus GAM:\s*/i, ''), tone: 'info' as const }]
+
+    return (
+        <aside
+            className="min-h-[280px] flex flex-col overflow-hidden"
+            style={{ background: '#141414', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px' }}
+            aria-live="polite"
+        >
+            <div className="px-4 py-3 pr-14 sm:pr-4 flex items-center justify-between gap-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 flex items-center justify-center shrink-0" style={{ color: '#7c3aed', background: 'rgba(124,58,237,0.12)', borderRadius: '8px' }}>
+                        <Terminal size={17} />
+                    </div>
+                    <div className="min-w-0">
+                        <p className="text-sm font-semibold" style={{ color: '#e5e5e5' }}>Depurador GAM</p>
+                        <p className="text-xs truncate" style={{ color: '#737373' }}>Order {job.orderId || 'GAM'}</p>
+                    </div>
+                </div>
+                <span className="px-2 py-1 text-[10px] font-semibold shrink-0" style={{ color: presentation.color, background: presentation.background, borderRadius: '6px' }}>
+                    {presentation.label}
+                </span>
+            </div>
+
+            <div className="flex-1 max-h-72 overflow-y-auto px-4 py-3 space-y-3" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
+                {logs.map((log, index) => {
+                    const color = log.tone === 'error' ? '#ef4444' : log.tone === 'success' ? '#22c55e' : '#7c3aed'
+                    const isCurrent = isActive && index === logs.length - 1
+                    return (
+                        <div key={`${log.at}-${index}`} className="grid grid-cols-[auto_minmax(0,1fr)] gap-3 items-start">
+                            <div className="w-5 h-5 flex items-center justify-center mt-0.5" style={{ color }}>
+                                {isCurrent ? <Loader2 size={13} className="animate-spin" /> : log.tone === 'error' ? <CircleX size={13} /> : <Check size={13} />}
+                            </div>
+                            <div className="min-w-0">
+                                <p className="text-xs leading-5 break-words" style={{ color: '#a3a3a3' }}>{log.message}</p>
+                                <time className="text-[10px]" style={{ color: '#525252' }}>
+                                    {new Date(log.at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                </time>
+                            </div>
+                        </div>
+                    )
+                })}
+            </div>
+
+            <div className="px-4 py-3 flex justify-end gap-2" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                {isActive ? (
+                    <button
+                        onClick={() => onStop(job.id)}
+                        className="px-3 py-2 flex items-center gap-2 text-xs font-semibold transition-colors"
+                        style={{ color: '#ef4444', border: '1px solid rgba(239,68,68,0.28)', borderRadius: '8px' }}
+                    >
+                        <Square size={13} fill="currentColor" /> Encerrar worker
+                    </button>
+                ) : (
+                    <button
+                        onClick={() => onDelete(job.id)}
+                        className="px-3 py-2 flex items-center gap-2 text-xs font-semibold transition-colors"
+                        style={{ color: '#ef4444', border: '1px solid rgba(239,68,68,0.28)', borderRadius: '8px' }}
+                    >
+                        <Trash2 size={14} /> Excluir rascunho
+                    </button>
+                )}
+            </div>
+        </aside>
+    )
+}
+
+function debuggerPresentation(job: GamImportJob) {
+    if (job.level === 'JOB_GAM_RUNNING') return { label: 'Processando', color: '#7c3aed', background: 'rgba(124,58,237,0.12)' }
+    if (job.level === 'JOB_GAM_PENDING') return { label: 'Na fila', color: '#f59e0b', background: 'rgba(245,158,11,0.10)' }
+    if (job.level === 'JOB_GAM_REVIEW') return { label: 'Pronto', color: '#22c55e', background: 'rgba(34,197,94,0.10)' }
+    if (job.level === 'JOB_GAM_CANCELLED') return { label: 'Encerrado', color: '#f59e0b', background: 'rgba(245,158,11,0.10)' }
+    return { label: 'Erro', color: '#ef4444', background: 'rgba(239,68,68,0.10)' }
 }
 
 function StepIdentification({ formData, updateFields, next, existingPis }: StepProps) {

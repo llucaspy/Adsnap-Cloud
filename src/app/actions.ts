@@ -205,8 +205,14 @@ export async function createMultipleCampaigns(payload: {
     return { success: true, count: results.length }
 }
 
-export async function createCampaignsFromGamDraftAction(draft: GamImportDraft) {
+export async function createCampaignsFromGamDraftAction(draft: GamImportDraft, jobId?: string) {
     const result = await writeCampaignsFromGamDraft(prisma, draft)
+
+    if (jobId) {
+        await prisma.nexusLog.deleteMany({
+            where: { id: jobId, level: 'JOB_GAM_REVIEW' },
+        })
+    }
 
     await nexusLogStore.addLog(
         `Nexus GAM: ${result.created} campanha(s) criada(s), ${result.skipped} duplicada(s), ${result.blocked} bloqueada(s).`,
@@ -248,7 +254,7 @@ export async function requestGamImportDraft(orderUrl: string) {
         const staleRunningJob = existingJob.level === 'JOB_GAM_RUNNING'
             && existingJob.createdAt.getTime() < Date.now() - 30 * 60 * 1000
         const triggered = existingJob.level === 'JOB_GAM_PENDING' || staleRunningJob
-            ? await triggerGamWorker()
+            ? await triggerGamWorker(existingJob.id)
             : true
         return { success: true, orderId, triggered, existing: true, jobId: existingJob.id }
     }
@@ -257,11 +263,19 @@ export async function requestGamImportDraft(orderUrl: string) {
         data: {
             level: 'JOB_GAM_PENDING',
             message: `Nexus GAM: rascunho solicitado para Order ${orderId}`,
-            details: JSON.stringify({ orderUrl: url, mode: 'draft' }),
+            details: JSON.stringify({
+                orderUrl: url,
+                mode: 'draft',
+                executionLogs: [{
+                    at: new Date().toISOString(),
+                    message: `Rascunho solicitado para a Order ${orderId}`,
+                    tone: 'info',
+                }],
+            }),
         },
     })
 
-    const triggered = await triggerGamWorker()
+    const triggered = await triggerGamWorker(job.id)
     if (!triggered) {
         await nexusLogStore.addLog('Nexus GAM: rascunho enfileirado, mas worker nao foi disparado automaticamente.', 'INFO')
     }
@@ -272,7 +286,7 @@ export async function requestGamImportDraft(orderUrl: string) {
 
 export async function getGamImportDrafts() {
     const logs = await prisma.nexusLog.findMany({
-        where: { level: { in: ['JOB_GAM_REVIEW', 'JOB_GAM_ERROR', 'JOB_GAM_RUNNING', 'JOB_GAM_PENDING'] } },
+        where: { level: { in: ['JOB_GAM_REVIEW', 'JOB_GAM_ERROR', 'JOB_GAM_RUNNING', 'JOB_GAM_PENDING', 'JOB_GAM_CANCELLED'] } },
         orderBy: { createdAt: 'desc' },
         take: 10,
     })
@@ -281,11 +295,17 @@ export async function getGamImportDrafts() {
         let draft: GamImportDraft | null = null
         let orderUrl = ''
         let orderId = ''
+        let executionLogs: Array<{ at: string; message: string; tone: 'info' | 'success' | 'error' }> = []
         try {
             if (log.details) {
-                const details = JSON.parse(log.details) as GamImportDraft & { orderUrl?: string; orderId?: string }
+                const details = JSON.parse(log.details) as GamImportDraft & {
+                    orderUrl?: string
+                    orderId?: string
+                    executionLogs?: Array<{ at: string; message: string; tone: 'info' | 'success' | 'error' }>
+                }
                 orderUrl = details.orderUrl || ''
                 orderId = details.orderId || details.orderUrl?.match(/order_id=(\d+)/i)?.[1] || ''
+                executionLogs = details.executionLogs || []
                 if (log.level === 'JOB_GAM_REVIEW') draft = details
             }
         } catch {
@@ -299,9 +319,54 @@ export async function getGamImportDrafts() {
             createdAt: log.createdAt.toISOString(),
             orderId,
             orderUrl,
+            executionLogs,
             draft,
         }
     })
+}
+
+export async function deleteGamImportDraft(jobId: string) {
+    const job = await prisma.nexusLog.findUnique({ where: { id: jobId } })
+    if (!job || !job.level.startsWith('JOB_GAM_')) return { success: true }
+    if (job.level === 'JOB_GAM_PENDING' || job.level === 'JOB_GAM_RUNNING') {
+        throw new Error('Encerre o worker antes de excluir este rascunho.')
+    }
+
+    await prisma.nexusLog.delete({ where: { id: jobId } })
+    revalidatePath('/campaigns')
+    return { success: true }
+}
+
+export async function cancelGamImportJob(jobId: string) {
+    const job = await prisma.nexusLog.findUnique({ where: { id: jobId } })
+    if (!job || !['JOB_GAM_PENDING', 'JOB_GAM_RUNNING'].includes(job.level)) {
+        return { success: true, cancelledRun: false }
+    }
+
+    let details: Record<string, unknown> = {}
+    try {
+        details = JSON.parse(job.details || '{}') as Record<string, unknown>
+    } catch {
+        details = { orderUrl: job.details || '' }
+    }
+    const executionLogs = Array.isArray(details.executionLogs) ? details.executionLogs : []
+    details.executionLogs = [
+        ...executionLogs,
+        { at: new Date().toISOString(), message: 'Execucao encerrada pelo usuario', tone: 'error' },
+    ].slice(-100)
+
+    await prisma.nexusLog.update({
+        where: { id: jobId },
+        data: {
+            level: 'JOB_GAM_CANCELLED',
+            message: 'Nexus GAM: execucao encerrada pelo usuario',
+            details: JSON.stringify(details),
+        },
+    })
+
+    const cancelledRun = await cancelGamWorkflowRun(jobId)
+    revalidatePath('/campaigns')
+    return { success: true, cancelledRun }
 }
 
 export async function archiveCampaign(id: string, isArchived: boolean = true) {
@@ -592,7 +657,7 @@ export async function triggerNexusWorker() {
     }
 }
 
-export async function triggerGamWorker() {
+export async function triggerGamWorker(jobId?: string) {
     const token = process.env.GITHUB_TOKEN
     let repo = process.env.GITHUB_REPO
 
@@ -618,7 +683,10 @@ export async function triggerGamWorker() {
                     'X-GitHub-Api-Version': '2022-11-28',
                     'User-Agent': 'Adsnap-GAM-Agent',
                 },
-                body: JSON.stringify({ ref: 'main' }),
+                body: JSON.stringify({
+                    ref: 'main',
+                    inputs: jobId ? { job_id: jobId } : {},
+                }),
                 signal: controller.signal,
             },
         )
@@ -630,6 +698,47 @@ export async function triggerGamWorker() {
         return false
     } catch (error) {
         console.error('[Nexus GAM] Erro ao disparar worker dedicado:', error)
+        return false
+    }
+}
+
+async function cancelGamWorkflowRun(jobId: string) {
+    const token = process.env.GITHUB_TOKEN
+    let repo = process.env.GITHUB_REPO
+    if (!token || !repo) return false
+
+    if (repo.includes('github.com/')) {
+        repo = repo.split('github.com/')[1].replace(/\/$/, '').replace(/\.git$/, '')
+    }
+
+    const headers = {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'Adsnap-GAM-Agent',
+    }
+
+    try {
+        const response = await fetch(
+            `https://api.github.com/repos/${repo}/actions/workflows/gam-import.yml/runs?per_page=50`,
+            { headers, cache: 'no-store' },
+        )
+        if (!response.ok) return false
+
+        const data = await response.json() as {
+            workflow_runs?: Array<{ id: number; display_title?: string; status?: string }>
+        }
+        const runs = (data.workflow_runs || []).filter(run =>
+            run.status !== 'completed' && run.display_title?.includes(jobId),
+        )
+
+        const results = await Promise.all(runs.map(run => fetch(
+            `https://api.github.com/repos/${repo}/actions/runs/${run.id}/cancel`,
+            { method: 'POST', headers },
+        )))
+        return results.some(result => result.ok)
+    } catch (error) {
+        console.error('[Nexus GAM] Erro ao encerrar workflow:', error)
         return false
     }
 }
