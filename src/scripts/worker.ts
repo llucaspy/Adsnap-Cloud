@@ -153,72 +153,6 @@ async function runWorkerCycle() {
         console.error('[Nexus Worker] Erro no agendamento:', err)
     }
 
-    // 3. Campaign Capture
-    try {
-        const queuedCampaigns = await prisma.campaign.findMany({
-            where: {
-                status: 'QUEUED',
-                isArchived: false
-            },
-            orderBy: { updatedAt: 'asc' },
-            take: 20
-        })
-
-        const autoconfigCampaigns = queuedCampaigns.length >= 20 ? [] : await prisma.campaign.findMany({
-            where: {
-                status: 'AUTOCONFIG',
-                isArchived: false
-            },
-            orderBy: { updatedAt: 'asc' },
-            take: 20 - queuedCampaigns.length
-        })
-
-        const campaigns = [...queuedCampaigns, ...autoconfigCampaigns]
-
-        if (campaigns.length > 0) {
-            console.log(`[Nexus Worker] Encontradas ${campaigns.length} campanhas/montagens para processar.`)
-            await nexusLogStore.addLog(`Nexus Worker: Processando lote de ${campaigns.length} itens (incluindo montagem automática)`, 'SYSTEM')
-
-            for (const campaign of campaigns) {
-                // Atomic claim
-                const claim = await prisma.campaign.updateMany({
-                    where: { id: campaign.id, status: { in: ['QUEUED', 'AUTOCONFIG'] } },
-                    data: { status: 'PROCESSING', updatedAt: new Date() }
-                })
-
-                if (claim.count === 0) continue
-
-                if (campaign.status === 'AUTOCONFIG') {
-                    console.log(`[Nexus Worker] Realizando MONTAGEM: ${campaign.client} (PI ${campaign.pi})`)
-                    try {
-                        await processComposition(campaign.id)
-                        await nexusLogStore.addLog(`Nexus Worker: Montagem automatizada concluída para ${campaign.client}`, 'SUCCESS', undefined, campaign.id)
-                    } catch (err) {
-                        console.error(`[Nexus Worker] Erro na montagem ${campaign.pi}:`, err)
-                        await prisma.campaign.update({ where: { id: campaign.id }, data: { status: 'AUTOCONFIG' } }) // Retry
-                    }
-                    continue
-                }
-
-                console.log(`[Nexus Worker] Capturando: ${campaign.client} (PI ${campaign.pi})`)
-                try {
-                    await Promise.race([
-                        processCampaign(campaign.id),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout de 5m')), 300000))
-                    ])
-                } catch (err) {
-                    console.error(`[Nexus Worker] Erro em ${campaign.pi}:`, err)
-                    await prisma.campaign.update({
-                        where: { id: campaign.id },
-                        data: { status: 'QUEUED' }
-                    })
-                }
-            }
-        }
-    } catch (err) {
-        console.error('[Nexus Worker] Erro no ciclo de captura:', err)
-    }
-
     // 4. Government campaign final reports
     try {
         await processGovernmentReportQueue(now)
@@ -369,6 +303,72 @@ async function runWorkerCycle() {
     }
 
     await prisma.$disconnect()
+    // 8. Campaign Capture (movido para o final)
+    try {
+        const queuedCampaigns = await prisma.campaign.findMany({
+            where: {
+                status: 'QUEUED',
+                isArchived: false
+            },
+            orderBy: { updatedAt: 'asc' },
+            take: 20
+        })
+
+        const autoconfigCampaigns = queuedCampaigns.length >= 20 ? [] : await prisma.campaign.findMany({
+            where: {
+                status: 'AUTOCONFIG',
+                isArchived: false
+            },
+            orderBy: { updatedAt: 'asc' },
+            take: 20 - queuedCampaigns.length
+        })
+
+        const campaigns = [...queuedCampaigns, ...autoconfigCampaigns]
+
+        if (campaigns.length > 0) {
+            console.log(`[Nexus Worker] Encontradas ${campaigns.length} campanhas/montagens para processar.`)
+            await nexusLogStore.addLog(`Nexus Worker: Processando lote de ${campaigns.length} itens (incluindo montagem automática)`, 'SYSTEM')
+
+            for (const campaign of campaigns) {
+                // Atomic claim
+                const claim = await prisma.campaign.updateMany({
+                    where: { id: campaign.id, status: { in: ['QUEUED', 'AUTOCONFIG'] } },
+                    data: { status: 'PROCESSING', updatedAt: new Date() }
+                })
+
+                if (claim.count === 0) continue
+
+                if (campaign.status === 'AUTOCONFIG') {
+                    console.log(`[Nexus Worker] Realizando MONTAGEM: ${campaign.client} (PI ${campaign.pi})`)
+                    try {
+                        await processComposition(campaign.id)
+                        await nexusLogStore.addLog(`Nexus Worker: Montagem automatizada concluída para ${campaign.client}`, 'SUCCESS', undefined, campaign.id)
+                    } catch (err) {
+                        console.error(`[Nexus Worker] Erro na montagem ${campaign.pi}:`, err)
+                        await prisma.campaign.update({ where: { id: campaign.id }, data: { status: 'AUTOCONFIG' } }) // Retry
+                    }
+                    continue
+                }
+
+                console.log(`[Nexus Worker] Capturando: ${campaign.client} (PI ${campaign.pi})`)
+                try {
+                    await Promise.race([
+                        processCampaign(campaign.id),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout de 5m')), 300000))
+                    ])
+                } catch (err) {
+                    console.error(`[Nexus Worker] Erro em ${campaign.pi}:`, err)
+                    await prisma.campaign.update({
+                        where: { id: campaign.id },
+                        data: { status: 'QUEUED' }
+                    })
+                }
+            }
+        }
+    } catch (err) {
+        console.error('[Nexus Worker] Erro no ciclo de captura:', err)
+    }
+
 }
 
 /**
@@ -392,4 +392,5 @@ async function startWorker() {
 startWorker().catch(err => {
     console.error('[Nexus Worker] Erro fatal:', err)
     process.exit(1)
-})
+
+})
