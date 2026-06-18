@@ -253,6 +253,10 @@ async function runWorkerCycle() {
                 const bannerFormats = JSON.parse(settings?.bannerFormats || '[]')
                 const draft = buildGamImportDraft(data, bannerFormats)
 
+                if (draft.mediaEntries.length === 0 && draft.blockedItems.length === 0) {
+                    throw new Error('GAM_RASCUNHO_VAZIO: nenhum formato ou bloqueio foi identificado.')
+                }
+
                 await prisma.nexusLog.update({
                     where: { id: job.id },
                     data: {

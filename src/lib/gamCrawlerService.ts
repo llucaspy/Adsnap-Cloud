@@ -99,10 +99,14 @@ export class GamCrawlerService {
         const page = await browser.newPage()
 
         try {
-            await this.ensureLogin(page)
+            await this.ensureLogin(page, parseNetworkCode(orderUrl))
             await page.goto(orderUrl, { waitUntil: 'domcontentloaded', timeout: 90000 })
             await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => null)
             await page.waitForTimeout(5000)
+
+            if (this.isGoogleLogin(page.url()) || page.url().includes('/home')) {
+                throw new Error('GAM_LOGIN_NAO_CONCLUIDO: a Order nao abriu em uma sessao autenticada.')
+            }
 
             const orderText = await page.locator('body').innerText({ timeout: 10000 }).catch(() => '')
             const orderName = await firstText(page, [
@@ -125,6 +129,10 @@ export class GamCrawlerService {
 
             const discoveredItems = await this.discoverLineItems(page, parseNetworkCode(orderUrl))
 
+            if (discoveredItems.length === 0) {
+                throw new Error(`GAM_SEM_LINE_ITEMS: nenhum item de linha foi encontrado na Order ${parseOrderId(orderUrl)}.`)
+            }
+
             for (const item of discoveredItems) {
                 await this.processLineItem(page, parseNetworkCode(orderUrl), item)
             }
@@ -146,11 +154,16 @@ export class GamCrawlerService {
         }
     }
 
-    private async ensureLogin(page: Page) {
-        await page.goto('https://admanager.google.com/home', { waitUntil: 'domcontentloaded', timeout: 90000 })
+    private isGoogleLogin(url: string) {
+        return url.includes('accounts.google.com') || url.includes('/signin/')
+    }
+
+    private async ensureLogin(page: Page, networkCode: string) {
+        const loginTarget = `https://admanager.google.com/${networkCode}`
+        await page.goto(loginTarget, { waitUntil: 'domcontentloaded', timeout: 90000 })
         await page.waitForTimeout(2500)
 
-        if (!page.url().includes('accounts.google.com') && !page.url().includes('signin')) {
+        if (!this.isGoogleLogin(page.url())) {
             console.log('[Nexus GAM] Sessao persistente ativa.')
             return
         }
@@ -164,16 +177,24 @@ export class GamCrawlerService {
 
         console.log('[Nexus GAM] Sessao nao encontrada. Realizando login supervisionado...')
 
-        await page.fill('input[type="email"]', user, { timeout: 10000 })
-        await page.click('#identifierNext')
+        const emailInput = page.locator('#identifierId, input[name="identifier"], input[type="email"]').first()
+        await emailInput.fill(user, { timeout: 15000 })
+        await page.locator('#identifierNext, button:has-text("Next"), button:has-text("Pr\u00f3xima")').first().click({ timeout: 10000 })
+
+        const passwordInput = page.locator('input[name="Passwd"], input[type="password"]:visible').first()
+        await passwordInput.waitFor({ state: 'visible', timeout: 20000 })
+        await passwordInput.fill(pass)
+        await page.locator('#passwordNext, button:has-text("Next"), button:has-text("Pr\u00f3xima")').first().click({ timeout: 10000 })
+
+        await page.waitForURL(url => url.hostname === 'admanager.google.com', { timeout: 45000 }).catch(() => null)
         await page.waitForTimeout(3000)
 
-        await page.fill('input[type="password"]', pass, { timeout: 10000 })
-        await page.click('#passwordNext')
-        await page.waitForTimeout(8000)
-
-        if (page.url().includes('challenge')) {
-            throw new Error('DESAFIO_2FA_DETECTADO: conclua o login manualmente nesta sessao antes de rodar a importacao.')
+        if (this.isGoogleLogin(page.url())) {
+            const loginText = await page.locator('body').innerText({ timeout: 5000 }).catch(() => '')
+            if (/wrong password|senha incorreta|password was changed/i.test(loginText)) {
+                throw new Error('GAM_CREDENCIAL_RECUSADA: atualize a credencial do worker.')
+            }
+            throw new Error('DESAFIO_LOGIN_DETECTADO: o Google solicitou uma verificacao adicional.')
         }
     }
 
