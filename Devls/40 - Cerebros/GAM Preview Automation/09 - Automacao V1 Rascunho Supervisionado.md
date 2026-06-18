@@ -154,3 +154,17 @@ O rascunho e um artefato temporario e nao deve virar historico permanente:
 Cada job guarda ate 100 eventos estruturados em `details.executionLogs`, com horario, mensagem e tom. O Novo Setup exibe esses eventos em um depurador lateral que acompanha a fila, autenticacao, descoberta de line items, leitura de criativos e geracao dos previews.
 
 O workflow dedicado recebe `job_id`, usa esse ID no `run-name` e no grupo de concorrencia. Assim, o botao **Encerrar worker** cancela primeiro o job no banco e depois encontra e cancela a execucao exata no GitHub Actions. O worker tambem verifica o estado do job em cada atualizacao de progresso, oferecendo cancelamento cooperativo caso a chamada remota de cancelamento nao encontre o runner.
+
+## Incidente de aprovacao sem campanha ativa
+
+Em 2026-06-18, a Order 4085922715 foi aprovada pelo wizard legado e criou 10 registros, mas o fim do voo `2026-06-18` foi salvo como meia-noite UTC. Durante o proprio dia 18, o Monitoramento ja interpretava a PI 327201 como encerrada. O mesmo caminho tambem deixou o agendamento desligado e descartou `creativeAssetUrl`.
+
+Regras corrigidas para toda aprovacao pelo Novo Setup:
+
+- inicio do voo e persistido como `00:00:00` no fuso de Sao Paulo;
+- fim do voo e persistido como `23:59:59.999` no fuso de Sao Paulo;
+- o estado visual informa claramente quando o agendamento diario ja esta ativo;
+- `creativeAssetUrl` segue do rascunho para `compositionBox` da campanha;
+- campanhas aprovadas continuam visiveis no dashboard.
+
+A PI 327201 foi reparada diretamente: 10 formatos, agendamento ativo, fim do voo correto e 10 assets criativos restaurados.

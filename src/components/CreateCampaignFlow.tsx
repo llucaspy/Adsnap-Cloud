@@ -29,6 +29,7 @@ interface MediaEntry {
     allowedChannels: string
     externalCampaignId?: string
     externalAuthUrl?: string
+    creativeAssetUrl?: string
 }
 
 interface GamImportJob {
@@ -166,6 +167,7 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
             allowedChannels: '[]',
             externalCampaignId: entry.externalCampaignId,
             externalAuthUrl: draft.orderUrl || '',
+            creativeAssetUrl: entry.creativeAssetUrl,
         })))
         setGamStatus(`Rascunho carregado: ${draft.mediaEntries.length} formato(s).`)
         setStep(4)
@@ -243,7 +245,8 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
                         isMultiChannel: e.isMultiChannel,
                         allowedChannels: e.allowedChannels,
                         externalCampaignId: e.externalCampaignId,
-                        externalAuthUrl: e.externalAuthUrl
+                        externalAuthUrl: e.externalAuthUrl,
+                        creativeAssetUrl: e.creativeAssetUrl,
                     })),
                 })
                 if (loadedGamJobId) {
@@ -1204,7 +1207,7 @@ function StepAutomation({ formData, updateFields, onSubmit, back, isPending, med
                                 className="font-bold text-lg"
                                 style={{ color: 'var(--text-primary)' }}
                             >
-                                Ativar Agendamento diário
+                                {formData.isScheduled ? 'Agendamento diário ativo' : 'Ativar Agendamento diário'}
                             </p>
                             <p
                                 className="text-sm"

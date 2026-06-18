@@ -154,6 +154,7 @@ export async function createMultipleCampaigns(payload: {
         allowedChannels?: string
         externalCampaignId?: string
         externalAuthUrl?: string
+        creativeAssetUrl?: string
     }[]
 }) {
     const {
@@ -166,8 +167,8 @@ export async function createMultipleCampaigns(payload: {
         throw new Error('Dados da campanha e pelo menos um formato são obrigatórios')
     }
 
-    const flightStart = flightStartStr ? new Date(flightStartStr) : null
-    const flightEnd = flightEndStr ? new Date(flightEndStr) : null
+    const flightStart = flightStartStr ? new Date(`${flightStartStr}T00:00:00-03:00`) : null
+    const flightEnd = flightEndStr ? new Date(`${flightEndStr}T23:59:59.999-03:00`) : null
 
     const results = []
 
@@ -194,6 +195,8 @@ export async function createMultipleCampaigns(payload: {
                 allowedChannels: entry.allowedChannels || '[]',
                 externalCampaignId: entry.externalCampaignId || null,
                 externalAuthUrl: entry.externalAuthUrl || null,
+                compositionBox: entry.creativeAssetUrl ? { creativeAssetUrl: entry.creativeAssetUrl } : undefined,
+                showOnDashboard: true,
             },
         })
         results.push(campaign)
