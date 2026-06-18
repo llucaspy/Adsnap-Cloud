@@ -29,7 +29,7 @@ function parseLineItemId(value: string) {
 }
 
 function parseFirstSize(text: string) {
-    const match = text.match(/\b([1-9]\d{1,3})\s*x\s*([1-9]\d{1,3})\b/i)
+    const match = text.match(/([1-9]\d{1,3})\s*x\s*([1-9]\d{1,3})(?!\d)/i)
     if (!match) return null
     return { width: Number(match[1]), height: Number(match[2]) }
 }
@@ -41,6 +41,14 @@ function extractDateRange(text: string) {
     const brDates = [...text.matchAll(/\b(\d{1,2}\/\d{1,2}\/20\d{2})\b/g)].map(match => match[1])
     if (brDates.length >= 2) return { flightStart: brDates[0], flightEnd: brDates[1] }
 
+    const months: Record<string, string> = {
+        jan: '01', fev: '02', mar: '03', abr: '04', mai: '05', jun: '06',
+        jul: '07', ago: '08', set: '09', out: '10', nov: '11', dez: '12',
+    }
+    const ptDates = [...text.matchAll(/\b(\d{1,2})\s+de\s+(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\.?\s+de\s+(20\d{2})\b/gi)]
+        .map(match => `${match[3]}-${months[match[2].toLowerCase()]}-${match[1].padStart(2, '0')}`)
+    if (ptDates.length >= 2) return { flightStart: ptDates[0], flightEnd: ptDates[1] }
+
     return { flightStart: null, flightEnd: null }
 }
 
@@ -50,32 +58,6 @@ async function firstText(page: Page, selectors: string[]) {
         if (value.trim()) return value.trim()
     }
     return ''
-}
-
-async function clickFirstText(page: Page, pattern: RegExp) {
-    const locator = page.getByText(pattern).first()
-    if (await locator.count().catch(() => 0)) {
-        await locator.click({ timeout: 3000 }).catch(() => null)
-        return true
-    }
-    return false
-}
-
-async function fillVisibleInput(page: Page, value: string) {
-    const inputs = await page.locator('input:visible').all()
-    for (const input of inputs) {
-        const type = await input.getAttribute('type').catch(() => '')
-        if (type === 'hidden') continue
-
-        const current = await input.inputValue().catch(() => '')
-        if (current.includes('google_preview')) continue
-
-        await input.fill(value, { timeout: 1500 }).catch(() => null)
-        const after = await input.inputValue().catch(() => '')
-        if (after === value) return true
-    }
-
-    return false
 }
 
 export class GamCrawlerService {
@@ -133,6 +115,8 @@ export class GamCrawlerService {
                 throw new Error(`GAM_SEM_LINE_ITEMS: nenhum item de linha foi encontrado na Order ${parseOrderId(orderUrl)}.`)
             }
 
+            const lineItemClient = discoveredItems[0]?.name.split('_')[0]?.trim()
+
             for (const item of discoveredItems) {
                 await this.processLineItem(page, parseNetworkCode(orderUrl), item)
             }
@@ -143,7 +127,7 @@ export class GamCrawlerService {
                 orderId: parseOrderId(orderUrl),
                 orderName,
                 orderUrl,
-                clientName: clientName || 'Cliente Desconhecido',
+                clientName: clientName || lineItemClient || 'Cliente Desconhecido',
                 agencyName,
                 flightStart: range.flightStart,
                 flightEnd: range.flightEnd,
@@ -225,6 +209,7 @@ export class GamCrawlerService {
             return {
                 id,
                 name: link.text || `Line item ${id}`,
+                sourceUrl: link.href,
                 creatives: [],
             } satisfies GamLineItemImport
         }).filter(item => item.id), item => item.id)
@@ -248,7 +233,7 @@ export class GamCrawlerService {
     }
 
     private async processLineItem(page: Page, networkCode: string, item: GamLineItemImport) {
-        const url = `https://admanager.google.com/${networkCode}#delivery/line%20item/line_item_overview/line_item_id=${item.id}`
+        const url = item.sourceUrl || `https://admanager.google.com/${networkCode}#delivery/line%20item/line_item_overview/line_item_id=${item.id}`
         console.log(`[Nexus GAM] Processando Line Item: ${item.name} (${item.id})`)
 
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 })
@@ -260,13 +245,19 @@ export class GamCrawlerService {
         item.flightStart = range.flightStart
         item.flightEnd = range.flightEnd
 
-        await clickFirstText(page, /Criativos|Creatives/i)
-        await page.waitForTimeout(2500)
+        const creativesUrl = url.includes('li_tab=')
+            ? url.replace(/li_tab=[^&]+/i, 'li_tab=creatives')
+            : `${url}${url.includes('#') ? '&' : '#'}li_tab=creatives`
+
+        await page.goto(creativesUrl, { waitUntil: 'domcontentloaded', timeout: 90000 })
+        await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => null)
+        await page.waitForTimeout(3500)
 
         const creativeLinks = await page.locator('a[href*="creative_id="], a[href*="creativeId="]').evaluateAll(nodes => {
             return nodes.map(node => ({
                 href: (node as HTMLAnchorElement).href || node.getAttribute('href') || '',
                 text: (node.textContent || '').trim(),
+                context: (node.closest('tr')?.textContent || node.parentElement?.textContent || '').trim(),
             }))
         }).catch(() => [])
 
@@ -274,12 +265,21 @@ export class GamCrawlerService {
             creativeId: parseCreativeId(link.href),
             href: link.href,
             name: link.text,
+            sizeHint: parseFirstSize(`${link.text} ${link.context}`),
         })).filter(creative => creative.creativeId), creative => creative.creativeId)
 
         console.log(`[Nexus GAM] Criativos encontrados no line item ${item.id}: ${creatives.length}`)
 
         for (const creative of creatives) {
-            const preview = await this.processCreative(page, networkCode, item.id, creative.href, creative.creativeId, creative.name)
+            const preview = await this.processCreative(
+                page,
+                networkCode,
+                item.id,
+                creative.href,
+                creative.creativeId,
+                creative.name,
+                creative.sizeHint
+            )
             if (preview) item.creatives.push(preview)
         }
     }
@@ -290,7 +290,8 @@ export class GamCrawlerService {
         lineItemId: string,
         href: string,
         creativeId: string,
-        name?: string
+        name?: string,
+        sizeHint?: { width: number; height: number } | null
     ): Promise<GamCreativePreview | null> {
         const creativeUrl = href.startsWith('http')
             ? href
@@ -302,27 +303,39 @@ export class GamCrawlerService {
         await page.waitForTimeout(3500)
 
         const creativeText = await page.locator('body').innerText({ timeout: 10000 }).catch(() => '')
-        const size = parseFirstSize(creativeText)
+        const size = parseFirstSize(`${name || ''} ${creativeText}`) || sizeHint
 
         if (!size) {
             console.log(`[Nexus GAM] Tamanho nao encontrado para criativo ${creativeId}`)
             return null
         }
 
-        await clickFirstText(page, /Visualizar|Preview/i)
-        await page.waitForTimeout(2000)
-        await clickFirstText(page, /No site|On site|Site ativo|Live site/i)
-        await page.waitForTimeout(1000)
+        const previewPageUrl = creativeUrl.includes('tab=')
+            ? creativeUrl.replace(/tab=[^&]+/i, 'tab=preview')
+            : `${creativeUrl}&tab=preview`
+
+        await page.goto(previewPageUrl, { waitUntil: 'domcontentloaded', timeout: 90000 })
+        await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => null)
+        await page.waitForTimeout(3000)
+
+        const onSiteButton = page.locator('material-button').filter({ hasText: /No site|On site/i }).first()
+        await onSiteButton.click({ timeout: 10000 })
 
         const previewBaseUrl = size.width === 320 && (size.height === 50 || size.height === 100)
             ? 'metropoles.com/saude'
             : 'metropoles.com'
 
-        await fillVisibleInput(page, previewBaseUrl)
-        await clickFirstText(page, /Mostrar URL|Gerar URL|Show URL|Generate URL/i)
+        const siteUrlInput = page.getByLabel(/URL do site|Site URL/i).first()
+        await siteUrlInput.waitFor({ state: 'visible', timeout: 10000 })
+        await siteUrlInput.fill(previewBaseUrl)
+
+        const showUrlButton = page.locator('material-button').filter({
+            hasText: /Mostrar URL de visualiza[cç][aã]o|Show preview URL|Generate preview URL/i,
+        }).first()
+        await showUrlButton.click({ timeout: 10000 })
         await page.waitForTimeout(2500)
 
-        const previewUrl = await page.locator('input[readonly], textarea[readonly], input[value*="google_preview"], textarea:has-text("google_preview")')
+        const previewUrl = await page.locator('textarea[readonly], input[readonly], input[value*="google_preview"], textarea:has-text("google_preview")')
             .first()
             .inputValue({ timeout: 3000 })
             .catch(async () => {
@@ -335,6 +348,11 @@ export class GamCrawlerService {
             return null
         }
 
+        const creativeAssetUrl = await this.findCreativeAssetUrl(page, size.width, size.height)
+        if (creativeAssetUrl) {
+            console.log(`[Nexus GAM] Asset autenticado encontrado para ${creativeId}: ${creativeAssetUrl}`)
+        }
+
         return {
             creativeId,
             name,
@@ -342,7 +360,45 @@ export class GamCrawlerService {
             height: size.height,
             previewUrl,
             previewBaseUrl,
+            creativeAssetUrl,
         }
+    }
+
+    private async findCreativeAssetUrl(page: Page, width: number, height: number) {
+        const candidates: Array<{ url: string; preferred: boolean }> = []
+
+        for (const frame of page.frames()) {
+            const images = await frame.locator('img').evaluateAll((nodes, expected) => {
+                return nodes.map(node => {
+                    const image = node as HTMLImageElement
+                    const rect = image.getBoundingClientRect()
+                    return {
+                        url: image.currentSrc || image.src || image.getAttribute('src') || '',
+                        width: image.naturalWidth || image.width || rect.width,
+                        height: image.naturalHeight || image.height || rect.height,
+                    }
+                }).filter(image =>
+                    image.url &&
+                    Math.round(image.width) === expected.width &&
+                    Math.round(image.height) === expected.height
+                )
+            }, { width, height }).catch(() => [])
+
+            for (const image of images) {
+                try {
+                    const url = new URL(image.url)
+                    if (url.protocol !== 'https:' && url.protocol !== 'http:') continue
+                    candidates.push({
+                        url: url.toString(),
+                        preferred: url.hostname === 'cdn.00px.net',
+                    })
+                } catch {
+                    // Ignore non-network image sources such as data URLs.
+                }
+            }
+        }
+
+        return candidates.find(candidate => candidate.preferred)?.url || candidates[0]?.url
     }
 }
 

@@ -1,4 +1,4 @@
-import { chromium, devices } from 'playwright';
+import { chromium, devices, Locator } from 'playwright';
 import { compositeWithSharp } from './rasterService';
 import prisma from './prisma';
 import { supabase } from './supabase';
@@ -263,6 +263,37 @@ function describeMeasuredBoxes(boxes: MeasuredAdBox[]) {
         .join(', ') || 'sem boxes visiveis';
 }
 
+async function injectCreativeAsset(locator: Locator, assetUrl: string, width: number, height: number) {
+    await locator.evaluate((element, creative) => {
+        const image = document.createElement('img');
+        image.src = creative.assetUrl;
+        image.alt = '';
+        image.dataset.adsnapCreative = 'true';
+        image.style.display = 'block';
+        image.style.width = `${creative.width}px`;
+        image.style.height = `${creative.height}px`;
+        image.style.objectFit = 'contain';
+
+        const target = element as HTMLElement;
+        target.replaceChildren(image);
+        target.style.width = `${creative.width}px`;
+        target.style.height = `${creative.height}px`;
+        target.style.minWidth = `${creative.width}px`;
+        target.style.minHeight = `${creative.height}px`;
+        target.style.overflow = 'hidden';
+    }, { assetUrl, width, height });
+
+    const image = locator.locator('img[data-adsnap-creative="true"]').first();
+    await image.waitFor({ state: 'visible', timeout: 15000 });
+    await image.evaluate((node: HTMLImageElement) => {
+        if (node.complete && node.naturalWidth > 0) return;
+        return new Promise<void>((resolve, reject) => {
+            node.addEventListener('load', () => resolve(), { once: true });
+            node.addEventListener('error', () => reject(new Error('Falha ao carregar asset do criativo')), { once: true });
+        });
+    });
+}
+
 // ============================================================================
 // MAIN CAPTURE EXECUTION
 // ============================================================================
@@ -271,10 +302,15 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
     console.log('[Nexus] _executeCapture() iniciando...')
     const campaign = await prisma.campaign.findUnique({
         where: { id: campaignId },
-        select: { url: true, format: true, device: true, client: true, agency: true }
+        select: { url: true, format: true, device: true, client: true, agency: true, compositionBox: true }
     });
 
     if (!campaign) throw new Error('Campanha não encontrada');
+    const composition = campaign.compositionBox && typeof campaign.compositionBox === 'object'
+        ? campaign.compositionBox as { creativeAssetUrl?: string }
+        : null;
+    const creativeAssetUrl = composition?.creativeAssetUrl;
+
     console.log('[Nexus] Campanha encontrada:', campaign.client, '-', campaign.format)
     await nexusLogStore.addLog(`Nexus: Processando ${campaign.client} - Formato: ${campaign.format}`, 'INFO', undefined, campaignId);
 
@@ -422,6 +458,13 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
                 }
 
                 await locator.waitFor({ state: 'visible', timeout: 5000 });
+
+                if (creativeAssetUrl) {
+                    console.log(`[Nexus] Injetando asset autenticado do GAM no slot (${targetW}x${targetH})`);
+                    await injectCreativeAsset(locator, creativeAssetUrl, targetW, targetH);
+                    await nexusLogStore.addLog('Nexus: Criativo autenticado injetado no slot', 'SUCCESS', creativeAssetUrl, campaignId);
+                }
+
                 const box = await locator.boundingBox();
 
                 if (box && (box.width < 10 || box.height < 10)) {
@@ -445,6 +488,11 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
 
                     await page.evaluate((y) => window.scrollTo(0, y), targetScrollY);
                     await page.waitForTimeout(3000);
+
+                    if (creativeAssetUrl) {
+                        await injectCreativeAsset(locator, creativeAssetUrl, targetW, targetH);
+                        await page.waitForTimeout(500);
+                    }
 
                     const screenshotBuffer = await page.screenshot({ type: 'png' });
                     await browser.close();

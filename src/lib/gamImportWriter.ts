@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@prisma/client'
+import { Prisma, type PrismaClient } from '@prisma/client'
 import type { GamImportDraft, GamImportMediaEntry } from './gamImportPlanner'
 
 export interface GamImportWriteResult {
@@ -10,6 +10,19 @@ export interface GamImportWriteResult {
 
 function isReady(entry: GamImportMediaEntry) {
     return entry.confidence === 'high' || entry.confidence === 'review'
+}
+
+function withCreativeAsset(existing: Prisma.JsonValue | null | undefined, creativeAssetUrl?: string) {
+    if (!creativeAssetUrl) return undefined
+
+    const current = existing && typeof existing === 'object' && !Array.isArray(existing)
+        ? existing as Record<string, Prisma.JsonValue>
+        : {}
+
+    return {
+        ...current,
+        creativeAssetUrl,
+    } satisfies Prisma.InputJsonObject
 }
 
 export async function createCampaignsFromGamDraft(
@@ -39,10 +52,17 @@ export async function createCampaignsFromGamDraft(
                 url: entry.url,
                 isArchived: false,
             },
-            select: { id: true },
+            select: { id: true, compositionBox: true },
         })
 
         if (existing) {
+            const compositionBox = withCreativeAsset(existing.compositionBox, entry.creativeAssetUrl)
+            if (compositionBox) {
+                await prisma.campaign.update({
+                    where: { id: existing.id },
+                    data: { compositionBox },
+                })
+            }
             skipped++
             campaignIds.push(existing.id)
             continue
@@ -65,6 +85,7 @@ export async function createCampaignsFromGamDraft(
                 status: 'PENDING',
                 externalCampaignId: entry.externalCampaignId,
                 externalAuthUrl: draft.orderUrl || null,
+                compositionBox: withCreativeAsset(null, entry.creativeAssetUrl),
                 showOnDashboard: true,
             },
         })

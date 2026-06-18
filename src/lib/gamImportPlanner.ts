@@ -13,11 +13,13 @@ export interface GamCreativePreview {
     height: number
     previewUrl: string
     previewBaseUrl?: string
+    creativeAssetUrl?: string
 }
 
 export interface GamLineItemImport {
     id: string
     name: string
+    sourceUrl?: string
     flightStart?: string | Date | null
     flightEnd?: string | Date | null
     creatives: GamCreativePreview[]
@@ -46,6 +48,7 @@ export interface GamImportMediaEntry {
     width: number
     height: number
     externalCampaignId: string
+    creativeAssetUrl?: string
     confidence: 'high' | 'review' | 'blocked'
     warnings: string[]
 }
@@ -178,16 +181,16 @@ function inferSegmentation(agency: string) {
     return 'PRIVADO'
 }
 
-function advertiserToken(clientName: string) {
+function advertiserTokens(clientName: string) {
     return normalizeText(clientName)
         .split(/[^a-z0-9]+/)
         .filter(Boolean)
-        .find(token => token.length >= 3)
+        .filter(token => token.length >= 2 && !['da', 'de', 'do'].includes(token))
 }
 
 function cleanCampaignName(order: GamOrderImport) {
     const source = order.lineItems[0]?.name || order.orderName || order.clientName
-    const token = advertiserToken(order.clientName)
+    const clientTokens = advertiserTokens(order.clientName)
 
     let cleaned = compactSpaces(source)
         .replace(/\bPI\s*[0-9]{3,8}\b/ig, '')
@@ -195,11 +198,14 @@ function cleanCampaignName(order: GamOrderImport) {
         .replace(/\s{2,}/g, ' ')
         .trim()
 
-    if (token) {
+    if (clientTokens.length > 0) {
         const parts = cleaned.split(/\s+/)
-        if (normalizeText(parts[0] || '').includes(token) || token.includes(normalizeText(parts[0] || ''))) {
-            cleaned = parts.slice(1).join(' ').trim()
+        while (parts.length > 0) {
+            const first = normalizeText(parts[0] || '')
+            if (!clientTokens.some(token => first.includes(token) || token.includes(first))) break
+            parts.shift()
         }
+        cleaned = parts.join(' ').trim()
     }
 
     return cleaned || order.orderName || order.clientName
@@ -277,6 +283,7 @@ function makeMediaEntry(params: {
         width: Number(format.width),
         height: Number(format.height),
         externalCampaignId: `GAM_ORDER_${order.orderId}_LINE_ITEM_${lineItem.id}`,
+        creativeAssetUrl: creative.creativeAssetUrl,
         confidence: warnings.length > 0 ? 'review' : 'high',
         warnings,
     } satisfies GamImportMediaEntry
