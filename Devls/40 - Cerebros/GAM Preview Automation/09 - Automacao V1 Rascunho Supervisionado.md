@@ -113,3 +113,20 @@ Fluxo seguro aprendido com a Order 4097107199:
 7. validar visualmente a marca e a mensagem do criativo, nao apenas o tamanho.
 
 Depois que `creativeAssetUrl` foi salvo, as coletas diarias nao precisam autenticar novamente no GAM. A sessao persistente continua necessaria para importar novas Orders ou atualizar criativos.
+
+## Sessao remota sem servidor dedicado
+
+Em 2026-06-18, a sessao GAM passou a ser reutilizavel em runners descartaveis:
+
+1. o login supervisionado acontece uma vez no perfil local `.gam-session/`;
+2. o Playwright exporta cookies e storage state, incluindo IndexedDB;
+3. o estado e cifrado com AES-256-GCM antes de sair do processo;
+4. somente o blob cifrado e enviado para `adsnap-private/gam/{networkCode}/storage-state.enc`;
+5. o bucket do Supabase deve permanecer privado;
+6. o GitHub Actions baixa e decifra o estado em memoria;
+7. o crawler abre um contexto efemero autenticado e, ao terminar, grava a sessao renovada;
+8. se o Google invalidar os cookies, o job retorna `GAM_SESSION_EXPIRADA` e exige novo login supervisionado.
+
+A chave e derivada de `GAM_SESSION_ENCRYPTION_KEY` quando configurada. Como compatibilidade, o worker pode deriva-la de `SUPABASE_SERVICE_ROLE_KEY`, que ja existe apenas nos ambientes protegidos. Nenhum cookie, senha ou estado descriptografado deve ser versionado ou salvo em bucket publico.
+
+Teste validado com a Order 4097107199: um contexto sem perfil local restaurou 173 cookies do Supabase, encontrou o line item 7335019398, extraiu os quatro assets e renovou a sessao remota.

@@ -1,6 +1,11 @@
-import { chromium, Page } from 'playwright'
+import { chromium, Page, type BrowserContext } from 'playwright'
 import path from 'path'
 import type { GamCreativePreview, GamLineItemImport, GamOrderImport } from './gamImportPlanner'
+import {
+    canUseRemoteGamSession,
+    loadGamSessionState,
+    saveGamSessionState,
+} from './gamSessionStore'
 
 function unique<T>(items: T[], getKey: (item: T) => string) {
     const seen = new Set<string>()
@@ -63,25 +68,75 @@ async function firstText(page: Page, selectors: string[]) {
 export class GamCrawlerService {
     private userDataDir = process.env.GAM_USER_DATA_DIR || path.join(process.cwd(), '.gam-session')
 
-    async startIngestion(orderUrl: string): Promise<GamOrderImport> {
-        console.log(`[Nexus GAM] Iniciando ingestao para: ${orderUrl}`)
-
-        const browser = await chromium.launchPersistentContext(this.userDataDir, {
-            headless: process.env.GAM_HEADLESS !== 'false',
+    private contextOptions() {
+        return {
             viewport: { width: 1366, height: 768 },
             userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             timezoneId: 'America/Sao_Paulo',
-            args: [
-                '--disable-blink-features=AutomationControlled',
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-            ],
-        })
+        }
+    }
 
-        const page = await browser.newPage()
+    private browserArgs() {
+        return [
+            '--disable-blink-features=AutomationControlled',
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+        ]
+    }
+
+    private async launchContext(networkCode: string): Promise<{
+        context: BrowserContext
+        remoteSession: boolean
+        close: () => Promise<void>
+    }> {
+        const remoteState = canUseRemoteGamSession()
+            ? await loadGamSessionState(networkCode)
+            : null
+
+        if (remoteState) {
+            console.log('[Nexus GAM] Restaurando sessao criptografada do Supabase.')
+            const browser = await chromium.launch({
+                headless: process.env.GAM_HEADLESS !== 'false',
+                args: this.browserArgs(),
+            })
+            const context = await browser.newContext({
+                ...this.contextOptions(),
+                storageState: remoteState,
+            })
+            return {
+                context,
+                remoteSession: true,
+                close: () => browser.close(),
+            }
+        }
+
+        if (process.env.GITHUB_ACTIONS === 'true') {
+            throw new Error('GAM_SESSION_REMOTA_AUSENTE: autentique e sincronize a sessao antes de executar o worker.')
+        }
+
+        console.log('[Nexus GAM] Usando perfil persistente local.')
+        const context = await chromium.launchPersistentContext(this.userDataDir, {
+            headless: process.env.GAM_HEADLESS !== 'false',
+            ...this.contextOptions(),
+            args: this.browserArgs(),
+        })
+        return {
+            context,
+            remoteSession: false,
+            close: () => context.close(),
+        }
+    }
+
+    async startIngestion(orderUrl: string): Promise<GamOrderImport> {
+        console.log(`[Nexus GAM] Iniciando ingestao para: ${orderUrl}`)
+        const networkCode = parseNetworkCode(orderUrl)
+        const launched = await this.launchContext(networkCode)
+        const page = await launched.context.newPage()
+        let authenticated = false
 
         try {
-            await this.ensureLogin(page, parseNetworkCode(orderUrl))
+            await this.ensureLogin(page, networkCode)
+            authenticated = true
             await page.goto(orderUrl, { waitUntil: 'domcontentloaded', timeout: 90000 })
             await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => null)
             await page.waitForTimeout(5000)
@@ -109,7 +164,7 @@ export class GamCrawlerService {
                     '[data-testid*="agency"]',
                 ]) || this.extractAgencyFromText(orderName || orderText)
 
-            const discoveredItems = await this.discoverLineItems(page, parseNetworkCode(orderUrl))
+            const discoveredItems = await this.discoverLineItems(page, networkCode)
 
             if (discoveredItems.length === 0) {
                 throw new Error(`GAM_SEM_LINE_ITEMS: nenhum item de linha foi encontrado na Order ${parseOrderId(orderUrl)}.`)
@@ -118,7 +173,7 @@ export class GamCrawlerService {
             const lineItemClient = discoveredItems[0]?.name.split('_')[0]?.trim()
 
             for (const item of discoveredItems) {
-                await this.processLineItem(page, parseNetworkCode(orderUrl), item)
+                await this.processLineItem(page, networkCode, item)
             }
 
             const range = extractDateRange(orderText)
@@ -134,7 +189,16 @@ export class GamCrawlerService {
                 lineItems: discoveredItems,
             }
         } finally {
-            await browser.close()
+            if (authenticated && canUseRemoteGamSession()) {
+                try {
+                    const state = await launched.context.storageState({ indexedDB: true })
+                    await saveGamSessionState(state, networkCode)
+                    console.log('[Nexus GAM] Sessao renovada no Supabase.')
+                } catch (error) {
+                    console.warn('[Nexus GAM] Nao foi possivel renovar a sessao remota:', error instanceof Error ? error.message : String(error))
+                }
+            }
+            await launched.close()
         }
     }
 
@@ -150,6 +214,10 @@ export class GamCrawlerService {
         if (!this.isGoogleLogin(page.url())) {
             console.log('[Nexus GAM] Sessao persistente ativa.')
             return
+        }
+
+        if (process.env.GITHUB_ACTIONS === 'true') {
+            throw new Error('GAM_SESSION_EXPIRADA: o Google solicitou uma nova autenticacao supervisionada.')
         }
 
         const user = process.env.GAM_USER

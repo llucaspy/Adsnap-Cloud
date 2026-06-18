@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import path from 'path'
 import { chromium } from 'playwright'
+import { saveGamSessionState } from '../lib/gamSessionStore'
 
 const NETWORK_CODE = process.env.GAM_NETWORK_CODE || '123935210'
 const LOGIN_TARGET = `https://admanager.google.com/${NETWORK_CODE}`
@@ -50,6 +51,9 @@ async function main() {
             throw new Error('A verificacao Google nao foi concluida dentro de 10 minutos.')
         }
 
+        const state = await context.storageState({ indexedDB: true })
+        await saveGamSessionState(state, NETWORK_CODE)
+        console.log('GAM_SESSION_SYNCED')
         console.log('GAM_SESSION_AUTHENTICATED')
     } finally {
         await context.close()
