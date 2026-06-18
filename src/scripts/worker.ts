@@ -4,6 +4,7 @@ import { processCampaign, processComposition } from '../lib/captureService'
 import { nexusLogStore } from '../lib/nexusLogStore'
 import { getGmailClient, fetchRecentEmails } from '../lib/gmail'
 import { classifyEmail } from '../lib/gemini'
+import { processPendingGamJobs } from '../lib/gamJobProcessor'
 
 const processedEmailIds = new Set<string>()
 
@@ -219,10 +220,12 @@ async function runWorkerCycle() {
 
     // 4. GAM Ingestion Jobs (supervised draft)
     try {
+        await processPendingGamJobs()
+
         const crawlerModule = await import('../lib/gamCrawlerService')
         const plannerModule = await import('../lib/gamImportPlanner')
-        const gamCrawler = (crawlerModule as any).gamCrawler || (crawlerModule as any).default?.gamCrawler
-        const buildGamImportDraft = (plannerModule as any).buildGamImportDraft || (plannerModule as any).default?.buildGamImportDraft
+        const gamCrawler = crawlerModule.gamCrawler
+        const buildGamImportDraft = plannerModule.buildGamImportDraft
 
         if (!gamCrawler || !buildGamImportDraft) {
             throw new Error('Modulos GAM indisponiveis no worker.')

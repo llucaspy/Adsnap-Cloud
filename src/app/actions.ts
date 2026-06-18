@@ -245,7 +245,11 @@ export async function requestGamImportDraft(orderUrl: string) {
     })
 
     if (existingJob) {
-        const triggered = existingJob.level === 'JOB_GAM_PENDING' ? await triggerNexusWorker() : true
+        const staleRunningJob = existingJob.level === 'JOB_GAM_RUNNING'
+            && existingJob.createdAt.getTime() < Date.now() - 30 * 60 * 1000
+        const triggered = existingJob.level === 'JOB_GAM_PENDING' || staleRunningJob
+            ? await triggerGamWorker()
+            : true
         return { success: true, orderId, triggered, existing: true, jobId: existingJob.id }
     }
 
@@ -257,7 +261,7 @@ export async function requestGamImportDraft(orderUrl: string) {
         },
     })
 
-    const triggered = await triggerNexusWorker()
+    const triggered = await triggerGamWorker()
     if (!triggered) {
         await nexusLogStore.addLog('Nexus GAM: rascunho enfileirado, mas worker nao foi disparado automaticamente.', 'INFO')
     }
@@ -584,6 +588,48 @@ export async function triggerNexusWorker() {
     } catch (err) {
         console.error('[Nexus] Exception in triggerNexusWorker:', err)
         nexusLogStore.addLog(`Nexus: Erro crítico ao disparar Worker: ${(err as Error).message}`, 'ERROR')
+        return false
+    }
+}
+
+export async function triggerGamWorker() {
+    const token = process.env.GITHUB_TOKEN
+    let repo = process.env.GITHUB_REPO
+
+    if (!token || !repo) {
+        console.warn('[Nexus GAM] GITHUB_TOKEN ou GITHUB_REPO ausente; job mantido na fila.')
+        return false
+    }
+
+    if (repo.includes('github.com/')) {
+        repo = repo.split('github.com/')[1].replace(/\/$/, '').replace(/\.git$/, '')
+    }
+
+    try {
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 15000)
+        const response = await fetch(
+            `https://api.github.com/repos/${repo}/actions/workflows/gam-import.yml/dispatches`,
+            {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    Accept: 'application/vnd.github+json',
+                    'X-GitHub-Api-Version': '2022-11-28',
+                    'User-Agent': 'Adsnap-GAM-Agent',
+                },
+                body: JSON.stringify({ ref: 'main' }),
+                signal: controller.signal,
+            },
+        )
+        clearTimeout(timeoutId)
+
+        if (response.ok) return true
+
+        console.error('[Nexus GAM] Falha ao disparar worker dedicado:', response.status, await response.text())
+        return false
+    } catch (error) {
+        console.error('[Nexus GAM] Erro ao disparar worker dedicado:', error)
         return false
     }
 }
