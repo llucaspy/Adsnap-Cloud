@@ -248,7 +248,12 @@ async function runWorkerCycle() {
                 const url = parsed.orderUrl || parsed.url || details
                 if (!url || !url.startsWith('http')) throw new Error('URL de job invalida')
 
-                const data = await gamCrawler.startIngestion(url)
+                const data = await gamCrawler.startIngestion(url, async (progress: string) => {
+                    await prisma.nexusLog.update({
+                        where: { id: job.id },
+                        data: { message: `Nexus GAM: ${progress}` }
+                    })
+                })
                 const settings = await prisma.settings.findUnique({ where: { id: 1 } })
                 const bannerFormats = JSON.parse(settings?.bannerFormats || '[]')
                 const draft = buildGamImportDraft(data, bannerFormats)

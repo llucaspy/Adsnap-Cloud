@@ -2,14 +2,14 @@
 
 import { createMultipleCampaigns, getGamImportDrafts, getSettings, requestGamImportDraft } from '@/app/actions'
 import type { GamImportDraft } from '@/lib/gamImportPlanner'
-import { useTransition, useState, useEffect } from 'react'
+import { useTransition, useState, useEffect, useCallback } from 'react'
 import {
     Plus, Globe, Smartphone, Monitor, Calendar,
     Clock, ChevronRight, ChevronLeft, Check,
     Building2, User2, Hash, Layers, Sparkles,
     CalendarRange, Shield, Landmark, Building, Users,
     ChevronDown, Trash2, X, Wand2, RefreshCw, FileCheck2,
-    AlertTriangle
+    Loader2, CircleCheck, CircleX, RotateCcw
 } from 'lucide-react'
 import { MultiTimePicker } from './MultiTimePicker'
 
@@ -22,6 +22,16 @@ interface MediaEntry {
     allowedChannels: string
     externalCampaignId?: string
     externalAuthUrl?: string
+}
+
+interface GamImportJob {
+    id: string
+    level: string
+    message: string
+    createdAt: string
+    orderId: string
+    orderUrl: string
+    draft: GamImportDraft | null
 }
 
 interface StepProps {
@@ -51,13 +61,8 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
     const [mediaEntries, setMediaEntries] = useState<MediaEntry[]>([])
     const [gamOrderUrl, setGamOrderUrl] = useState('')
     const [gamStatus, setGamStatus] = useState('')
-    const [gamDrafts, setGamDrafts] = useState<Array<{
-        id: string
-        level: string
-        message: string
-        createdAt: string
-        draft: GamImportDraft | null
-    }>>([])
+    const [isGamRefreshing, setIsGamRefreshing] = useState(false)
+    const [gamDrafts, setGamDrafts] = useState<GamImportJob[]>([])
     const [formData, setFormData] = useState({
         agency: '',
         client: '',
@@ -84,15 +89,30 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
         fetchFormats()
     }, [])
 
-    async function refreshGamDrafts() {
-        const drafts = await getGamImportDrafts()
-        setGamDrafts(drafts)
-        return drafts
-    }
+    const refreshGamDrafts = useCallback(async () => {
+        setIsGamRefreshing(true)
+        try {
+            const drafts = await getGamImportDrafts()
+            setGamDrafts(drafts)
+            return drafts
+        } finally {
+            setIsGamRefreshing(false)
+        }
+    }, [])
 
     useEffect(() => {
         refreshGamDrafts().catch(() => null)
-    }, [])
+    }, [refreshGamDrafts])
+
+    const hasActiveGamJob = gamDrafts.some(job => job.level === 'JOB_GAM_PENDING' || job.level === 'JOB_GAM_RUNNING')
+
+    useEffect(() => {
+        if (!hasActiveGamJob) return
+        const interval = window.setInterval(() => {
+            if (document.visibilityState === 'visible') refreshGamDrafts().catch(() => null)
+        }, 4000)
+        return () => window.clearInterval(interval)
+    }, [hasActiveGamJob, refreshGamDrafts])
 
     const updateFields = (fields: Partial<typeof formData>) => {
         setFormData(prev => ({ ...prev, ...fields }))
@@ -127,17 +147,30 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
         setStep(4)
     }
 
-    async function handleRequestGamDraft() {
+    function requestGamDraft(url: string) {
         startGamTransition(async () => {
             try {
                 setGamStatus('Solicitando rascunho...')
-                const result = await requestGamImportDraft(gamOrderUrl)
-                setGamStatus(result.triggered ? `Order ${result.orderId} enviada ao worker.` : `Order ${result.orderId} enfileirada.`)
+                const result = await requestGamImportDraft(url)
+                setGamStatus(result.existing
+                    ? `A Order ${result.orderId} ja esta em processamento.`
+                    : result.triggered
+                        ? `Order ${result.orderId} enviada ao worker.`
+                        : `Order ${result.orderId} enfileirada; aguardando o agendador.`)
                 await refreshGamDrafts()
             } catch (error) {
                 setGamStatus((error as Error).message)
             }
         })
+    }
+
+    function handleRequestGamDraft() {
+        requestGamDraft(gamOrderUrl)
+    }
+
+    function handleRetryGamDraft(orderUrl: string) {
+        setGamOrderUrl(orderUrl)
+        requestGamDraft(orderUrl)
     }
 
     async function handleFinalSubmit() {
@@ -199,7 +232,9 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
                 onRequestDraft={handleRequestGamDraft}
                 onRefresh={refreshGamDrafts}
                 onLoadDraft={loadGamDraft}
+                onRetry={handleRetryGamDraft}
                 isPending={isGamPending}
+                isRefreshing={isGamRefreshing}
                 status={gamStatus}
                 drafts={gamDrafts}
             />
@@ -274,17 +309,45 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
     )
 }
 
-function GamImportPanel({ orderUrl, onOrderUrlChange, onRequestDraft, onRefresh, onLoadDraft, isPending, status, drafts }: {
+function GamImportPanel({ orderUrl, onOrderUrlChange, onRequestDraft, onRefresh, onLoadDraft, onRetry, isPending, isRefreshing, status, drafts }: {
     orderUrl: string
     onOrderUrlChange: (value: string) => void
     onRequestDraft: () => void
-    onRefresh: () => Promise<any>
+    onRefresh: () => Promise<GamImportJob[]>
     onLoadDraft: (draft: GamImportDraft) => void
+    onRetry: (orderUrl: string) => void
     isPending: boolean
+    isRefreshing: boolean
     status: string
-    drafts: Array<{ id: string; level: string; message: string; createdAt: string; draft: GamImportDraft | null }>
+    drafts: GamImportJob[]
 }) {
-    const readyDrafts = drafts.filter(item => item.draft)
+    const visibleJobs = drafts.slice(0, 6)
+
+    const friendlyError = (message: string) => {
+        if (message.includes('GAM_SESSION_EXPIRADA')) return 'A sessao do GAM expirou e precisa de novo login supervisionado.'
+        if (message.includes('GAM_SEM_LINE_ITEMS')) return 'A Order abriu, mas nenhum line item foi encontrado.'
+        if (message.includes('GAM_RASCUNHO_VAZIO')) return 'A Order nao produziu formatos reconhecidos pelo Adsnap.'
+        return message.replace(/^Erro:\s*/i, '')
+    }
+
+    const jobPresentation = (job: GamImportJob) => {
+        if (job.level === 'JOB_GAM_PENDING') return {
+            label: 'Na fila', color: '#f59e0b', background: 'rgba(245,158,11,0.10)', icon: Clock,
+            detail: 'Aguardando um runner disponivel.',
+        }
+        if (job.level === 'JOB_GAM_RUNNING') return {
+            label: 'Processando', color: '#7c3aed', background: 'rgba(124,58,237,0.12)', icon: Loader2,
+            detail: job.message.replace(/^Nexus GAM:\s*/i, ''),
+        }
+        if (job.level === 'JOB_GAM_REVIEW') return {
+            label: 'Pronto', color: '#22c55e', background: 'rgba(34,197,94,0.10)', icon: CircleCheck,
+            detail: `${job.draft?.mediaEntries.length || 0} formato(s) aguardando revisao${job.draft?.blockedItems.length ? `; ${job.draft.blockedItems.length} bloqueado(s)` : ''}.`,
+        }
+        return {
+            label: 'Erro', color: '#ef4444', background: 'rgba(239,68,68,0.10)', icon: CircleX,
+            detail: friendlyError(job.message),
+        }
+    }
 
     return (
         <div
@@ -306,11 +369,12 @@ function GamImportPanel({ orderUrl, onOrderUrlChange, onRequestDraft, onRefresh,
                 </div>
                 <button
                     onClick={() => onRefresh()}
+                    disabled={isRefreshing}
                     className="w-10 h-10 rounded-lg flex items-center justify-center transition-all"
                     style={{ background: 'var(--bg-tertiary)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
                     title="Atualizar"
                 >
-                    <RefreshCw size={16} />
+                    <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
                 </button>
             </div>
 
@@ -321,14 +385,14 @@ function GamImportPanel({ orderUrl, onOrderUrlChange, onRequestDraft, onRefresh,
                         value={orderUrl}
                         onChange={event => onOrderUrlChange(event.target.value)}
                         placeholder="https://admanager.google.com/...order_id=..."
-                        className="w-full rounded-xl p-4 pl-12 outline-none transition-all font-medium"
+                        className="w-full rounded-lg p-4 pl-12 outline-none transition-all font-medium"
                         style={{ background: 'var(--bg-tertiary)', border: '2px solid transparent', color: 'var(--text-primary)' }}
                     />
                 </div>
                 <button
                     onClick={onRequestDraft}
                     disabled={isPending || !orderUrl.trim()}
-                    className="px-5 py-4 rounded-xl transition-all flex items-center justify-center gap-2 font-bold text-sm disabled:opacity-40"
+                    className="px-5 py-4 rounded-lg transition-all flex items-center justify-center gap-2 font-bold text-sm disabled:opacity-40"
                     style={{ background: 'var(--accent-muted)', color: 'var(--accent-light)', border: '1px solid var(--accent)' }}
                 >
                     <FileCheck2 size={18} />
@@ -342,31 +406,65 @@ function GamImportPanel({ orderUrl, onOrderUrlChange, onRequestDraft, onRefresh,
                 </p>
             )}
 
-            {readyDrafts.length > 0 && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                    {readyDrafts.slice(0, 4).map(item => item.draft && (
-                        <button
-                            key={item.id}
-                            onClick={() => onLoadDraft(item.draft!)}
-                            className="p-4 rounded-xl text-left transition-all hover:-translate-y-0.5"
-                            style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}
-                        >
-                            <div className="flex items-center justify-between gap-3 mb-2">
-                                <span className="font-bold text-sm truncate" style={{ color: 'var(--text-primary)' }}>
-                                    {item.draft.client}
-                                </span>
-                                {item.draft.blockedItems.length > 0 && (
-                                    <span className="flex items-center gap-1 text-[10px] font-black" style={{ color: '#f59e0b' }}>
-                                        <AlertTriangle size={12} />
-                                        {item.draft.blockedItems.length}
-                                    </span>
-                                )}
+            {visibleJobs.length > 0 && (
+                <div
+                    className="overflow-hidden"
+                    style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '12px' }}
+                    aria-live="polite"
+                >
+                    {visibleJobs.map((job, index) => {
+                        const presentation = jobPresentation(job)
+                        const StatusIcon = presentation.icon
+                        return (
+                            <div
+                                key={job.id}
+                                className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3"
+                                style={{ borderTop: index === 0 ? 'none' : '1px solid var(--border)' }}
+                            >
+                                <div
+                                    className="w-9 h-9 flex items-center justify-center"
+                                    style={{ color: presentation.color, background: presentation.background, borderRadius: '8px' }}
+                                >
+                                    <StatusIcon size={17} className={job.level === 'JOB_GAM_RUNNING' ? 'animate-spin' : ''} />
+                                </div>
+                                <div className="min-w-0">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <span className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
+                                            Order {job.orderId || 'GAM'}
+                                        </span>
+                                        <span
+                                            className="px-2 py-1 text-[10px] font-semibold shrink-0"
+                                            style={{ color: presentation.color, background: presentation.background, borderRadius: '6px' }}
+                                        >
+                                            {presentation.label}
+                                        </span>
+                                    </div>
+                                    <p className="text-xs truncate mt-1" style={{ color: 'var(--text-muted)' }} title={presentation.detail}>
+                                        {presentation.detail} - {new Date(job.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                    </p>
+                                </div>
+                                {job.draft ? (
+                                    <button
+                                        onClick={() => onLoadDraft(job.draft!)}
+                                        className="px-3 py-2 flex items-center gap-2 text-xs font-semibold transition-colors"
+                                        style={{ color: '#ffffff', background: '#7c3aed', borderRadius: '8px' }}
+                                    >
+                                        Revisar <ChevronRight size={14} />
+                                    </button>
+                                ) : job.level === 'JOB_GAM_ERROR' && job.orderUrl ? (
+                                    <button
+                                        onClick={() => onRetry(job.orderUrl)}
+                                        disabled={isPending}
+                                        className="w-9 h-9 flex items-center justify-center transition-colors disabled:opacity-40"
+                                        style={{ color: '#ef4444', border: '1px solid rgba(239,68,68,0.28)', borderRadius: '8px' }}
+                                        title="Tentar novamente"
+                                    >
+                                        <RotateCcw size={15} />
+                                    </button>
+                                ) : null}
                             </div>
-                            <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>
-                                PI {item.draft.pi} · {item.draft.mediaEntries.length} formato(s)
-                            </p>
-                        </button>
-                    ))}
+                        )
+                    })}
                 </div>
             )}
         </div>

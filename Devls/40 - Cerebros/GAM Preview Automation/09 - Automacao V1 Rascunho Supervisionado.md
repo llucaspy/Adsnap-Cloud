@@ -130,3 +130,14 @@ Em 2026-06-18, a sessao GAM passou a ser reutilizavel em runners descartaveis:
 A chave e derivada de `GAM_SESSION_ENCRYPTION_KEY` quando configurada. Como compatibilidade, o worker pode deriva-la de `SUPABASE_SERVICE_ROLE_KEY`, que ja existe apenas nos ambientes protegidos. Nenhum cookie, senha ou estado descriptografado deve ser versionado ou salvo em bucket publico.
 
 Teste validado com a Order 4097107199: um contexto sem perfil local restaurou 173 cookies do Supabase, encontrou o line item 7335019398, extraiu os quatro assets e renovou a sessao remota.
+
+## Observabilidade do rascunho
+
+O operador nao deve precisar abrir GitHub Actions ou logs tecnicos para saber se uma Order esta funcionando. A tela Novo Setup acompanha os jobs a cada quatro segundos e apresenta quatro estados:
+
+- `JOB_GAM_PENDING`: na fila, aguardando o runner;
+- `JOB_GAM_RUNNING`: progresso atualizado pelo crawler, incluindo sessao, line items e previews;
+- `JOB_GAM_REVIEW`: rascunho pronto com botao de revisao;
+- `JOB_GAM_ERROR`: erro traduzido e opcao de nova tentativa.
+
+Novos pedidos para uma Order que ja esteja `PENDING` ou `RUNNING` reutilizam o job ativo em vez de criar duplicatas.

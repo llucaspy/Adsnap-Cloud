@@ -230,7 +230,26 @@ export async function requestGamImportDraft(orderUrl: string) {
 
     const orderId = url.match(/order_id=(\d+)/i)?.[1] || 'Unknown'
 
-    await prisma.nexusLog.create({
+    const activeJobs = await prisma.nexusLog.findMany({
+        where: { level: { in: ['JOB_GAM_PENDING', 'JOB_GAM_RUNNING'] } },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+    })
+    const existingJob = activeJobs.find(job => {
+        try {
+            const details = JSON.parse(job.details || '{}') as { orderUrl?: string; orderId?: string }
+            return details.orderId === orderId || details.orderUrl?.includes(`order_id=${orderId}`)
+        } catch {
+            return false
+        }
+    })
+
+    if (existingJob) {
+        const triggered = existingJob.level === 'JOB_GAM_PENDING' ? await triggerNexusWorker() : true
+        return { success: true, orderId, triggered, existing: true, jobId: existingJob.id }
+    }
+
+    const job = await prisma.nexusLog.create({
         data: {
             level: 'JOB_GAM_PENDING',
             message: `Nexus GAM: rascunho solicitado para Order ${orderId}`,
@@ -244,7 +263,7 @@ export async function requestGamImportDraft(orderUrl: string) {
     }
 
     revalidatePath('/campaigns')
-    return { success: true, orderId, triggered }
+    return { success: true, orderId, triggered, existing: false, jobId: job.id }
 }
 
 export async function getGamImportDrafts() {
@@ -256,9 +275,14 @@ export async function getGamImportDrafts() {
 
     return logs.map(log => {
         let draft: GamImportDraft | null = null
+        let orderUrl = ''
+        let orderId = ''
         try {
-            if (log.level === 'JOB_GAM_REVIEW' && log.details) {
-                draft = JSON.parse(log.details) as GamImportDraft
+            if (log.details) {
+                const details = JSON.parse(log.details) as GamImportDraft & { orderUrl?: string; orderId?: string }
+                orderUrl = details.orderUrl || ''
+                orderId = details.orderId || details.orderUrl?.match(/order_id=(\d+)/i)?.[1] || ''
+                if (log.level === 'JOB_GAM_REVIEW') draft = details
             }
         } catch {
             draft = null
@@ -269,6 +293,8 @@ export async function getGamImportDrafts() {
             level: log.level,
             message: log.message,
             createdAt: log.createdAt.toISOString(),
+            orderId,
+            orderUrl,
             draft,
         }
     })

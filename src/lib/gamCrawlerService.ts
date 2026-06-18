@@ -7,6 +7,8 @@ import {
     saveGamSessionState,
 } from './gamSessionStore'
 
+type GamProgressHandler = (message: string) => void | Promise<void>
+
 function unique<T>(items: T[], getKey: (item: T) => string) {
     const seen = new Set<string>()
     return items.filter(item => {
@@ -127,9 +129,10 @@ export class GamCrawlerService {
         }
     }
 
-    async startIngestion(orderUrl: string): Promise<GamOrderImport> {
+    async startIngestion(orderUrl: string, onProgress?: GamProgressHandler): Promise<GamOrderImport> {
         console.log(`[Nexus GAM] Iniciando ingestao para: ${orderUrl}`)
         const networkCode = parseNetworkCode(orderUrl)
+        await onProgress?.('Restaurando sessao autenticada do GAM')
         const launched = await this.launchContext(networkCode)
         const page = await launched.context.newPage()
         let authenticated = false
@@ -137,6 +140,7 @@ export class GamCrawlerService {
         try {
             await this.ensureLogin(page, networkCode)
             authenticated = true
+            await onProgress?.('Sessao validada; abrindo a Order')
             await page.goto(orderUrl, { waitUntil: 'domcontentloaded', timeout: 90000 })
             await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => null)
             await page.waitForTimeout(5000)
@@ -170,10 +174,13 @@ export class GamCrawlerService {
                 throw new Error(`GAM_SEM_LINE_ITEMS: nenhum item de linha foi encontrado na Order ${parseOrderId(orderUrl)}.`)
             }
 
+            await onProgress?.(`${discoveredItems.length} line item(s) encontrado(s)`)
+
             const lineItemClient = discoveredItems[0]?.name.split('_')[0]?.trim()
 
-            for (const item of discoveredItems) {
-                await this.processLineItem(page, networkCode, item)
+            for (const [index, item] of discoveredItems.entries()) {
+                await onProgress?.(`Lendo line item ${index + 1} de ${discoveredItems.length}`)
+                await this.processLineItem(page, networkCode, item, onProgress)
             }
 
             const range = extractDateRange(orderText)
@@ -300,7 +307,12 @@ export class GamCrawlerService {
         return []
     }
 
-    private async processLineItem(page: Page, networkCode: string, item: GamLineItemImport) {
+    private async processLineItem(
+        page: Page,
+        networkCode: string,
+        item: GamLineItemImport,
+        onProgress?: GamProgressHandler
+    ) {
         const url = item.sourceUrl || `https://admanager.google.com/${networkCode}#delivery/line%20item/line_item_overview/line_item_id=${item.id}`
         console.log(`[Nexus GAM] Processando Line Item: ${item.name} (${item.id})`)
 
@@ -337,8 +349,11 @@ export class GamCrawlerService {
         })).filter(creative => creative.creativeId), creative => creative.creativeId)
 
         console.log(`[Nexus GAM] Criativos encontrados no line item ${item.id}: ${creatives.length}`)
+        await onProgress?.(`${creatives.length} criativo(s) encontrado(s) no line item`)
 
-        for (const creative of creatives) {
+        for (const [index, creative] of creatives.entries()) {
+            const size = creative.sizeHint ? ` ${creative.sizeHint.width}x${creative.sizeHint.height}` : ''
+            await onProgress?.(`Gerando preview ${index + 1} de ${creatives.length}${size}`)
             const preview = await this.processCreative(
                 page,
                 networkCode,
