@@ -294,6 +294,64 @@ async function injectCreativeAsset(locator: Locator, assetUrl: string, width: nu
     });
 }
 
+function isStandaloneCreativeAsset(assetUrl: string) {
+    try {
+        const url = new URL(assetUrl)
+        const isAdfLayer = url.hostname === 'creatives.adftech.com.br'
+            && /\/\d{2}\.(?:png|jpe?g|webp)$/i.test(url.pathname)
+
+        return !isAdfLayer && /\.(?:png|jpe?g|webp)(?:$|\?)/i.test(url.toString())
+    } catch {
+        return false
+    }
+}
+
+async function waitForCreativeRender(page: import('playwright').Page, locator: Locator, campaignId: string) {
+    const minimumWaitMs = 10_000
+    const maximumWaitMs = 18_000
+    const sampleIntervalMs = 1_500
+    const startedAt = Date.now()
+    let previousSample: Buffer | null = null
+    let stableSamples = 0
+
+    await nexusLogStore.addLog(
+        'Nexus: Aguardando renderizacao completa do criativo',
+        'SYSTEM',
+        `Espera minima: ${minimumWaitMs / 1000}s | limite: ${maximumWaitMs / 1000}s`,
+        campaignId
+    )
+
+    await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => null)
+    await page.evaluate(() => document.fonts?.ready).catch(() => null)
+
+    while (Date.now() - startedAt < maximumWaitMs) {
+        await page.waitForTimeout(sampleIntervalMs)
+
+        const sample = await locator.screenshot({
+            type: 'png',
+            animations: 'disabled',
+            timeout: 6_000,
+        }).catch(() => null)
+
+        if (sample && previousSample && sample.equals(previousSample)) {
+            stableSamples += 1
+        } else {
+            stableSamples = 0
+        }
+        previousSample = sample
+
+        if (Date.now() - startedAt >= minimumWaitMs && stableSamples >= 1) break
+    }
+
+    const waitedMs = Date.now() - startedAt
+    await nexusLogStore.addLog(
+        'Nexus: Criativo pronto para captura',
+        'SUCCESS',
+        `Renderizacao aguardada por ${(waitedMs / 1000).toFixed(1)}s`,
+        campaignId
+    )
+}
+
 // ============================================================================
 // MAIN CAPTURE EXECUTION
 // ============================================================================
@@ -310,6 +368,18 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
         ? campaign.compositionBox as { creativeAssetUrl?: string }
         : null;
     const creativeAssetUrl = composition?.creativeAssetUrl;
+    const standaloneCreativeAssetUrl = creativeAssetUrl && isStandaloneCreativeAsset(creativeAssetUrl)
+        ? creativeAssetUrl
+        : undefined;
+
+    if (creativeAssetUrl && !standaloneCreativeAssetUrl) {
+        await nexusLogStore.addLog(
+            'Nexus: Asset em camadas detectado; usando renderizacao real do preview',
+            'INFO',
+            creativeAssetUrl,
+            campaignId
+        );
+    }
 
     console.log('[Nexus] Campanha encontrada:', campaign.client, '-', campaign.format)
     await nexusLogStore.addLog(`Nexus: Processando ${campaign.client} - Formato: ${campaign.format}`, 'INFO', undefined, campaignId);
@@ -459,10 +529,10 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
 
                 await locator.waitFor({ state: 'visible', timeout: 5000 });
 
-                if (creativeAssetUrl) {
+                if (standaloneCreativeAssetUrl) {
                     console.log(`[Nexus] Injetando asset autenticado do GAM no slot (${targetW}x${targetH})`);
-                    await injectCreativeAsset(locator, creativeAssetUrl, targetW, targetH);
-                    await nexusLogStore.addLog('Nexus: Criativo autenticado injetado no slot', 'SUCCESS', creativeAssetUrl, campaignId);
+                    await injectCreativeAsset(locator, standaloneCreativeAssetUrl, targetW, targetH);
+                    await nexusLogStore.addLog('Nexus: Criativo autenticado injetado no slot', 'SUCCESS', standaloneCreativeAssetUrl, campaignId);
                 }
 
                 const box = await locator.boundingBox();
@@ -489,12 +559,14 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
                     await page.evaluate((y) => window.scrollTo(0, y), targetScrollY);
                     await page.waitForTimeout(3000);
 
-                    if (creativeAssetUrl) {
-                        await injectCreativeAsset(locator, creativeAssetUrl, targetW, targetH);
-                        await page.waitForTimeout(500);
+                    if (standaloneCreativeAssetUrl) {
+                        await injectCreativeAsset(locator, standaloneCreativeAssetUrl, targetW, targetH);
+                        await page.waitForTimeout(1500);
+                    } else {
+                        await waitForCreativeRender(page, locator, campaignId);
                     }
 
-                    const screenshotBuffer = await page.screenshot({ type: 'png' });
+                    const screenshotBuffer = await page.screenshot({ type: 'png', animations: 'disabled' });
                     await browser.close();
 
                     const finalImage = await compositeStudioImage(screenshotBuffer, campaign.url, isMobile);
@@ -592,10 +664,10 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
         console.log(`[Nexus] Scroll final para Y = ${Math.round(targetScrollY)} `);
         await page.evaluate((y) => window.scrollTo(0, y), targetScrollY);
 
-        await page.waitForTimeout(6000);
+        await page.waitForTimeout(12000);
 
         console.log('[Nexus] Capturando screenshot final...')
-        const screenshotBuffer = await page.screenshot({ type: 'png' });
+        const screenshotBuffer = await page.screenshot({ type: 'png', animations: 'disabled' });
         await browser.close();
 
         await nexusLogStore.addLog('Nexus: Browser finalizado. Iniciando composição estética...', 'SYSTEM', undefined, campaignId);

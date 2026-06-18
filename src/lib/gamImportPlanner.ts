@@ -168,7 +168,7 @@ function inferAgency(order: GamOrderImport) {
     const source = normalizeText(`${order.orderName || ''} ${order.agencyName || ''} ${order.lineItems.map(item => item.name).join(' ')}`)
 
     if (source.includes('estadual')) return 'ESTADUAL'
-    if (source.includes('federal')) return 'FEDERAL'
+    if (source.includes('federal') || /\bministerio (?:da|das|de|do|dos)\b/.test(source)) return 'FEDERAL'
     if (source.includes('interno')) return 'INTERNO'
     return order.agencyName && !/desconhecid/i.test(order.agencyName) ? order.agencyName : 'PRIVADO'
 }

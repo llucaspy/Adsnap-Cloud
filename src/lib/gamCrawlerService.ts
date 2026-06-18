@@ -481,7 +481,29 @@ export class GamCrawlerService {
             }
         }
 
-        return candidates.find(candidate => candidate.preferred)?.url || candidates[0]?.url
+        const uniqueCandidates = Array.from(
+            new Map(candidates.map(candidate => [candidate.url, candidate])).values()
+        )
+        const preferred = uniqueCandidates.find(candidate => candidate.preferred)
+        if (preferred) return preferred.url
+
+        if (uniqueCandidates.length === 1) {
+            const candidate = uniqueCandidates[0].url
+            try {
+                const url = new URL(candidate)
+                const isLayeredHtml5Asset = url.hostname === 'creatives.adftech.com.br'
+                    && /\/\d{2}\.(?:png|jpe?g|webp)$/i.test(url.pathname)
+                if (!isLayeredHtml5Asset) return candidate
+            } catch {
+                return undefined
+            }
+        }
+
+        if (uniqueCandidates.length > 1) {
+            console.log(`[Nexus GAM] ${uniqueCandidates.length} camadas visuais detectadas; o preview sera renderizado sem injecao direta`)
+        }
+
+        return undefined
     }
 }
 

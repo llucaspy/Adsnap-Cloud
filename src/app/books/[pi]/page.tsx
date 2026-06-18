@@ -4,8 +4,7 @@ import { ArrowLeft, Download } from 'lucide-react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { BookCampaignList } from '@/components/BookCampaignList'
-
-import { startOfDay, endOfDay, parse } from 'date-fns'
+import { BookEmailButton } from '@/components/BookEmailButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -100,6 +99,17 @@ export default async function PiDetailPage({
 
     const client = processedCampaigns[0].client
     const agency = processedCampaigns[0].agency
+    const federalCampaigns = processedCampaigns.filter(campaign => campaign.segmentation === 'GOV_FEDERAL')
+    const latestFlightEnd = federalCampaigns.reduce<Date | null>((latest, campaign) => {
+        if (!campaign.flightEnd) return latest
+        return !latest || campaign.flightEnd > latest ? campaign.flightEnd : latest
+    }, null)
+    const reportDispatch = latestFlightEnd
+        ? await prisma.emailDispatch.findUnique({
+            where: { pi_flightEnd: { pi, flightEnd: latestFlightEnd } },
+            select: { status: true },
+        })
+        : null
 
     return (
         <div className="space-y-12 animate-slide-up">
@@ -148,16 +158,21 @@ export default async function PiDetailPage({
                         </p>
                     </div>
 
-                    <button
-                        className="flex items-center gap-3 px-8 py-4 rounded-xl font-bold transition-all group text-white hover:scale-105 active:scale-95"
-                        style={{
-                            background: 'var(--bg-secondary)',
-                            border: '1px solid var(--border)',
-                        }}
-                    >
-                        <Download size={20} className="group-hover:text-white transition-colors" />
-                        Exportar Relatório PDF
-                    </button>
+                    <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start">
+                        {latestFlightEnd && (
+                            <BookEmailButton pi={pi} initialStatus={reportDispatch?.status} />
+                        )}
+                        <button
+                            className="flex min-h-11 items-center justify-center gap-3 rounded-lg px-5 py-2.5 text-sm font-medium text-[#e5e5e5] transition-[background,border-color,transform] duration-200 hover:-translate-y-px hover:bg-white/[0.04]"
+                            style={{
+                                background: 'transparent',
+                                border: '1px solid rgba(255,255,255,0.16)',
+                            }}
+                        >
+                            <Download size={18} className="transition-colors" />
+                            Exportar Relatório PDF
+                        </button>
+                    </div>
                 </div>
             </header>
 

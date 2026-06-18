@@ -246,6 +246,7 @@ export async function queueGovernmentReportManual(pi: string) {
     await nexusLogStore.addLog(`Relatorio Governo Federal: PI ${cleanPi} enfileirada manualmente`, 'SYSTEM')
     const triggered = await triggerNexusWorker()
     revalidatePath('/admin')
+    revalidatePath(`/books/${cleanPi}`)
 
     return {
         success: true,
