@@ -611,75 +611,35 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
 }
 
 /**
- * Nexus Execution Engine: Lógica de Ingestão GAM Assíncrona
+ * Nexus Execution Engine: Despachante de Jobs GAM (v5.6)
+ * Registra o job no banco para consumo pelo Worker Externo.
  */
 async function executeGamIngestion(url: string): Promise<NexusResponse> {
     const orderId = url.split('order_id=')[1]?.split('&')[0] || 'Unknown';
     
-    // Dispara a execução em background (Async Broker)
-    // Nota: Em Next.js App Router, Promises soltas podem ser interrompidas em ambientes Lambda,
-    // mas aqui garantimos o recibo imediato ao usuário.
-    (async () => {
-        try {
-            console.log(`[Nexus Engine] Iniciando JOB de ingestão em background para Order ${orderId}...`)
-            
-            // Log inicial no DB para o usuário ver no front
-            await prisma.nexusLog.create({
-                data: {
-                    level: 'INFO',
-                    message: `Nexus Execution Engine: Iniciando processamento da Order ${orderId}`,
-                    details: `URL: ${url}`
-                }
-            })
+    try {
+        console.log(`[Nexus Dispatcher] Enfileirando JOB de ingestão para Order ${orderId}...`)
 
-            const data = await gamCrawler.startIngestion(url)
-            
-            const createdCampaigns = []
-            for (const item of data.lineItems) {
-                for (const preview of item.previewLinks) {
-                    const campaign = await prisma.campaign.create({
-                        data: {
-                            pi: data.orderId.substring(0, 6),
-                            client: data.clientName,
-                            agency: data.agencyName,
-                            campaignName: item.name,
-                            url: preview.url,
-                            format: preview.format === 'DETECTED' ? 'Display' : preview.format,
-                            segmentation: 'PRIVADO',
-                            status: 'ACTIVE',
-                            isArchived: false,
-                        }
-                    })
-                    createdCampaigns.push(campaign)
-                }
+        // Log de Job Pendente para o Worker
+        await prisma.nexusLog.create({
+            data: {
+                level: 'JOB_GAM_PENDING',
+                message: `Nexus Execution Engine: Pedido de Ingestão Order ${orderId}`,
+                details: url // Salva a URL completa para o Crawler
             }
+        })
 
-            await prisma.nexusLog.create({
-                data: {
-                    level: 'SUCCESS',
-                    message: `Automação GAM Concluída para Order ${orderId}`,
-                    details: `Cadastradas ${createdCampaigns.length} campanhas com sucesso.`
-                }
-            })
-
-            console.log(`[Nexus Engine] Job ${orderId} finalizado com sucesso.`)
-        } catch (error) {
-            console.error(`[Nexus Engine] Falha no Job ${orderId}:`, error)
-            await prisma.nexusLog.create({
-                data: {
-                    level: 'ERROR',
-                    message: `Falha na automação GAM (Order ${orderId})`,
-                    details: error instanceof Error ? error.message : String(error)
-                }
-            })
+        // Retorno IMEDIATO ao usuário (Arquitetura Non-Blocking)
+        return {
+            message: `⚡ **Ticket de Operação v5.6 Gerado!**\n\nRecebi sua ordem para a Order **${orderId}**.\n\nA ingestão foi enfileirada para o **Nexus Worker Central** e começará em alguns instantes. Você pode acompanhar o progresso nos logs de sistema.`,
+            success: true,
+            actionPerformed: 'SCHEDULE_ALL'
         }
-    })()
-
-    // Retorno IMEDIATO ao usuário (Arquitetura Non-Blocking)
-    return {
-        message: `⚡ **Ticket de Operação Gerado!**\n\nRecebi sua ordem para a Order **${orderId}**. Como o processo de ativação no GAM envolve múltiplos itens de linha, a ingestão continuará rodando em background.\n\nVocê pode acompanhar o progresso nos logs do sistema ou dar um refresh na lista de campanhas em alguns instantes.`,
-        success: true,
-        actionPerformed: 'SCHEDULE_ALL'
+    } catch (error) {
+        return {
+            message: `❌ Falha ao enfileirar o job: ${error instanceof Error ? error.message : 'Erro interno'}`,
+            success: false
+        }
     }
 }
 
