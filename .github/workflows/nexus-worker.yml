@@ -3,7 +3,13 @@ name: Nexus Engine Worker
 on:
   schedule:
     - cron: '*/15 * * * *' # Roda a cada 15 minutos
-  workflow_dispatch: # Permite rodar manualmente
+    - cron: '0 3 1 * *' # Limpeza mensal
+  workflow_dispatch:
+    inputs:
+      campaign_ids:
+        description: 'IDs de campanhas para captura direcionada (separados por virgula)'
+        required: false
+        type: string
   repository_dispatch: # Permite gatilhos externos via API
     types: [nexus-trigger]
 
@@ -44,13 +50,14 @@ jobs:
         run: npm run worker
         env:
           GITHUB_ACTIONS: "true"
+          TARGET_CAMPAIGN_IDS: ${{ github.event.inputs.campaign_ids || '' }}
 
       - name: Run Storage Monitor
         run: npm run monitor
 
   monthly-cleanup:
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 3 1 * *' || github.event_name == 'workflow_dispatch'
+    if: github.event.schedule == '0 3 1 * *'
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4

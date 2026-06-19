@@ -37,7 +37,7 @@ export async function runCapture(campaignId: string) {
     nexusLogStore.addLog(`Nexus: Campanha individual enfileirada.`, 'SYSTEM')
 
     // Attempt to trigger worker immediately
-    const triggered = await triggerNexusWorker()
+    const triggered = await triggerNexusWorker([campaignId])
     if (!triggered) {
         nexusLogStore.addLog('Nexus: Worker não disparado (verifique GITHUB_TOKEN e GITHUB_REPO)', 'ERROR')
     }
@@ -59,7 +59,7 @@ export async function runCaptureBatch(campaignIds: string[]) {
     nexusLogStore.addLog(`Nexus: Lote de ${campaignIds.length} campanhas enfileirado via interface.`, 'SYSTEM')
 
     // Trigger GitHub Worker ONCE
-    const triggered = await triggerNexusWorker()
+    const triggered = await triggerNexusWorker(campaignIds)
     if (!triggered) {
         nexusLogStore.addLog('Nexus: Worker não disparado no lote (verifique chaves)', 'ERROR')
     }
@@ -617,7 +617,7 @@ export async function runAllCaptures() {
     })
 
     // Trigger GitHub Worker
-    const triggered = await triggerNexusWorker()
+    const triggered = await triggerNexusWorker(campaigns.map(campaign => campaign.id))
     if (!triggered) {
         nexusLogStore.addLog('Nexus: Worker não disparado (verifique GITHUB_TOKEN e GITHUB_REPO)', 'ERROR')
     }
@@ -630,7 +630,7 @@ export async function runAllCaptures() {
  * Triggers the GitHub Actions worker immediately via workflow_dispatch.
  * Requires GITHUB_TOKEN and GITHUB_REPO to be set in Vercel.
  */
-export async function triggerNexusWorker() {
+export async function triggerNexusWorker(campaignIds: string[] = []) {
     const token = process.env.GITHUB_TOKEN
     let repo = process.env.GITHUB_REPO // Expected: "owner/repo"
 
@@ -656,6 +656,7 @@ export async function triggerNexusWorker() {
 
     try {
         console.log(`[Nexus] Triggering GitHub worker for ${repo}...`)
+        const targetIds = [...new Set(campaignIds.map(id => id.trim()).filter(Boolean))]
         
         // Timeout de 15 segundos para evitar travamento da Server Action
         const controller = new AbortController()
@@ -672,7 +673,8 @@ export async function triggerNexusWorker() {
                     'User-Agent': 'Adsnap-Nexus-Agent'
                 },
                 body: JSON.stringify({
-                    ref: 'main' // Trigger the main branch
+                    ref: 'main',
+                    inputs: { campaign_ids: targetIds.join(',') }
                 }),
                 signal: controller.signal
             }

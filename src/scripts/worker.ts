@@ -97,6 +97,12 @@ async function cleanupStuckCampaigns() {
 async function runWorkerCycle() {
     console.log('[Nexus Worker] Iniciando ciclo de processamento...')
     await nexusLogStore.addLog('Nexus Worker: Ciclo iniciado no servidor.', 'SYSTEM')
+    const targetedCampaignIds = [...new Set(
+        (process.env.TARGET_CAMPAIGN_IDS || '')
+            .split(',')
+            .map(id => id.trim())
+            .filter(Boolean)
+    )]
     
     const now = new Date()
     const brtNowStr = now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })
@@ -239,19 +245,19 @@ async function runWorkerCycle() {
         console.error('[Nexus Worker] Erro nos alertas de limite diário:', err)
     }
 
-    await prisma.$disconnect()
     // 8. Campaign Capture (movido para o final)
     try {
         const queuedCampaigns = await prisma.campaign.findMany({
             where: {
                 status: 'QUEUED',
-                isArchived: false
+                isArchived: false,
+                ...(targetedCampaignIds.length > 0 ? { id: { in: targetedCampaignIds } } : {})
             },
             orderBy: { updatedAt: 'asc' },
             take: 20
         })
 
-        const autoconfigCampaigns = queuedCampaigns.length >= 20 ? [] : await prisma.campaign.findMany({
+        const autoconfigCampaigns = targetedCampaignIds.length > 0 || queuedCampaigns.length >= 20 ? [] : await prisma.campaign.findMany({
             where: {
                 status: 'AUTOCONFIG',
                 isArchived: false
@@ -263,6 +269,12 @@ async function runWorkerCycle() {
         const campaigns = [...queuedCampaigns, ...autoconfigCampaigns]
 
         if (campaigns.length > 0) {
+            if (targetedCampaignIds.length > 0) {
+                await nexusLogStore.addLog(
+                    `Nexus Worker: captura manual direcionada para ${campaigns.length} de ${targetedCampaignIds.length} item(ns)`,
+                    'SYSTEM'
+                )
+            }
             console.log(`[Nexus Worker] Encontradas ${campaigns.length} campanhas/montagens para processar.`)
             await nexusLogStore.addLog(`Nexus Worker: Processando lote de ${campaigns.length} itens (incluindo montagem automática)`, 'SYSTEM')
 
@@ -316,8 +328,11 @@ async function startWorker() {
     console.log(`[Nexus Worker] Iniciado em modo ${isCI ? 'CI/PROD' : 'LOCAL'}`)
 
     if (isCI) {
-        await runWorkerCycle()
-        process.exit(0)
+        try {
+            await runWorkerCycle()
+        } finally {
+            await prisma.$disconnect()
+        }
     } else {
         while (true) {
             await runWorkerCycle()
