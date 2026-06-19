@@ -167,69 +167,6 @@ async function runWorkerCycle() {
     // 5. GAM Ingestion Jobs (supervised draft)
     try {
         await processPendingGamJobs()
-
-        const crawlerModule = await import('../lib/gamCrawlerService')
-        const plannerModule = await import('../lib/gamImportPlanner')
-        const gamCrawler = crawlerModule.gamCrawler
-        const buildGamImportDraft = plannerModule.buildGamImportDraft
-
-        if (!gamCrawler || !buildGamImportDraft) {
-            throw new Error('Modulos GAM indisponiveis no worker.')
-        }
-
-        const jobs = await prisma.nexusLog.findMany({
-            where: { level: 'JOB_GAM_PENDING' },
-            take: 5
-        })
-
-        for (const job of jobs) {
-            console.log(`[Nexus Worker] Executando Job de Ingestão: ${job.message}`)
-
-            // Mark as Running
-            await prisma.nexusLog.update({
-                where: { id: job.id },
-                data: { level: 'JOB_GAM_RUNNING' }
-            })
-
-            try {
-                const details = job.details || ''
-                const parsed = details.trim().startsWith('{') ? JSON.parse(details) : { orderUrl: details }
-                const url = parsed.orderUrl || parsed.url || details
-                if (!url || !url.startsWith('http')) throw new Error('URL de job invalida')
-
-                const data = await gamCrawler.startIngestion(url, async (progress: string) => {
-                    await prisma.nexusLog.update({
-                        where: { id: job.id },
-                        data: { message: `Nexus GAM: ${progress}` }
-                    })
-                })
-                const settings = await prisma.settings.findUnique({ where: { id: 1 } })
-                const bannerFormats = JSON.parse(settings?.bannerFormats || '[]')
-                const draft = buildGamImportDraft(data, bannerFormats)
-
-                if (draft.mediaEntries.length === 0 && draft.blockedItems.length === 0) {
-                    throw new Error('GAM_RASCUNHO_VAZIO: nenhum formato ou bloqueio foi identificado.')
-                }
-
-                await prisma.nexusLog.update({
-                    where: { id: job.id },
-                    data: {
-                        level: 'JOB_GAM_REVIEW',
-                        message: `Rascunho GAM pronto: ${draft.client} (${draft.mediaEntries.length} formato(s), ${draft.blockedItems.length} bloqueado(s))`,
-                        details: JSON.stringify(draft)
-                    }
-                })
-            } catch (jobErr) {
-                console.error('[Nexus Worker] Falha no Job GAM:', jobErr)
-                await prisma.nexusLog.update({
-                    where: { id: job.id },
-                    data: {
-                        level: 'JOB_GAM_ERROR',
-                        message: `Erro: ${jobErr instanceof Error ? jobErr.message : String(jobErr)}`
-                    }
-                })
-            }
-        }
     } catch (err) {
         console.error('[Nexus Worker] Erro nos Jobs GAM:', err)
     }
@@ -392,5 +329,4 @@ async function startWorker() {
 startWorker().catch(err => {
     console.error('[Nexus Worker] Erro fatal:', err)
     process.exit(1)
-
-})
+})

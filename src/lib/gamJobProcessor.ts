@@ -14,6 +14,8 @@ export interface GamJobEvent {
 type GamJobDetails = Partial<GamImportDraft> & {
     orderUrl?: string
     mode?: string
+    requestedPi?: string
+    requestedSegmentation?: string
     executionLogs?: GamJobEvent[]
 }
 
@@ -102,7 +104,12 @@ export async function processPendingGamJobs(limit = 5, targetJobId?: string) {
             })
             const settings = await prisma.settings.findUnique({ where: { id: 1 } })
             const bannerFormats = JSON.parse(settings?.bannerFormats || '[]')
-            const draft = buildGamImportDraft(data, bannerFormats)
+            const inferredDraft = buildGamImportDraft(data, bannerFormats)
+            const draft: GamImportDraft = {
+                ...inferredDraft,
+                pi: initialDetails.requestedPi || inferredDraft.pi,
+                segmentation: initialDetails.requestedSegmentation || inferredDraft.segmentation,
+            }
 
             if (draft.mediaEntries.length === 0 && draft.blockedItems.length === 0) {
                 throw new Error('GAM_RASCUNHO_VAZIO: nenhum formato ou bloqueio foi identificado.')
@@ -111,7 +118,12 @@ export async function processPendingGamJobs(limit = 5, targetJobId?: string) {
             const current = await prisma.nexusLog.findUnique({ where: { id: job.id } })
             if (!current || current.level !== 'JOB_GAM_RUNNING') throw new Error('GAM_JOB_CANCELLED')
             const completedDetails = withEvent(
-                { ...draft, executionLogs: readDetails(current.details).executionLogs },
+                {
+                    ...draft,
+                    requestedPi: initialDetails.requestedPi || draft.pi,
+                    requestedSegmentation: initialDetails.requestedSegmentation || draft.segmentation,
+                    executionLogs: readDetails(current.details).executionLogs,
+                },
                 `Rascunho pronto com ${draft.mediaEntries.length} formato(s)`,
                 'success',
             )

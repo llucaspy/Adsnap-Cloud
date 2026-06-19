@@ -14,7 +14,7 @@ import {
     Plus, Globe, Smartphone, Monitor, Calendar,
     Clock, ChevronRight, ChevronLeft, Check,
     Building2, User2, Hash, Layers, Sparkles,
-    CalendarRange, Shield, Landmark, Building, Users,
+    CalendarRange, Landmark, Building, Users,
     ChevronDown, Trash2, X, Wand2, RefreshCw, FileCheck2,
     Loader2, CircleCheck, CircleX, RotateCcw, Terminal, Square
 } from 'lucide-react'
@@ -39,6 +39,8 @@ interface GamImportJob {
     createdAt: string
     orderId: string
     orderUrl: string
+    requestedPi: string
+    requestedSegmentation: string
     executionLogs: Array<{
         at: string
         message: string
@@ -66,13 +68,31 @@ const SEGMENTATIONS = [
     { value: 'INTERNO', label: 'Interno', icon: Users, description: 'Campanhas internas' },
 ]
 
+const GAM_SEGMENTATIONS = [
+    { value: 'GOV_FEDERAL', label: 'Governo Federal', icon: Landmark },
+    { value: 'GOV_ESTADUAL', label: 'Governo Estadual', icon: Building },
+    { value: 'PRIVADO', label: 'Privado', icon: Building2 },
+    { value: 'OUTRO', label: 'Outro', icon: Users },
+]
+
+function segmentationLabel(value: string) {
+    if (value.startsWith('OUTRO:')) return value.replace(/^OUTRO:\s*/i, '')
+    return GAM_SEGMENTATIONS.find(item => item.value === value)?.label
+        || SEGMENTATIONS.find(item => item.value === value)?.label
+        || value
+}
+
 export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[] }) {
+    const [setupMode, setSetupMode] = useState<'gam' | 'manual'>('gam')
     const [step, setStep] = useState(1)
     const [isPending, startTransition] = useTransition()
     const [isGamPending, startGamTransition] = useTransition()
     const [bannerFormats, setBannerFormats] = useState<any[]>([])
     const [mediaEntries, setMediaEntries] = useState<MediaEntry[]>([])
     const [gamOrderUrl, setGamOrderUrl] = useState('')
+    const [gamPi, setGamPi] = useState('')
+    const [gamSegmentation, setGamSegmentation] = useState('GOV_FEDERAL')
+    const [gamCustomSegmentation, setGamCustomSegmentation] = useState('')
     const [gamStatus, setGamStatus] = useState('')
     const [isGamRefreshing, setIsGamRefreshing] = useState(false)
     const [gamDrafts, setGamDrafts] = useState<GamImportJob[]>([])
@@ -171,13 +191,14 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
         })))
         setGamStatus(`Rascunho carregado: ${draft.mediaEntries.length} formato(s).`)
         setStep(4)
+        setSetupMode('manual')
     }
 
-    function requestGamDraft(url: string) {
+    function requestGamDraft(url: string, pi: string, segmentation: string) {
         startGamTransition(async () => {
             try {
                 setGamStatus('Solicitando rascunho...')
-                const result = await requestGamImportDraft(url)
+                const result = await requestGamImportDraft({ orderUrl: url, pi, segmentation })
                 setSelectedGamJobId(result.jobId)
                 setGamStatus(result.existing
                     ? `A Order ${result.orderId} ja esta em processamento.`
@@ -192,12 +213,26 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
     }
 
     function handleRequestGamDraft() {
-        requestGamDraft(gamOrderUrl)
+        const segmentation = gamSegmentation === 'OUTRO'
+            ? `OUTRO: ${gamCustomSegmentation.trim()}`
+            : gamSegmentation
+        requestGamDraft(gamOrderUrl, gamPi, segmentation)
     }
 
-    function handleRetryGamDraft(orderUrl: string) {
-        setGamOrderUrl(orderUrl)
-        requestGamDraft(orderUrl)
+    function handleRetryGamDraft(job: GamImportJob) {
+        const pi = job.requestedPi || gamPi
+        const segmentation = job.requestedSegmentation || (
+            gamSegmentation === 'OUTRO' ? `OUTRO: ${gamCustomSegmentation.trim()}` : gamSegmentation
+        )
+        setGamOrderUrl(job.orderUrl)
+        setGamPi(pi)
+        if (segmentation.startsWith('OUTRO:')) {
+            setGamSegmentation('OUTRO')
+            setGamCustomSegmentation(segmentation.replace(/^OUTRO:\s*/i, ''))
+        } else {
+            setGamSegmentation(segmentation)
+        }
+        requestGamDraft(job.orderUrl, pi, segmentation)
     }
 
     async function handleDeleteGamDraft(jobId: string) {
@@ -263,29 +298,48 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
     }
 
     return (
-        <div
-            className="rounded-3xl overflow-hidden transition-all duration-500 relative"
-            style={{
-                background: 'var(--bg-secondary)',
-                border: '1px solid var(--border)'
-            }}
-        >
-            {/* Gradient border effect */}
+        <div className="space-y-6">
             <div
-                className="absolute inset-0 rounded-3xl opacity-50 pointer-events-none"
-                style={{
-                    background: 'var(--gradient-primary)',
-                    padding: '1px',
-                    mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
-                    maskComposite: 'exclude',
-                    WebkitMaskComposite: 'xor'
-                }}
-            />
+                className="inline-flex p-1"
+                style={{ background: '#e9e7e2', border: '1px solid rgba(23,23,23,0.08)', borderRadius: '8px' }}
+                aria-label="Modo de cadastro"
+            >
+                <button
+                    type="button"
+                    onClick={() => setSetupMode('gam')}
+                    className="h-9 px-4 flex items-center gap-2 text-sm font-semibold transition-colors"
+                    style={{
+                        color: setupMode === 'gam' ? '#ffffff' : '#525252',
+                        background: setupMode === 'gam' ? '#7c3aed' : 'transparent',
+                        borderRadius: '6px',
+                    }}
+                >
+                    <Wand2 size={15} /> Importar do GAM
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setSetupMode('manual')}
+                    className="h-9 px-4 flex items-center gap-2 text-sm font-semibold transition-colors"
+                    style={{
+                        color: setupMode === 'manual' ? '#ffffff' : '#525252',
+                        background: setupMode === 'manual' ? '#7c3aed' : 'transparent',
+                        borderRadius: '6px',
+                    }}
+                >
+                    <Plus size={15} /> Cadastro manual
+                </button>
+            </div>
 
-            {/* Progress Header */}
+            {setupMode === 'gam' && (
             <GamImportPanel
                 orderUrl={gamOrderUrl}
                 onOrderUrlChange={setGamOrderUrl}
+                pi={gamPi}
+                onPiChange={value => setGamPi(value.replace(/\D/g, '').slice(0, 8))}
+                segmentation={gamSegmentation}
+                onSegmentationChange={setGamSegmentation}
+                customSegmentation={gamCustomSegmentation}
+                onCustomSegmentationChange={setGamCustomSegmentation}
                 onRequestDraft={handleRequestGamDraft}
                 onRefresh={refreshGamDrafts}
                 onLoadDraft={loadGamDraft}
@@ -298,22 +352,28 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
                 isRefreshing={isGamRefreshing}
                 status={gamStatus}
                 drafts={gamDrafts}
+                existingPis={existingPis}
             />
+            )}
 
-            {/* Progress Header */}
+            {setupMode === 'manual' && (
+            <section
+                className="overflow-hidden"
+                style={{ background: '#141414', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px' }}
+            >
             <div
-                className="px-8 pt-8 pb-6 flex items-center justify-between relative z-10"
+                className="px-5 py-4 flex items-center justify-between"
                 style={{ borderBottom: '1px solid var(--border)' }}
             >
                 <div className="flex gap-2">
                     {[1, 2, 3, 4].map((s) => (
                         <div
                             key={s}
-                            className="h-2 rounded-full transition-all duration-500"
+                            className="h-1.5 transition-all duration-500"
                             style={{
-                                width: step >= s ? '40px' : '20px',
-                                background: step >= s ? 'var(--gradient-primary)' : 'var(--bg-tertiary)',
-                                boxShadow: step >= s ? '0 0 12px rgba(255, 255, 255, 0.2)' : 'none'
+                                width: step >= s ? '36px' : '18px',
+                                background: step >= s ? '#7c3aed' : '#1a1a1a',
+                                borderRadius: '4px',
                             }}
                         />
                     ))}
@@ -326,7 +386,7 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
                 </span>
             </div>
 
-            <div className="p-8 lg:p-10 relative z-10">
+            <div className="p-5 md:p-7">
                 {step === 1 && (
                     <StepIdentification
                         formData={formData}
@@ -366,6 +426,8 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
                     />
                 )}
             </div>
+            </section>
+            )}
         </div>
     )
 }
@@ -373,6 +435,12 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
 function GamImportPanel({
     orderUrl,
     onOrderUrlChange,
+    pi,
+    onPiChange,
+    segmentation,
+    onSegmentationChange,
+    customSegmentation,
+    onCustomSegmentationChange,
     onRequestDraft,
     onRefresh,
     onLoadDraft,
@@ -385,13 +453,20 @@ function GamImportPanel({
     isRefreshing,
     status,
     drafts,
+    existingPis,
 }: {
     orderUrl: string
     onOrderUrlChange: (value: string) => void
+    pi: string
+    onPiChange: (value: string) => void
+    segmentation: string
+    onSegmentationChange: (value: string) => void
+    customSegmentation: string
+    onCustomSegmentationChange: (value: string) => void
     onRequestDraft: () => void
     onRefresh: () => Promise<GamImportJob[]>
     onLoadDraft: (job: GamImportJob) => void
-    onRetry: (orderUrl: string) => void
+    onRetry: (job: GamImportJob) => void
     onDelete: (jobId: string) => Promise<void>
     onStop: (jobId: string) => Promise<void>
     selectedJobId: string | null
@@ -400,186 +475,202 @@ function GamImportPanel({
     isRefreshing: boolean
     status: string
     drafts: GamImportJob[]
+    existingPis: string[]
 }) {
-    const visibleJobs = drafts.slice(0, 6)
-    const selectedJob = visibleJobs.find(job => job.id === selectedJobId) || visibleJobs[0] || null
-
-    const friendlyError = (message: string) => {
-        if (message.includes('GAM_SESSION_EXPIRADA')) return 'A sessao do GAM expirou e precisa de novo login supervisionado.'
-        if (message.includes('GAM_SEM_LINE_ITEMS')) return 'A Order abriu, mas nenhum line item foi encontrado.'
-        if (message.includes('GAM_RASCUNHO_VAZIO')) return 'A Order nao produziu formatos reconhecidos pelo Adsnap.'
-        return message.replace(/^Erro:\s*/i, '')
-    }
-
-    const jobPresentation = (job: GamImportJob) => {
-        if (job.level === 'JOB_GAM_PENDING') return {
-            label: 'Na fila', color: '#f59e0b', background: 'rgba(245,158,11,0.10)', icon: Clock,
-            detail: 'Aguardando um runner disponivel.',
-        }
-        if (job.level === 'JOB_GAM_RUNNING') return {
-            label: 'Processando', color: '#7c3aed', background: 'rgba(124,58,237,0.12)', icon: Loader2,
-            detail: job.message.replace(/^Nexus GAM:\s*/i, ''),
-        }
-        if (job.level === 'JOB_GAM_REVIEW') return {
-            label: 'Pronto', color: '#22c55e', background: 'rgba(34,197,94,0.10)', icon: CircleCheck,
-            detail: `${job.draft?.mediaEntries.length || 0} formato(s) aguardando revisao${job.draft?.blockedItems.length ? `; ${job.draft.blockedItems.length} bloqueado(s)` : ''}.`,
-        }
-        if (job.level === 'JOB_GAM_CANCELLED') return {
-            label: 'Encerrado', color: '#f59e0b', background: 'rgba(245,158,11,0.10)', icon: Square,
-            detail: 'Execucao encerrada pelo usuario.',
-        }
-        return {
-            label: 'Erro', color: '#ef4444', background: 'rgba(239,68,68,0.10)', icon: CircleX,
-            detail: friendlyError(job.message),
-        }
-    }
+    const visibleJobs = drafts.slice(0, 8)
+    const selectedJob = visibleJobs.find(job => job.id === selectedJobId)
+        || visibleJobs.find(job => ['JOB_GAM_PENDING', 'JOB_GAM_RUNNING'].includes(job.level))
+        || visibleJobs[0]
+        || null
+    const hasValidPi = /^\d{3,8}$/.test(pi)
+    const hasValidOrder = /^https:\/\/admanager\.google\.com\/.+order_id=\d+/i.test(orderUrl.trim())
+    const hasValidSegmentation = segmentation !== 'OUTRO' || customSegmentation.trim().length >= 2
+    const canRequest = hasValidPi && hasValidOrder && hasValidSegmentation && !isPending
+    const piAlreadyExists = hasValidPi && existingPis.includes(pi)
 
     return (
-        <div
-            className="px-8 pt-8 pb-6 relative z-10 space-y-4"
-            style={{ borderBottom: '1px solid var(--border)' }}
+        <section
+            className="overflow-hidden"
+            style={{ background: '#141414', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px' }}
         >
-            <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                    <div
-                        className="w-10 h-10 rounded-lg flex items-center justify-center"
-                        style={{ background: 'var(--accent-muted)', color: 'var(--accent-light)' }}
-                    >
-                        <Wand2 size={18} />
+            <div className="px-5 py-4 flex items-center justify-between gap-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 flex items-center justify-center shrink-0" style={{ background: 'rgba(124,58,237,0.12)', color: '#a78bfa', borderRadius: '8px' }}>
+                        <Wand2 size={17} />
                     </div>
-                    <div>
-                        <h3 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>Importar GAM</h3>
-                        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Rascunho supervisionado</p>
+                    <div className="min-w-0">
+                        <h2 className="text-base font-semibold" style={{ color: '#ffffff' }}>Importar Order do GAM</h2>
+                        <p className="text-xs truncate" style={{ color: '#737373' }}>Defina o contexto, gere o rascunho e acompanhe o worker.</p>
                     </div>
                 </div>
                 <button
                     onClick={() => onRefresh()}
                     disabled={isRefreshing}
-                    className="w-10 h-10 rounded-lg flex items-center justify-center transition-all"
-                    style={{ background: 'var(--bg-tertiary)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
-                    title="Atualizar"
+                    className="w-9 h-9 flex items-center justify-center transition-colors disabled:opacity-40"
+                    style={{ color: '#a3a3a3', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px' }}
+                    title="Atualizar execucoes"
                 >
-                    <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
+                    <RefreshCw size={15} className={isRefreshing ? 'animate-spin' : ''} />
                 </button>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-3">
-                <div className="relative">
-                    <Globe className="absolute left-4 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--text-muted)' }} />
-                    <input
-                        value={orderUrl}
-                        onChange={event => onOrderUrlChange(event.target.value)}
-                        placeholder="https://admanager.google.com/...order_id=..."
-                        className="w-full rounded-lg p-4 pl-12 outline-none transition-all font-medium"
-                        style={{ background: 'var(--bg-tertiary)', border: '2px solid transparent', color: 'var(--text-primary)' }}
-                    />
-                </div>
-                <button
-                    onClick={onRequestDraft}
-                    disabled={isPending || !orderUrl.trim()}
-                    className="px-5 py-4 rounded-lg transition-all flex items-center justify-center gap-2 font-bold text-sm disabled:opacity-40"
-                    style={{ background: 'var(--accent-muted)', color: 'var(--accent-light)', border: '1px solid var(--accent)' }}
-                >
-                    <FileCheck2 size={18} />
-                    {isPending ? 'Gerando...' : 'Gerar rascunho'}
-                </button>
-            </div>
+            <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.78fr)] gap-5 p-5">
+                <div className="space-y-5">
+                    <div className="grid grid-cols-1 md:grid-cols-[180px_minmax(0,1fr)] gap-4">
+                        <div className="space-y-2">
+                            <label htmlFor="gam-pi" className="text-xs font-semibold" style={{ color: '#a3a3a3' }}>Numero do PI</label>
+                            <div className="relative">
+                                <Hash className="absolute left-3 top-1/2 -translate-y-1/2" size={16} style={{ color: '#737373' }} />
+                                <input
+                                    id="gam-pi"
+                                    inputMode="numeric"
+                                    value={pi}
+                                    onChange={event => onPiChange(event.target.value)}
+                                    placeholder="042760"
+                                    className="w-full h-11 pl-10 pr-3 outline-none text-sm font-medium"
+                                    style={{ background: '#1a1a1a', color: '#e5e5e5', border: `1px solid ${pi && !hasValidPi ? '#ef4444' : 'rgba(255,255,255,0.08)'}`, borderRadius: '8px' }}
+                                />
+                            </div>
+                            {piAlreadyExists && <p className="text-[11px]" style={{ color: '#f59e0b' }}>Este PI ja possui campanhas. Os novos formatos serao agrupados no mesmo Book.</p>}
+                        </div>
 
-            {status && (
-                <p className="text-xs font-bold" style={{ color: status.includes('valido') || status.includes('Erro') ? '#f59e0b' : 'var(--text-secondary)' }}>
-                    {status}
-                </p>
-            )}
-
-            {visibleJobs.length > 0 && (
-                <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.72fr)] gap-4 items-stretch">
-                    <div
-                        className="overflow-hidden"
-                        style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: '12px' }}
-                        aria-live="polite"
-                    >
-                        {visibleJobs.map((job, index) => {
-                            const presentation = jobPresentation(job)
-                            const StatusIcon = presentation.icon
-                            const isSelected = selectedJob?.id === job.id
-                            const canDelete = !['JOB_GAM_PENDING', 'JOB_GAM_RUNNING'].includes(job.level)
-                            return (
-                                <div
-                                    key={job.id}
-                                    role="button"
-                                    tabIndex={0}
-                                    onClick={() => onSelectJob(job.id)}
-                                    onKeyDown={event => {
-                                        if (event.key === 'Enter' || event.key === ' ') onSelectJob(job.id)
-                                    }}
-                                    className="grid grid-cols-[auto_minmax(0,1fr)] sm:grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 cursor-pointer transition-colors"
-                                    style={{
-                                        borderTop: index === 0 ? 'none' : '1px solid var(--border)',
-                                        background: isSelected ? 'rgba(124,58,237,0.12)' : 'transparent',
-                                    }}
-                                >
-                                    <div
-                                        className="w-9 h-9 flex items-center justify-center"
-                                        style={{ color: presentation.color, background: presentation.background, borderRadius: '8px' }}
-                                    >
-                                        <StatusIcon size={17} className={job.level === 'JOB_GAM_RUNNING' ? 'animate-spin' : ''} />
-                                    </div>
-                                    <div className="min-w-0">
-                                        <div className="flex items-center gap-2 min-w-0">
-                                            <span className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
-                                                Order {job.orderId || 'GAM'}
-                                            </span>
-                                            <span
-                                                className="px-2 py-1 text-[10px] font-semibold shrink-0"
-                                                style={{ color: presentation.color, background: presentation.background, borderRadius: '6px' }}
-                                            >
-                                                {presentation.label}
-                                            </span>
-                                        </div>
-                                        <p className="text-xs truncate mt-1" style={{ color: 'var(--text-muted)' }} title={presentation.detail}>
-                                            {presentation.detail} - {new Date(job.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                                        </p>
-                                    </div>
-                                    <div className="col-span-2 sm:col-span-1 flex items-center justify-end gap-2 pr-10 sm:pr-0" onClick={event => event.stopPropagation()}>
-                                        {job.draft ? (
-                                            <button
-                                                onClick={() => onLoadDraft(job)}
-                                                className="px-3 py-2 flex items-center gap-2 text-xs font-semibold transition-colors"
-                                                style={{ color: '#ffffff', background: '#7c3aed', borderRadius: '8px' }}
-                                            >
-                                                Revisar <ChevronRight size={14} />
-                                            </button>
-                                        ) : job.level === 'JOB_GAM_ERROR' && job.orderUrl ? (
-                                            <button
-                                                onClick={() => onRetry(job.orderUrl)}
-                                                disabled={isPending}
-                                                className="w-9 h-9 flex items-center justify-center transition-colors disabled:opacity-40"
-                                                style={{ color: '#ef4444', border: '1px solid rgba(239,68,68,0.28)', borderRadius: '8px' }}
-                                                title="Tentar novamente"
-                                            >
-                                                <RotateCcw size={15} />
-                                            </button>
-                                        ) : null}
-                                        {canDelete && (
-                                            <button
-                                                onClick={() => onDelete(job.id)}
-                                                className="w-9 h-9 flex items-center justify-center transition-colors"
-                                                style={{ color: '#ef4444', border: '1px solid rgba(239,68,68,0.28)', borderRadius: '8px' }}
-                                                title="Excluir rascunho"
-                                            >
-                                                <Trash2 size={15} />
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-                            )
-                        })}
+                        <fieldset className="space-y-2">
+                            <legend className="text-xs font-semibold" style={{ color: '#a3a3a3' }}>Segmentacao</legend>
+                            <div className="grid grid-cols-2 gap-2">
+                                {GAM_SEGMENTATIONS.map(item => {
+                                    const Icon = item.icon
+                                    const active = segmentation === item.value
+                                    return (
+                                        <button
+                                            key={item.value}
+                                            type="button"
+                                            onClick={() => onSegmentationChange(item.value)}
+                                            className="h-11 px-3 flex items-center justify-center gap-2 text-xs font-semibold transition-colors"
+                                            style={{
+                                                color: active ? '#ffffff' : '#a3a3a3',
+                                                background: active ? '#7c3aed' : '#1a1a1a',
+                                                border: active ? '1px solid #7c3aed' : '1px solid rgba(255,255,255,0.08)',
+                                                borderRadius: '8px',
+                                            }}
+                                        >
+                                            <Icon size={15} />
+                                            <span className="truncate">{item.label}</span>
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                        </fieldset>
                     </div>
 
-                    <GamJobDebugger job={selectedJob} onStop={onStop} onDelete={onDelete} presentation={selectedJob ? debuggerPresentation(selectedJob) : null} />
+                    {segmentation === 'OUTRO' && (
+                        <div className="space-y-2">
+                            <label htmlFor="gam-custom-segmentation" className="text-xs font-semibold" style={{ color: '#a3a3a3' }}>Descreva a segmentacao</label>
+                            <input
+                                id="gam-custom-segmentation"
+                                value={customSegmentation}
+                                onChange={event => onCustomSegmentationChange(event.target.value)}
+                                placeholder="Ex.: Autarquia municipal"
+                                className="w-full h-11 px-3 outline-none text-sm"
+                                style={{ background: '#1a1a1a', color: '#e5e5e5', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px' }}
+                            />
+                        </div>
+                    )}
+
+                    <div className="space-y-2">
+                        <label htmlFor="gam-order-url" className="text-xs font-semibold" style={{ color: '#a3a3a3' }}>Link da Order</label>
+                        <div className="relative">
+                            <Globe className="absolute left-3 top-1/2 -translate-y-1/2" size={16} style={{ color: '#737373' }} />
+                            <input
+                                id="gam-order-url"
+                                value={orderUrl}
+                                onChange={event => onOrderUrlChange(event.target.value)}
+                                placeholder="https://admanager.google.com/...order_id=..."
+                                className="w-full h-11 pl-10 pr-3 outline-none text-sm"
+                                style={{ background: '#1a1a1a', color: '#e5e5e5', border: `1px solid ${orderUrl && !hasValidOrder ? '#ef4444' : 'rgba(255,255,255,0.08)'}`, borderRadius: '8px' }}
+                            />
+                        </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                        <div className="min-h-5" aria-live="polite">
+                            {status ? (
+                                <p className="text-xs" style={{ color: /erro|valido|informe/i.test(status) ? '#f59e0b' : '#a3a3a3' }}>{status}</p>
+                            ) : (
+                                <p className="text-xs" style={{ color: '#737373' }}>O worker usa o PI e a segmentacao definidos aqui na campanha final.</p>
+                            )}
+                        </div>
+                        <button
+                            onClick={onRequestDraft}
+                            disabled={!canRequest}
+                            className="h-11 px-5 shrink-0 flex items-center justify-center gap-2 text-sm font-semibold text-white transition-colors disabled:opacity-40"
+                            style={{ background: '#7c3aed', borderRadius: '8px' }}
+                        >
+                            {isPending ? <Loader2 size={16} className="animate-spin" /> : <FileCheck2 size={16} />}
+                            {isPending ? 'Enviando...' : 'Gerar rascunho'}
+                        </button>
+                    </div>
+                </div>
+
+                {selectedJob ? (
+                    <GamJobDebugger job={selectedJob} onStop={onStop} onDelete={onDelete} presentation={debuggerPresentation(selectedJob)} />
+                ) : (
+                    <div className="min-h-[290px] flex flex-col items-center justify-center text-center px-8" style={{ background: '#0f0f0f', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px' }}>
+                        <Terminal size={22} style={{ color: '#737373' }} />
+                        <p className="mt-3 text-sm font-semibold" style={{ color: '#e5e5e5' }}>Execucao em tempo real</p>
+                        <p className="mt-1 text-xs leading-5" style={{ color: '#737373' }}>Os passos do worker aparecem aqui assim que o rascunho entra na fila.</p>
+                    </div>
+                )}
+            </div>
+
+            {visibleJobs.length > 0 && (
+                <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                    <div className="px-5 py-3 flex items-center justify-between">
+                        <p className="text-xs font-semibold" style={{ color: '#a3a3a3' }}>Rascunhos recentes</p>
+                        <span className="text-[11px]" style={{ color: '#737373' }}>{visibleJobs.length} execucao(oes)</span>
+                    </div>
+                    {visibleJobs.map(job => {
+                        const presentation = debuggerPresentation(job)
+                        const active = job.id === selectedJob?.id
+                        const canDelete = !['JOB_GAM_PENDING', 'JOB_GAM_RUNNING'].includes(job.level)
+                        return (
+                            <div
+                                key={job.id}
+                                className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-5 py-3 items-center cursor-pointer"
+                                style={{ borderTop: '1px solid rgba(255,255,255,0.08)', background: active ? 'rgba(124,58,237,0.08)' : 'transparent' }}
+                                onClick={() => onSelectJob(job.id)}
+                            >
+                                <div className="min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <p className="text-sm font-semibold" style={{ color: '#e5e5e5' }}>Order {job.orderId || 'GAM'}</p>
+                                        <span className="px-2 py-1 text-[10px] font-semibold" style={{ color: presentation.color, background: presentation.background, borderRadius: '6px' }}>{presentation.label}</span>
+                                    </div>
+                                    <p className="text-xs mt-1 truncate" style={{ color: '#737373' }}>
+                                        PI {job.requestedPi || job.draft?.pi || '-'} · {segmentationLabel(job.requestedSegmentation || job.draft?.segmentation || '-')}
+                                    </p>
+                                </div>
+                                <div className="flex items-center gap-2" onClick={event => event.stopPropagation()}>
+                                    {job.draft && (
+                                        <button onClick={() => onLoadDraft(job)} className="h-9 px-3 flex items-center gap-2 text-xs font-semibold text-white" style={{ background: '#7c3aed', borderRadius: '8px' }}>
+                                            Revisar <ChevronRight size={14} />
+                                        </button>
+                                    )}
+                                    {job.level === 'JOB_GAM_ERROR' && job.orderUrl && (
+                                        <button onClick={() => onRetry(job)} disabled={isPending} className="w-9 h-9 flex items-center justify-center disabled:opacity-40" style={{ color: '#f59e0b', border: '1px solid rgba(245,158,11,0.28)', borderRadius: '8px' }} title="Tentar novamente">
+                                            <RotateCcw size={14} />
+                                        </button>
+                                    )}
+                                    {canDelete && (
+                                        <button onClick={() => onDelete(job.id)} className="w-9 h-9 flex items-center justify-center" style={{ color: '#ef4444', border: '1px solid rgba(239,68,68,0.28)', borderRadius: '8px' }} title="Excluir rascunho">
+                                            <Trash2 size={14} />
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        )
+                    })}
                 </div>
             )}
-        </div>
+        </section>
     )
 }
 
@@ -1272,7 +1363,7 @@ function StepAutomation({ formData, updateFields, onSubmit, back, isPending, med
                         <div>
                             <span style={{ color: 'var(--text-muted)' }}>Segmento:</span>
                             <span className="ml-2 font-bold" style={{ color: 'var(--accent-light)' }}>
-                                {SEGMENTATIONS.find((s: any) => s.value === formData.segmentation)?.label}
+                                {segmentationLabel(formData.segmentation)}
                             </span>
                         </div>
                         <div className="col-span-2">

@@ -231,10 +231,26 @@ export async function createCampaignsFromGamDraftAction(draft: GamImportDraft, j
     return { success: true, ...result }
 }
 
-export async function requestGamImportDraft(orderUrl: string) {
-    const url = orderUrl.trim()
+export async function requestGamImportDraft(input: {
+    orderUrl: string
+    pi: string
+    segmentation: string
+}) {
+    const url = input.orderUrl.trim()
+    const requestedPi = input.pi.trim()
+    const requestedSegmentation = input.segmentation.trim()
+
     if (!/^https:\/\/admanager\.google\.com\/.+order_id=\d+/i.test(url)) {
         throw new Error('Informe um link de Order valido do Google Ad Manager.')
+    }
+    if (!/^\d{3,8}$/.test(requestedPi)) {
+        throw new Error('Informe um PI valido com 3 a 8 numeros.')
+    }
+
+    const standardSegmentations = ['GOV_FEDERAL', 'GOV_ESTADUAL', 'PRIVADO']
+    const isCustomSegmentation = /^OUTRO:\s*\S.+$/i.test(requestedSegmentation)
+    if (!standardSegmentations.includes(requestedSegmentation) && !isCustomSegmentation) {
+        throw new Error('Selecione uma segmentacao ou descreva a opcao Outro.')
     }
 
     const orderId = url.match(/order_id=(\d+)/i)?.[1] || 'Unknown'
@@ -254,6 +270,16 @@ export async function requestGamImportDraft(orderUrl: string) {
     })
 
     if (existingJob) {
+        const existingDetails = JSON.parse(existingJob.details || '{}') as {
+            requestedPi?: string
+            requestedSegmentation?: string
+        }
+        if (
+            (existingDetails.requestedPi && existingDetails.requestedPi !== requestedPi)
+            || (existingDetails.requestedSegmentation && existingDetails.requestedSegmentation !== requestedSegmentation)
+        ) {
+            throw new Error(`Esta Order ja esta em processamento com o PI ${existingDetails.requestedPi || 'informado anteriormente'}.`)
+        }
         const staleRunningJob = existingJob.level === 'JOB_GAM_RUNNING'
             && existingJob.createdAt.getTime() < Date.now() - 30 * 60 * 1000
         const triggered = existingJob.level === 'JOB_GAM_PENDING' || staleRunningJob
@@ -268,10 +294,13 @@ export async function requestGamImportDraft(orderUrl: string) {
             message: `Nexus GAM: rascunho solicitado para Order ${orderId}`,
             details: JSON.stringify({
                 orderUrl: url,
+                orderId,
                 mode: 'draft',
+                requestedPi,
+                requestedSegmentation,
                 executionLogs: [{
                     at: new Date().toISOString(),
-                    message: `Rascunho solicitado para a Order ${orderId}`,
+                    message: `Order ${orderId} vinculada ao PI ${requestedPi} (${requestedSegmentation})`,
                     tone: 'info',
                 }],
             }),
@@ -298,16 +327,22 @@ export async function getGamImportDrafts() {
         let draft: GamImportDraft | null = null
         let orderUrl = ''
         let orderId = ''
+        let requestedPi = ''
+        let requestedSegmentation = ''
         let executionLogs: Array<{ at: string; message: string; tone: 'info' | 'success' | 'error' }> = []
         try {
             if (log.details) {
                 const details = JSON.parse(log.details) as GamImportDraft & {
                     orderUrl?: string
                     orderId?: string
+                    requestedPi?: string
+                    requestedSegmentation?: string
                     executionLogs?: Array<{ at: string; message: string; tone: 'info' | 'success' | 'error' }>
                 }
                 orderUrl = details.orderUrl || ''
                 orderId = details.orderId || details.orderUrl?.match(/order_id=(\d+)/i)?.[1] || ''
+                requestedPi = details.requestedPi || details.pi || ''
+                requestedSegmentation = details.requestedSegmentation || details.segmentation || ''
                 executionLogs = details.executionLogs || []
                 if (log.level === 'JOB_GAM_REVIEW') draft = details
             }
@@ -322,6 +357,8 @@ export async function getGamImportDrafts() {
             createdAt: log.createdAt.toISOString(),
             orderId,
             orderUrl,
+            requestedPi,
+            requestedSegmentation,
             executionLogs,
             draft,
         }
