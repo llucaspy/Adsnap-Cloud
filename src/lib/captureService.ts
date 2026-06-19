@@ -513,74 +513,81 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
         // STRATEGY 1: EXPLICIT SELECTOR
         // ====================================================
         if (bannerConfig && bannerConfig.selector) {
-            console.log(`[Nexus] Tentando captura via seletor: ${bannerConfig.selector}`);
-            await nexusLogStore.addLog(`Nexus: Buscando seletor configurado: ${bannerConfig.selector}`, 'SYSTEM', undefined, campaignId);
+            const selectorCandidates = [bannerConfig.selector];
+            if (targetW === 300 && targetH === 250 && bannerConfig.selector.includes('home-quadrado-0')) {
+                selectorCandidates.push(bannerConfig.selector.replace('home-quadrado-0', 'home-quadrado-1'));
+            }
 
-            try {
-                const locator = page.locator(bannerConfig.selector).first();
+            for (const selector of selectorCandidates) {
+                console.log(`[Nexus] Tentando captura via seletor: ${selector}`);
+                await nexusLogStore.addLog(`Nexus: Buscando seletor configurado: ${selector}`, 'SYSTEM', undefined, campaignId);
 
-                await locator.waitFor({ state: 'attached', timeout: 20000 });
+                try {
+                    const locator = page.locator(selector).first();
 
-                if (!await locator.isVisible()) {
-                    console.log('[Nexus] Seletor existe mas não está visível. Tentando scroll...');
-                    await locator.scrollIntoViewIfNeeded();
-                    await page.waitForTimeout(3000);
-                }
-
-                await locator.waitFor({ state: 'visible', timeout: 5000 });
-
-                if (standaloneCreativeAssetUrl) {
-                    console.log(`[Nexus] Injetando asset autenticado do GAM no slot (${targetW}x${targetH})`);
-                    await injectCreativeAsset(locator, standaloneCreativeAssetUrl, targetW, targetH);
-                    await nexusLogStore.addLog('Nexus: Criativo autenticado injetado no slot', 'SUCCESS', standaloneCreativeAssetUrl, campaignId);
-                }
-
-                const box = await locator.boundingBox();
-
-                if (box && (box.width < 10 || box.height < 10)) {
-                    console.log('[Nexus] Dimensões pequenas. Buscando iframe...');
-                    const frameLocator = locator.locator('iframe').first();
-                    if (await frameLocator.count() > 0) {
-                        await frameLocator.waitFor({ state: 'visible', timeout: 5000 });
+                    await locator.waitFor({ state: 'attached', timeout: 20000 });
+    
+                    if (!await locator.isVisible()) {
+                        console.log('[Nexus] Seletor existe mas não está visível. Tentando scroll...');
+                        await locator.scrollIntoViewIfNeeded({ timeout: 5000 });
+                        await page.waitForTimeout(3000);
                     }
-                }
-
-                const measuredBoxes = await locator.evaluate(measureAdBoxesInPage);
-
-                const matchingBox = measuredBoxes.find(candidate => matchesExpectedDimension(candidate, targetW, targetH));
-
-                if (matchingBox) {
-                    console.log(`[Nexus] Seletor validado! ${matchingBox.source} (${Math.round(matchingBox.width)}x${Math.round(matchingBox.height)})`);
-                    await nexusLogStore.addLog('Nexus: Seletor validado com dimensao correta', 'SUCCESS', `Dim: ${Math.round(matchingBox.width)}x${Math.round(matchingBox.height)} | Esperado: ${targetW}x${targetH}`, campaignId);
-
-                    const viewportHeight = isMobile ? 722 : 928;
-                    const targetScrollY = Math.max(0, matchingBox.y + (matchingBox.height / 2) - (viewportHeight / 2));
-
-                    await page.evaluate((y) => window.scrollTo(0, y), targetScrollY);
-                    await page.waitForTimeout(3000);
-
+    
+                    await locator.waitFor({ state: 'visible', timeout: 5000 });
+    
                     if (standaloneCreativeAssetUrl) {
+                        console.log(`[Nexus] Injetando asset autenticado do GAM no slot (${targetW}x${targetH})`);
                         await injectCreativeAsset(locator, standaloneCreativeAssetUrl, targetW, targetH);
-                        await page.waitForTimeout(1500);
-                    } else {
-                        await waitForCreativeRender(page, locator, campaignId);
+                        await nexusLogStore.addLog('Nexus: Criativo autenticado injetado no slot', 'SUCCESS', standaloneCreativeAssetUrl, campaignId);
                     }
-
-                    const screenshotBuffer = await page.screenshot({ type: 'png', animations: 'disabled' });
-                    await browser.close();
-
-                    const finalImage = await compositeStudioImage(screenshotBuffer, campaign.url, isMobile);
-                    return await saveCapture(campaign, finalImage, campaignId);
-                } else {
-                    const measured = describeMeasuredBoxes(measuredBoxes);
-                    console.log(`[Nexus] Seletor localizado com dimensao errada. Esperado ${targetW}x${targetH}; medido: ${measured}`);
-                    await nexusLogStore.addLog('Nexus: Seletor localizado com dimensao errada', 'INFO', `Esperado ${targetW}x${targetH}; medido: ${measured}`, campaignId);
-                    throw new Error(`Dimensao do seletor nao corresponde ao formato (${measured})`);
+    
+                    const box = await locator.boundingBox();
+    
+                    if (box && (box.width < 10 || box.height < 10)) {
+                        console.log('[Nexus] Dimensões pequenas. Buscando iframe...');
+                        const frameLocator = locator.locator('iframe').first();
+                        if (await frameLocator.count() > 0) {
+                            await frameLocator.waitFor({ state: 'visible', timeout: 5000 });
+                        }
+                    }
+    
+                    const measuredBoxes = await locator.evaluate(measureAdBoxesInPage);
+    
+                    const matchingBox = measuredBoxes.find(candidate => matchesExpectedDimension(candidate, targetW, targetH));
+    
+                    if (matchingBox) {
+                        console.log(`[Nexus] Seletor validado! ${matchingBox.source} (${Math.round(matchingBox.width)}x${Math.round(matchingBox.height)})`);
+                        await nexusLogStore.addLog('Nexus: Seletor validado com dimensao correta', 'SUCCESS', `Dim: ${Math.round(matchingBox.width)}x${Math.round(matchingBox.height)} | Esperado: ${targetW}x${targetH}`, campaignId);
+    
+                        const viewportHeight = isMobile ? 722 : 928;
+                        const targetScrollY = Math.max(0, matchingBox.y + (matchingBox.height / 2) - (viewportHeight / 2));
+    
+                        await page.evaluate((y) => window.scrollTo(0, y), targetScrollY);
+                        await page.waitForTimeout(3000);
+    
+                        if (standaloneCreativeAssetUrl) {
+                            await injectCreativeAsset(locator, standaloneCreativeAssetUrl, targetW, targetH);
+                            await page.waitForTimeout(1500);
+                        } else {
+                            await waitForCreativeRender(page, locator, campaignId);
+                        }
+    
+                        const screenshotBuffer = await page.screenshot({ type: 'png', animations: 'disabled' });
+                        await browser.close();
+    
+                        const finalImage = await compositeStudioImage(screenshotBuffer, campaign.url, isMobile);
+                        return await saveCapture(campaign, finalImage, campaignId);
+                    } else {
+                        const measured = describeMeasuredBoxes(measuredBoxes);
+                        console.log(`[Nexus] Seletor localizado com dimensao errada. Esperado ${targetW}x${targetH}; medido: ${measured}`);
+                        await nexusLogStore.addLog('Nexus: Seletor localizado com dimensao errada', 'INFO', `Esperado ${targetW}x${targetH}; medido: ${measured}`, campaignId);
+                        throw new Error(`Dimensao do seletor nao corresponde ao formato (${measured})`);
+                    }
+                } catch (selError) {
+                    const msg = selError instanceof Error ? selError.message : String(selError);
+                    console.warn('[Nexus] Falha no seletor:', msg);
+                    await nexusLogStore.addLog(`Nexus: Falha no seletor (${msg}). Tentando proximo slot...`, 'INFO', undefined, campaignId);
                 }
-            } catch (selError) {
-                const msg = selError instanceof Error ? selError.message : String(selError);
-                console.warn('[Nexus] Falha no seletor:', msg);
-                await nexusLogStore.addLog(`Nexus: Falha no seletor (${msg}). Tentando Auto-Detecção...`, 'INFO', undefined, campaignId);
             }
         }
 
