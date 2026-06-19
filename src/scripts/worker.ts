@@ -333,6 +333,7 @@ async function startWorker() {
         } finally {
             await prisma.$disconnect()
         }
+        process.exit(0)
     } else {
         while (true) {
             await runWorkerCycle()
