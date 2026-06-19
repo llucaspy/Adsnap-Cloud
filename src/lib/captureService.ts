@@ -1,4 +1,5 @@
 import { chromium, devices, Locator } from 'playwright';
+import sharp from 'sharp';
 import { compositeWithSharp } from './rasterService';
 import prisma from './prisma';
 import { supabase } from './supabase';
@@ -299,57 +300,162 @@ function isStandaloneCreativeAsset(assetUrl: string) {
         const url = new URL(assetUrl)
         const isAdfLayer = url.hostname === 'creatives.adftech.com.br'
             && /\/\d{2}\.(?:png|jpe?g|webp)$/i.test(url.pathname)
+        const isRocketLayer = /(^|\.)00px\.net$/i.test(url.hostname)
+            && /\/rocket\/[^/]+\/resources\//i.test(url.pathname)
 
-        return !isAdfLayer && /\.(?:png|jpe?g|webp)(?:$|\?)/i.test(url.toString())
+        return !isAdfLayer && !isRocketLayer && /\.(?:png|jpe?g|webp)(?:$|\?)/i.test(url.toString())
     } catch {
         return false
     }
 }
 
-async function waitForCreativeRender(page: import('playwright').Page, locator: Locator, campaignId: string) {
-    const minimumWaitMs = 10_000
-    const maximumWaitMs = 18_000
-    const sampleIntervalMs = 1_500
-    const startedAt = Date.now()
-    let previousSample: Buffer | null = null
-    let stableSamples = 0
+interface FrameQuality {
+    score: number
+    acceptable: boolean
+    deviation: number
+    edgeDensity: number
+    blankRatio: number
+}
 
-    await nexusLogStore.addLog(
-        'Nexus: Aguardando renderizacao completa do criativo',
-        'SYSTEM',
-        `Espera minima: ${minimumWaitMs / 1000}s | limite: ${maximumWaitMs / 1000}s`,
-        campaignId
-    )
+interface SelectedFrame {
+    buffer: Buffer
+    quality: FrameQuality
+    frame: number
+}
 
-    await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => null)
-    await page.evaluate(() => document.fonts?.ready).catch(() => null)
+async function scoreCreativeFrame(
+    screenshot: Buffer,
+    box: { x: number; y: number; width: number; height: number },
+    viewport: { width: number; height: number }
+): Promise<FrameQuality> {
+    const metadata = await sharp(screenshot).metadata()
+    const imageWidth = metadata.width || viewport.width
+    const imageHeight = metadata.height || viewport.height
+    const scaleX = imageWidth / viewport.width
+    const scaleY = imageHeight / viewport.height
+    const left = Math.max(0, Math.min(imageWidth - 1, Math.floor(box.x * scaleX)))
+    const top = Math.max(0, Math.min(imageHeight - 1, Math.floor(box.y * scaleY)))
+    const width = Math.max(1, Math.min(imageWidth - left, Math.ceil(box.width * scaleX)))
+    const height = Math.max(1, Math.min(imageHeight - top, Math.ceil(box.height * scaleY)))
 
-    while (Date.now() - startedAt < maximumWaitMs) {
-        await page.waitForTimeout(sampleIntervalMs)
+    const { data, info } = await sharp(screenshot)
+        .extract({ left, top, width, height })
+        .resize({ width: 160, height: 100, fit: 'inside', withoutEnlargement: true })
+        .removeAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true })
 
-        const sample = await locator.screenshot({
-            type: 'png',
-            animations: 'disabled',
-            timeout: 6_000,
-        }).catch(() => null)
+    const luminance = new Float32Array(info.width * info.height)
+    let sum = 0
+    let nearWhite = 0
+    let nearBlack = 0
+    let chromaSum = 0
 
-        if (sample && previousSample && sample.equals(previousSample)) {
-            stableSamples += 1
-        } else {
-            stableSamples = 0
-        }
-        previousSample = sample
-
-        if (Date.now() - startedAt >= minimumWaitMs && stableSamples >= 1) break
+    for (let pixel = 0; pixel < luminance.length; pixel++) {
+        const offset = pixel * info.channels
+        const r = data[offset]
+        const g = data[offset + 1]
+        const b = data[offset + 2]
+        const value = (r * 0.2126) + (g * 0.7152) + (b * 0.0722)
+        luminance[pixel] = value
+        sum += value
+        if (value >= 246) nearWhite++
+        if (value <= 9) nearBlack++
+        chromaSum += Math.max(r, g, b) - Math.min(r, g, b)
     }
 
-    const waitedMs = Date.now() - startedAt
+    const mean = sum / luminance.length
+    let varianceSum = 0
+    let edges = 0
+    let comparisons = 0
+
+    for (let y = 0; y < info.height; y++) {
+        for (let x = 0; x < info.width; x++) {
+            const index = (y * info.width) + x
+            const value = luminance[index]
+            varianceSum += (value - mean) ** 2
+            if (x > 0) {
+                if (Math.abs(value - luminance[index - 1]) >= 18) edges++
+                comparisons++
+            }
+            if (y > 0) {
+                if (Math.abs(value - luminance[index - info.width]) >= 18) edges++
+                comparisons++
+            }
+        }
+    }
+
+    const deviation = Math.sqrt(varianceSum / luminance.length)
+    const edgeDensity = comparisons ? edges / comparisons : 0
+    const blankRatio = Math.max(nearWhite, nearBlack) / luminance.length
+    const chroma = chromaSum / luminance.length
+    const score = (deviation * 0.9) + (edgeDensity * 45) + (chroma * 0.15) + ((1 - blankRatio) * 20)
+    const acceptable = deviation >= 10 && blankRatio < 0.92 && (edgeDensity >= 0.025 || chroma >= 8)
+
+    return { score, acceptable, deviation, edgeDensity, blankRatio }
+}
+
+async function captureBestCreativeFrame(
+    page: import('playwright').Page,
+    documentBox: { x: number; y: number; width: number; height: number },
+    campaignId: string
+) {
+    const viewport = page.viewportSize()
+    if (!viewport) throw new Error('Viewport indisponivel para analise do criativo')
+
+    const startedAt = Date.now()
+    const selection: { current: SelectedFrame | null } = { current: null }
+    let frameNumber = 0
+
     await nexusLogStore.addLog(
-        'Nexus: Criativo pronto para captura',
-        'SUCCESS',
-        `Renderizacao aguardada por ${(waitedMs / 1000).toFixed(1)}s`,
+        'Nexus: Selecionando melhor frame do criativo',
+        'SYSTEM',
+        'Amostragem curta com descarte de frames vazios e de transicao',
         campaignId
     )
+
+    await page.waitForLoadState('networkidle', { timeout: 3_000 }).catch(() => null)
+    await page.evaluate(() => document.fonts?.ready).catch(() => null)
+
+    const sampleBurst = async (count: number) => {
+        for (let index = 0; index < count; index++) {
+            frameNumber++
+            const scroll = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }))
+            const viewportBox = {
+                x: documentBox.x - scroll.x,
+                y: documentBox.y - scroll.y,
+                width: documentBox.width,
+                height: documentBox.height,
+            }
+            const screenshot = await page.screenshot({ type: 'png', animations: 'allow' })
+            const quality = await scoreCreativeFrame(screenshot, viewportBox, viewport)
+
+            if (!selection.current || quality.score > selection.current.quality.score) {
+                selection.current = { buffer: screenshot, quality, frame: frameNumber }
+            }
+
+            if (index < count - 1) await page.waitForTimeout(400)
+        }
+    }
+
+    await sampleBurst(6)
+    if (!selection.current?.quality.acceptable) {
+        await page.waitForTimeout(700)
+        await sampleBurst(4)
+    }
+
+    const best = selection.current
+    if (!best) throw new Error('Nao foi possivel capturar frames do criativo')
+
+    const elapsedMs = Date.now() - startedAt
+    await nexusLogStore.addLog(
+        best.quality.acceptable ? 'Nexus: Melhor frame selecionado' : 'Nexus: Melhor frame disponivel selecionado',
+        best.quality.acceptable ? 'SUCCESS' : 'INFO',
+        `Frame ${best.frame}/${frameNumber} | score ${best.quality.score.toFixed(1)} | vazio ${(best.quality.blankRatio * 100).toFixed(0)}% | ${(elapsedMs / 1000).toFixed(1)}s`,
+        campaignId
+    )
+
+    return best.buffer
 }
 
 // ============================================================================
@@ -568,11 +674,11 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
                         if (standaloneCreativeAssetUrl) {
                             await injectCreativeAsset(locator, standaloneCreativeAssetUrl, targetW, targetH);
                             await page.waitForTimeout(1500);
-                        } else {
-                            await waitForCreativeRender(page, locator, campaignId);
                         }
-    
-                        const screenshotBuffer = await page.screenshot({ type: 'png', animations: 'disabled' });
+
+                        const screenshotBuffer = standaloneCreativeAssetUrl
+                            ? await page.screenshot({ type: 'png', animations: 'disabled' })
+                            : await captureBestCreativeFrame(page, matchingBox, campaignId);
                         await browser.close();
     
                         const finalImage = await compositeStudioImage(screenshotBuffer, campaign.url, isMobile);
@@ -671,10 +777,10 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
         console.log(`[Nexus] Scroll final para Y = ${Math.round(targetScrollY)} `);
         await page.evaluate((y) => window.scrollTo(0, y), targetScrollY);
 
-        await page.waitForTimeout(12000);
+        await page.waitForTimeout(1500);
 
-        console.log('[Nexus] Capturando screenshot final...')
-        const screenshotBuffer = await page.screenshot({ type: 'png', animations: 'disabled' });
+        console.log('[Nexus] Selecionando melhor frame para screenshot final...')
+        const screenshotBuffer = await captureBestCreativeFrame(page, bestCandidate, campaignId);
         await browser.close();
 
         await nexusLogStore.addLog('Nexus: Browser finalizado. Iniciando composição estética...', 'SYSTEM', undefined, campaignId);
