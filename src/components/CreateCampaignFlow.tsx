@@ -82,7 +82,13 @@ function segmentationLabel(value: string) {
         || value
 }
 
-export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[] }) {
+export function CreateCampaignFlow({
+    existingPis = [],
+    initialGamJobId = null,
+}: {
+    existingPis?: string[]
+    initialGamJobId?: string | null
+}) {
     const [setupMode, setSetupMode] = useState<'gam' | 'manual'>('gam')
     const [step, setStep] = useState(1)
     const [isPending, startTransition] = useTransition()
@@ -96,7 +102,7 @@ export function CreateCampaignFlow({ existingPis = [] }: { existingPis?: string[
     const [gamStatus, setGamStatus] = useState('')
     const [isGamRefreshing, setIsGamRefreshing] = useState(false)
     const [gamDrafts, setGamDrafts] = useState<GamImportJob[]>([])
-    const [selectedGamJobId, setSelectedGamJobId] = useState<string | null>(null)
+    const [selectedGamJobId, setSelectedGamJobId] = useState<string | null>(initialGamJobId)
     const [loadedGamJobId, setLoadedGamJobId] = useState<string | null>(null)
     const [formData, setFormData] = useState({
         agency: '',

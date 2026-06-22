@@ -4,7 +4,12 @@ import { FilePlus2 } from 'lucide-react'
 
 export const dynamic = 'force-dynamic'
 
-export default async function CampaignsPage() {
+export default async function CampaignsPage({
+    searchParams,
+}: {
+    searchParams: Promise<{ jobId?: string }>
+}) {
+    const params = await searchParams
     const existingCampaigns = await prisma.campaign.findMany({
         select: { pi: true },
         distinct: ['pi'],
@@ -28,7 +33,7 @@ export default async function CampaignsPage() {
                 </div>
             </header>
 
-            <CreateCampaignFlow existingPis={existingPis} />
+            <CreateCampaignFlow existingPis={existingPis} initialGamJobId={params.jobId || null} />
         </main>
     )
 }

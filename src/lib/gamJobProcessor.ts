@@ -1,6 +1,7 @@
 import prisma from './prisma'
 import { gamCrawler } from './gamCrawlerService'
 import { buildGamImportDraft, type GamImportDraft } from './gamImportPlanner'
+import { sendTelegramAlert } from './telegram'
 
 const STALE_JOB_MINUTES = 30
 const MAX_JOB_EVENTS = 100
@@ -127,7 +128,7 @@ export async function processPendingGamJobs(limit = 5, targetJobId?: string) {
                 `Rascunho pronto com ${draft.mediaEntries.length} formato(s)`,
                 'success',
             )
-            await prisma.nexusLog.updateMany({
+            const completed = await prisma.nexusLog.updateMany({
                 where: { id: job.id, level: 'JOB_GAM_RUNNING' },
                 data: {
                     level: 'JOB_GAM_REVIEW',
@@ -135,6 +136,18 @@ export async function processPendingGamJobs(limit = 5, targetJobId?: string) {
                     details: JSON.stringify(completedDetails),
                 },
             })
+
+            if (completed.count > 0) {
+                const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://adsnap-cloud.vercel.app').replace(/\/$/, '')
+                const reviewUrl = `${appUrl}/campaigns?jobId=${encodeURIComponent(job.id)}`
+                await sendTelegramAlert(
+                    'Order pronta para revisao',
+                    `${draft.client} esta pronta para conferencia antes do cadastro.`,
+                    `Order ${draft.orderId} | PI ${draft.pi} | ${draft.mediaEntries.length} formato(s) | ${draft.blockedItems.length} bloqueado(s)`,
+                    undefined,
+                    { label: 'Abrir revisao', url: reviewUrl },
+                )
+            }
         } catch (error) {
             const current = await prisma.nexusLog.findUnique({ where: { id: job.id } })
             if (!current || current.level === 'JOB_GAM_CANCELLED') {

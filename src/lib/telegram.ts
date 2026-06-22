@@ -9,7 +9,8 @@ export async function sendTelegramAlert(
     title: string,
     message: string,
     details?: string,
-    campaignId?: string
+    campaignId?: string,
+    action?: { label: string; url: string }
 ): Promise<boolean> {
     try {
         // 1. Get token from env, chatId from env or DB
@@ -47,6 +48,9 @@ export async function sendTelegramAlert(
 
         // 3. Send via Telegram Bot API
         const url = `https://api.telegram.org/bot${botToken}/sendMessage`
+        const replyMarkup = action && /^https?:\/\//i.test(action.url)
+            ? { inline_keyboard: [[{ text: action.label, url: action.url }]] }
+            : undefined
         const res = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -55,6 +59,7 @@ export async function sendTelegramAlert(
                 text,
                 parse_mode: 'MarkdownV2',
                 disable_web_page_preview: true,
+                reply_markup: replyMarkup,
             }),
         })
 
@@ -69,6 +74,7 @@ export async function sendTelegramAlert(
                 body: JSON.stringify({
                     chat_id: chatId,
                     text: `🚨 ADSNAP ALERT\n\n${title}\n${message}${details ? '\n' + details : ''}${campaignId ? '\nCampaign: ' + campaignId : ''}\n\n${now}`,
+                    reply_markup: replyMarkup,
                 }),
             })
             const plainData = await plainRes.json()
