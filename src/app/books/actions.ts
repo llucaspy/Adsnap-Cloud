@@ -1,32 +1,61 @@
 'use server'
 
 import prisma from '@/lib/prisma'
-import { startOfMonth, endOfMonth } from 'date-fns'
+
+type MonthlyCampaignGroup = {
+    id: string
+    pi: string
+    client: string
+    agency: string
+    campaignName: string
+    flightStart: Date | null
+    flightEnd: Date | null
+    captureCount: number
+    formats: string[]
+}
+
+function getCurrentMonthRangeInBrasilia() {
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/Sao_Paulo',
+        year: 'numeric',
+        month: 'numeric',
+    }).formatToParts(new Date())
+    const year = Number(parts.find(part => part.type === 'year')?.value)
+    const month = Number(parts.find(part => part.type === 'month')?.value)
+
+    return {
+        start: new Date(Date.UTC(year, month - 1, 1, 3)),
+        nextMonthStart: new Date(Date.UTC(year, month, 1, 3)),
+    }
+}
 
 export async function getMonthlyCampaigns() {
     const now = new Date()
-    const start = startOfMonth(now)
-    const end = endOfMonth(now)
+    const { start, nextMonthStart } = getCurrentMonthRangeInBrasilia()
 
     const campaigns = await prisma.campaign.findMany({
         where: {
             isArchived: false,
-            flightStart: { lte: end },
-            OR: [
-                { flightEnd: { gte: start } },
-                { flightEnd: null }
-            ]
+            flightStart: { not: null, lt: nextMonthStart },
+            flightEnd: { not: null, gte: start },
         },
         include: {
             _count: {
-                select: { captures: true }
+                select: {
+                    captures: {
+                        where: {
+                            status: 'SUCCESS',
+                            createdAt: { gte: start, lt: nextMonthStart },
+                        },
+                    },
+                },
             }
         },
         orderBy: { flightStart: 'desc' }
     })
 
     // Group by PI
-    const piGroups: Record<string, any> = {}
+    const piGroups: Record<string, MonthlyCampaignGroup> = {}
 
     campaigns.forEach(c => {
         if (!piGroups[c.pi]) {
@@ -53,22 +82,20 @@ export async function getMonthlyCampaigns() {
         }
         if (c.flightEnd && (!group.flightEnd || c.flightEnd > group.flightEnd)) {
             group.flightEnd = c.flightEnd
-        } else if (c.flightEnd === null) {
-            group.flightEnd = null // remains ongoing
         }
     })
 
     const groupedArray = Object.values(piGroups)
 
     const active = groupedArray.filter(g => {
-        if (!g.flightStart) return true
+        if (!g.flightStart || !g.flightEnd) return false
         const isStarted = g.flightStart <= now
-        const isNotEnded = !g.flightEnd || g.flightEnd >= now
+        const isNotEnded = g.flightEnd >= now
         return isStarted && isNotEnded
     })
 
     const ended = groupedArray.filter(g => {
-        return g.flightEnd && g.flightEnd < now
+        return Boolean(g.flightEnd && g.flightEnd >= start && g.flightEnd < now)
     })
 
     return { active, ended }
