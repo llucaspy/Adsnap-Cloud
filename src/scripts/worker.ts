@@ -6,6 +6,7 @@ import { getGmailClient, fetchRecentEmails } from '../lib/gmail'
 import { classifyEmail } from '../lib/gemini'
 import { processPendingGamJobs } from '../lib/gamJobProcessor'
 import { processGovernmentReportQueue } from '../lib/governmentReportAutomation'
+import { isFederalCampaignBoundaryToday, shouldQueueScheduledCampaign } from '../lib/campaignSchedule'
 
 const processedEmailIds = new Set<string>()
 
@@ -91,6 +92,38 @@ async function cleanupStuckCampaigns() {
     }
 }
 
+async function cleanupOffScheduleFederalQueue(now: Date) {
+    const staleBefore = new Date(Date.now() - 15 * 60 * 1000)
+    const queued = await prisma.campaign.findMany({
+        where: {
+            segmentation: 'GOV_FEDERAL',
+            captureCadence: 'BOUNDARY',
+            status: 'QUEUED',
+            isArchived: false,
+            updatedAt: { lt: staleBefore },
+        },
+    })
+    const offBoundary = queued.filter(campaign => !isFederalCampaignBoundaryToday(campaign, now))
+    if (offBoundary.length === 0) return
+
+    const withCapture = offBoundary.filter(campaign => campaign.lastCaptureAt).map(campaign => campaign.id)
+    const withoutCapture = offBoundary.filter(campaign => !campaign.lastCaptureAt).map(campaign => campaign.id)
+    await prisma.$transaction([
+        prisma.campaign.updateMany({
+            where: { id: { in: withCapture }, status: 'QUEUED' },
+            data: { status: 'SUCCESS' },
+        }),
+        prisma.campaign.updateMany({
+            where: { id: { in: withoutCapture }, status: 'QUEUED' },
+            data: { status: 'PENDING' },
+        }),
+    ])
+    await nexusLogStore.addLog(
+        `Nexus Worker: ${offBoundary.length} fila(s) federais fora do inicio/fim foram removidas`,
+        'SYSTEM'
+    )
+}
+
 /**
  * Main worker logic cycle
  */
@@ -107,10 +140,9 @@ async function runWorkerCycle() {
     const now = new Date()
     const brtNowStr = now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })
     const brtNow = new Date(brtNowStr)
-    const today = new Date(Date.UTC(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate()))
-
     // 0. Cleanup
     await cleanupStuckCampaigns()
+    if (targetedCampaignIds.length === 0) await cleanupOffScheduleFederalQueue(now)
 
     // 1. Gmail Check
     try {
@@ -126,27 +158,12 @@ async function runWorkerCycle() {
                 isScheduled: true,
                 isArchived: false,
                 status: { notIn: ['EXPIRED', 'FINISHED', 'PROCESSING', 'QUEUED'] },
-                OR: [
-                    { flightStart: { lte: today }, flightEnd: { gte: today } },
-                    { flightStart: null, flightEnd: null }
-                ]
             }
         })
 
-        const toQueueIds = scheduledCampaigns.filter(c => {
-            try {
-                const times = JSON.parse(c.scheduledTimes || '[]') as string[]
-                const lastCapture = c.lastCaptureAt ? new Date(c.lastCaptureAt) : null
-
-                return times.some((t: string) => {
-                    const [h, m] = t.split(':').map(Number)
-                    const scheduledMoment = new Date(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate(), h, m)
-                    const hasPassed = brtNow.getTime() >= scheduledMoment.getTime()
-                    const notCapturedYet = !lastCapture || lastCapture.getTime() < scheduledMoment.getTime()
-                    return hasPassed && notCapturedYet
-                })
-            } catch { return false }
-        }).map(c => c.id)
+        const toQueueIds = scheduledCampaigns
+            .filter(campaign => shouldQueueScheduledCampaign(campaign, now))
+            .map(campaign => campaign.id)
 
         if (toQueueIds.length > 0) {
             await prisma.campaign.updateMany({
@@ -247,15 +264,27 @@ async function runWorkerCycle() {
 
     // 8. Campaign Capture (movido para o final)
     try {
-        const queuedCampaigns = await prisma.campaign.findMany({
+        const queuedCandidates = await prisma.campaign.findMany({
             where: {
                 status: 'QUEUED',
                 isArchived: false,
                 ...(targetedCampaignIds.length > 0 ? { id: { in: targetedCampaignIds } } : {})
             },
             orderBy: { updatedAt: 'asc' },
-            take: 20
+            take: 100
         })
+        const boundaryFederal = targetedCampaignIds.length > 0
+            ? []
+            : queuedCandidates.filter(campaign => isFederalCampaignBoundaryToday(campaign, now))
+        const regularQueue = targetedCampaignIds.length > 0
+            ? queuedCandidates
+            : queuedCandidates.filter(campaign => (
+                campaign.segmentation.trim().toUpperCase() !== 'GOV_FEDERAL'
+                || campaign.captureCadence.trim().toUpperCase() === 'DAILY'
+            ))
+        const queuedCampaigns = targetedCampaignIds.length > 0
+            ? regularQueue
+            : [...boundaryFederal, ...regularQueue.slice(0, Math.max(0, 20 - boundaryFederal.length))]
 
         const autoconfigCampaigns = targetedCampaignIds.length > 0 || queuedCampaigns.length >= 20 ? [] : await prisma.campaign.findMany({
             where: {
@@ -316,6 +345,14 @@ async function runWorkerCycle() {
         }
     } catch (err) {
         console.error('[Nexus Worker] Erro no ciclo de captura:', err)
+    }
+
+    // A daily federal report is released only after every format has a
+    // successful capture for the current Brasilia date.
+    try {
+        await processGovernmentReportQueue(new Date())
+    } catch (err) {
+        console.error('[Nexus Worker] Erro nos relatorios apos as capturas:', err)
     }
 
 }

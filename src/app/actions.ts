@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { nexusLogStore } from '@/lib/nexusLogStore'
 import type { GamImportDraft } from '@/lib/gamImportPlanner'
 import { createCampaignsFromGamDraft as writeCampaignsFromGamDraft } from '@/lib/gamImportWriter'
+import { normalizeCaptureCadence, type CaptureCadence } from '@/lib/governmentReportScope'
 
 export async function getNexusActivity() {
     try {
@@ -81,6 +82,7 @@ export async function getCampaignDetailsByPi(pi: string) {
             url: true,
             device: true,
             segmentation: true,
+            captureCadence: true,
             flightStart: true,
             flightEnd: true
         }
@@ -97,6 +99,7 @@ export async function createCampaign(formData: FormData) {
     const url = formData.get('url') as string
     const device = (formData.get('device') as string) || 'desktop'
     const segmentation = (formData.get('segmentation') as string) || 'PRIVADO'
+    const captureCadence = normalizeCaptureCadence(segmentation, formData.get('captureCadence') as string | null)
 
     // Flight dates
     const flightStartStr = formData.get('flightStart') as string
@@ -123,6 +126,7 @@ export async function createCampaign(formData: FormData) {
             url,
             device,
             segmentation,
+            captureCadence,
             flightStart,
             flightEnd,
             status: 'PENDING',
@@ -141,6 +145,7 @@ export async function createMultipleCampaigns(payload: {
     campaignName: string
     pi: string
     segmentation: string
+    captureCadence: CaptureCadence
     flightStart: string | null
     flightEnd: string | null
     isScheduled: boolean
@@ -158,7 +163,7 @@ export async function createMultipleCampaigns(payload: {
     }[]
 }) {
     const {
-        agency, client, campaignName, pi, segmentation,
+        agency, client, campaignName, pi, segmentation, captureCadence,
         flightStart: flightStartStr, flightEnd: flightEndStr,
         isScheduled, scheduledTimes, mediaEntries
     } = payload
@@ -185,6 +190,7 @@ export async function createMultipleCampaigns(payload: {
                 url: entry.url,
                 device: entry.device || 'desktop',
                 segmentation,
+                captureCadence: normalizeCaptureCadence(segmentation, captureCadence),
                 flightStart,
                 flightEnd,
                 status: 'PENDING',
@@ -235,10 +241,12 @@ export async function requestGamImportDraft(input: {
     orderUrl: string
     pi: string
     segmentation: string
+    captureCadence: CaptureCadence
 }) {
     const url = input.orderUrl.trim()
     const requestedPi = input.pi.trim()
     const requestedSegmentation = input.segmentation.trim()
+    const requestedCaptureCadence = normalizeCaptureCadence(requestedSegmentation, input.captureCadence)
 
     if (!/^https:\/\/admanager\.google\.com\/.+order_id=\d+/i.test(url)) {
         throw new Error('Informe um link de Order valido do Google Ad Manager.')
@@ -273,10 +281,12 @@ export async function requestGamImportDraft(input: {
         const existingDetails = JSON.parse(existingJob.details || '{}') as {
             requestedPi?: string
             requestedSegmentation?: string
+            requestedCaptureCadence?: CaptureCadence
         }
         if (
             (existingDetails.requestedPi && existingDetails.requestedPi !== requestedPi)
             || (existingDetails.requestedSegmentation && existingDetails.requestedSegmentation !== requestedSegmentation)
+            || (existingDetails.requestedCaptureCadence && existingDetails.requestedCaptureCadence !== requestedCaptureCadence)
         ) {
             throw new Error(`Esta Order ja esta em processamento com o PI ${existingDetails.requestedPi || 'informado anteriormente'}.`)
         }
@@ -298,9 +308,10 @@ export async function requestGamImportDraft(input: {
                 mode: 'draft',
                 requestedPi,
                 requestedSegmentation,
+                requestedCaptureCadence,
                 executionLogs: [{
                     at: new Date().toISOString(),
-                    message: `Order ${orderId} vinculada ao PI ${requestedPi} (${requestedSegmentation})`,
+                    message: `Order ${orderId} vinculada ao PI ${requestedPi} (${requestedSegmentation}, ${requestedCaptureCadence})`,
                     tone: 'info',
                 }],
             }),
@@ -329,6 +340,7 @@ export async function getGamImportDrafts() {
         let orderId = ''
         let requestedPi = ''
         let requestedSegmentation = ''
+        let requestedCaptureCadence: CaptureCadence = 'DAILY'
         let executionLogs: Array<{ at: string; message: string; tone: 'info' | 'success' | 'error' }> = []
         try {
             if (log.details) {
@@ -337,12 +349,17 @@ export async function getGamImportDrafts() {
                     orderId?: string
                     requestedPi?: string
                     requestedSegmentation?: string
+                    requestedCaptureCadence?: CaptureCadence
                     executionLogs?: Array<{ at: string; message: string; tone: 'info' | 'success' | 'error' }>
                 }
                 orderUrl = details.orderUrl || ''
                 orderId = details.orderId || details.orderUrl?.match(/order_id=(\d+)/i)?.[1] || ''
                 requestedPi = details.requestedPi || details.pi || ''
                 requestedSegmentation = details.requestedSegmentation || details.segmentation || ''
+                requestedCaptureCadence = normalizeCaptureCadence(
+                    requestedSegmentation,
+                    details.requestedCaptureCadence || details.captureCadence,
+                )
                 executionLogs = details.executionLogs || []
                 if (log.level === 'JOB_GAM_REVIEW') draft = details
             }
@@ -359,6 +376,7 @@ export async function getGamImportDrafts() {
             orderUrl,
             requestedPi,
             requestedSegmentation,
+            requestedCaptureCadence,
             executionLogs,
             draft,
         }
@@ -488,6 +506,7 @@ export async function addFormatToCampaign(data: {
     campaignName: string
     pi: string
     segmentation: string
+    captureCadence?: CaptureCadence
     url: string
     device: string
     format: string
@@ -511,6 +530,7 @@ export async function addFormatToCampaign(data: {
             url: data.url,
             device: data.device || 'desktop',
             segmentation: data.segmentation || 'PRIVADO',
+            captureCadence: normalizeCaptureCadence(data.segmentation || 'PRIVADO', data.captureCadence),
             flightStart: data.flightStart ? new Date(data.flightStart) : null,
             flightEnd: data.flightEnd ? new Date(data.flightEnd) : null,
             status: 'PENDING',
@@ -802,6 +822,7 @@ export async function bulkCreateCampaigns(campaigns: any[]) {
                     url: data.url,
                     device: data.device || 'desktop',
                     segmentation: data.segmentation || 'PRIVADO',
+                    captureCadence: normalizeCaptureCadence(data.segmentation || 'PRIVADO', data.captureCadence),
                     flightStart: data.flightStart ? new Date(data.flightStart) : null,
                     flightEnd: data.flightEnd ? new Date(data.flightEnd) : null,
                     status: 'PENDING',

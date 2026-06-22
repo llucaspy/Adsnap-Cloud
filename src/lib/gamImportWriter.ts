@@ -57,12 +57,14 @@ export async function createCampaignsFromGamDraft(
 
         if (existing) {
             const compositionBox = withCreativeAsset(existing.compositionBox, entry.creativeAssetUrl)
-            if (compositionBox) {
-                await prisma.campaign.update({
-                    where: { id: existing.id },
-                    data: { compositionBox },
-                })
-            }
+            await prisma.campaign.update({
+                where: { id: existing.id },
+                data: {
+                    segmentation: draft.segmentation,
+                    captureCadence: draft.captureCadence,
+                    ...(compositionBox ? { compositionBox } : {}),
+                },
+            })
             skipped++
             campaignIds.push(existing.id)
             continue
@@ -75,6 +77,7 @@ export async function createCampaignsFromGamDraft(
                 campaignName: draft.campaignName,
                 pi: draft.pi,
                 segmentation: draft.segmentation,
+                captureCadence: draft.captureCadence,
                 flightStart: draft.flightStart ? new Date(`${draft.flightStart}T00:00:00-03:00`) : null,
                 flightEnd: draft.flightEnd ? new Date(`${draft.flightEnd}T23:59:59-03:00`) : null,
                 isScheduled: draft.isScheduled,

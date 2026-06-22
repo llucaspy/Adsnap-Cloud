@@ -9,6 +9,7 @@ import {
     requestGamImportDraft,
 } from '@/app/actions'
 import type { GamImportDraft } from '@/lib/gamImportPlanner'
+import type { CaptureCadence } from '@/lib/governmentReportScope'
 import { useTransition, useState, useEffect, useCallback } from 'react'
 import {
     Plus, Globe, Smartphone, Monitor, Calendar,
@@ -41,6 +42,7 @@ interface GamImportJob {
     orderUrl: string
     requestedPi: string
     requestedSegmentation: string
+    requestedCaptureCadence: CaptureCadence
     executionLogs: Array<{
         at: string
         message: string
@@ -98,6 +100,7 @@ export function CreateCampaignFlow({
     const [gamOrderUrl, setGamOrderUrl] = useState('')
     const [gamPi, setGamPi] = useState('')
     const [gamSegmentation, setGamSegmentation] = useState('GOV_FEDERAL')
+    const [gamCaptureCadence, setGamCaptureCadence] = useState<CaptureCadence>('BOUNDARY')
     const [gamCustomSegmentation, setGamCustomSegmentation] = useState('')
     const [gamStatus, setGamStatus] = useState('')
     const [isGamRefreshing, setIsGamRefreshing] = useState(false)
@@ -110,6 +113,7 @@ export function CreateCampaignFlow({
         campaignName: '',
         pi: '',
         segmentation: 'PRIVADO',
+        captureCadence: 'DAILY' as CaptureCadence,
         flightStart: '',
         flightEnd: '',
         isScheduled: false,
@@ -179,6 +183,7 @@ export function CreateCampaignFlow({
             campaignName: draft.campaignName,
             pi: draft.pi,
             segmentation: draft.segmentation,
+            captureCadence: draft.captureCadence || (draft.segmentation === 'GOV_FEDERAL' ? 'BOUNDARY' : 'DAILY'),
             flightStart: draft.flightStart || '',
             flightEnd: draft.flightEnd || '',
             isScheduled: draft.isScheduled,
@@ -200,11 +205,11 @@ export function CreateCampaignFlow({
         setSetupMode('manual')
     }
 
-    function requestGamDraft(url: string, pi: string, segmentation: string) {
+    function requestGamDraft(url: string, pi: string, segmentation: string, captureCadence: CaptureCadence) {
         startGamTransition(async () => {
             try {
                 setGamStatus('Solicitando rascunho...')
-                const result = await requestGamImportDraft({ orderUrl: url, pi, segmentation })
+                const result = await requestGamImportDraft({ orderUrl: url, pi, segmentation, captureCadence })
                 setSelectedGamJobId(result.jobId)
                 setGamStatus(result.existing
                     ? `A Order ${result.orderId} ja esta em processamento.`
@@ -222,7 +227,7 @@ export function CreateCampaignFlow({
         const segmentation = gamSegmentation === 'OUTRO'
             ? `OUTRO: ${gamCustomSegmentation.trim()}`
             : gamSegmentation
-        requestGamDraft(gamOrderUrl, gamPi, segmentation)
+        requestGamDraft(gamOrderUrl, gamPi, segmentation, gamCaptureCadence)
     }
 
     function handleRetryGamDraft(job: GamImportJob) {
@@ -230,6 +235,7 @@ export function CreateCampaignFlow({
         const segmentation = job.requestedSegmentation || (
             gamSegmentation === 'OUTRO' ? `OUTRO: ${gamCustomSegmentation.trim()}` : gamSegmentation
         )
+        const captureCadence = job.requestedCaptureCadence || job.draft?.captureCadence || 'DAILY'
         setGamOrderUrl(job.orderUrl)
         setGamPi(pi)
         if (segmentation.startsWith('OUTRO:')) {
@@ -238,7 +244,8 @@ export function CreateCampaignFlow({
         } else {
             setGamSegmentation(segmentation)
         }
-        requestGamDraft(job.orderUrl, pi, segmentation)
+        setGamCaptureCadence(captureCadence)
+        requestGamDraft(job.orderUrl, pi, segmentation, captureCadence)
     }
 
     async function handleDeleteGamDraft(jobId: string) {
@@ -274,6 +281,7 @@ export function CreateCampaignFlow({
                     campaignName: formData.campaignName,
                     pi: formData.pi,
                     segmentation: formData.segmentation,
+                    captureCadence: formData.captureCadence,
                     flightStart: formData.flightStart || null,
                     flightEnd: formData.flightEnd || null,
                     isScheduled: formData.isScheduled,
@@ -343,7 +351,12 @@ export function CreateCampaignFlow({
                 pi={gamPi}
                 onPiChange={value => setGamPi(value.replace(/\D/g, '').slice(0, 8))}
                 segmentation={gamSegmentation}
-                onSegmentationChange={setGamSegmentation}
+                onSegmentationChange={value => {
+                    setGamSegmentation(value)
+                    setGamCaptureCadence(value === 'GOV_FEDERAL' ? 'BOUNDARY' : 'DAILY')
+                }}
+                captureCadence={gamCaptureCadence}
+                onCaptureCadenceChange={setGamCaptureCadence}
                 customSegmentation={gamCustomSegmentation}
                 onCustomSegmentationChange={setGamCustomSegmentation}
                 onRequestDraft={handleRequestGamDraft}
@@ -445,6 +458,8 @@ function GamImportPanel({
     onPiChange,
     segmentation,
     onSegmentationChange,
+    captureCadence,
+    onCaptureCadenceChange,
     customSegmentation,
     onCustomSegmentationChange,
     onRequestDraft,
@@ -467,6 +482,8 @@ function GamImportPanel({
     onPiChange: (value: string) => void
     segmentation: string
     onSegmentationChange: (value: string) => void
+    captureCadence: CaptureCadence
+    onCaptureCadenceChange: (value: CaptureCadence) => void
     customSegmentation: string
     onCustomSegmentationChange: (value: string) => void
     onRequestDraft: () => void
@@ -582,6 +599,40 @@ function GamImportPanel({
                         </div>
                     )}
 
+                    {segmentation === 'GOV_FEDERAL' && (
+                        <fieldset className="space-y-2">
+                            <legend className="text-xs font-semibold" style={{ color: '#a3a3a3' }}>Frequencia dos prints</legend>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-1" style={{ background: '#1a1a1a', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px' }}>
+                                {([
+                                    { value: 'BOUNDARY' as const, label: 'Inicio e fim', description: 'Captura no primeiro e no ultimo dia', icon: CalendarRange },
+                                    { value: 'DAILY' as const, label: 'Diaria', description: 'Captura e envia o book do dia apos 08:00', icon: RefreshCw },
+                                ]).map(item => {
+                                    const Icon = item.icon
+                                    const active = captureCadence === item.value
+                                    return (
+                                        <button
+                                            key={item.value}
+                                            type="button"
+                                            onClick={() => onCaptureCadenceChange(item.value)}
+                                            className="min-h-14 px-3 py-2 flex items-center gap-3 text-left transition-colors"
+                                            style={{
+                                                color: active ? '#ffffff' : '#a3a3a3',
+                                                background: active ? '#7c3aed' : 'transparent',
+                                                borderRadius: '6px',
+                                            }}
+                                        >
+                                            <Icon size={16} className="shrink-0" />
+                                            <span className="min-w-0">
+                                                <span className="block text-xs font-semibold">{item.label}</span>
+                                                <span className="block text-[11px] leading-4" style={{ color: active ? '#ddd6fe' : '#737373' }}>{item.description}</span>
+                                            </span>
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                        </fieldset>
+                    )}
+
                     <div className="space-y-2">
                         <label htmlFor="gam-order-url" className="text-xs font-semibold" style={{ color: '#a3a3a3' }}>Link da Order</label>
                         <div className="relative">
@@ -652,6 +703,9 @@ function GamImportPanel({
                                     </div>
                                     <p className="text-xs mt-1 truncate" style={{ color: '#737373' }}>
                                         PI {job.requestedPi || job.draft?.pi || '-'} · {segmentationLabel(job.requestedSegmentation || job.draft?.segmentation || '-')}
+                                        {(job.requestedSegmentation || job.draft?.segmentation) === 'GOV_FEDERAL'
+                                            ? ` · ${(job.requestedCaptureCadence || job.draft?.captureCadence) === 'DAILY' ? 'Diaria' : 'Inicio e fim'}`
+                                            : ''}
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-2" onClick={event => event.stopPropagation()}>
@@ -839,6 +893,7 @@ function StepIdentification({ formData, updateFields, next, existingPis }: StepP
                                             // url: data.url,
                                             // device: data.device,
                                             segmentation: data.segmentation,
+                                            captureCadence: data.captureCadence,
                                             flightStart: data.flightStart ? new Date(data.flightStart).toISOString().split('T')[0] : '',
                                             flightEnd: data.flightEnd ? new Date(data.flightEnd).toISOString().split('T')[0] : ''
                                         })
@@ -875,6 +930,7 @@ function StepIdentification({ formData, updateFields, next, existingPis }: StepP
                                                 // url: data.url,
                                                 // device: data.device,
                                                 segmentation: data.segmentation,
+                                                captureCadence: data.captureCadence,
                                                 flightStart: data.flightStart ? new Date(data.flightStart).toISOString().split('T')[0] : '',
                                                 flightEnd: data.flightEnd ? new Date(data.flightEnd).toISOString().split('T')[0] : ''
                                             })
@@ -936,7 +992,10 @@ function StepSegmentation({ formData, updateFields, next, back }: StepProps) {
                             return (
                                 <button
                                     key={seg.value}
-                                    onClick={() => updateFields({ segmentation: seg.value })}
+                                    onClick={() => updateFields({
+                                        segmentation: seg.value,
+                                        captureCadence: seg.value === 'GOV_FEDERAL' ? 'BOUNDARY' : 'DAILY',
+                                    })}
                                     className="p-5 rounded-xl transition-all flex items-center gap-4 text-left group"
                                     style={{
                                         background: isActive ? 'var(--accent-muted)' : 'var(--bg-tertiary)',
@@ -972,6 +1031,38 @@ function StepSegmentation({ formData, updateFields, next, back }: StepProps) {
                         })}
                     </div>
                 </div>
+
+                {formData.segmentation === 'GOV_FEDERAL' && (
+                    <fieldset className="space-y-3">
+                        <legend className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>
+                            Frequencia dos prints
+                        </legend>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-1" style={{ background: '#1a1a1a', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px' }}>
+                            {([
+                                { value: 'BOUNDARY' as const, label: 'Inicio e fim', description: 'Primeiro e ultimo dia', icon: CalendarRange },
+                                { value: 'DAILY' as const, label: 'Diaria', description: 'Todos os dias e e-mail apos 08:00', icon: RefreshCw },
+                            ]).map(item => {
+                                const Icon = item.icon
+                                const active = formData.captureCadence === item.value
+                                return (
+                                    <button
+                                        key={item.value}
+                                        type="button"
+                                        onClick={() => updateFields({ captureCadence: item.value })}
+                                        className="min-h-14 px-3 py-2 flex items-center gap-3 text-left"
+                                        style={{ background: active ? '#7c3aed' : 'transparent', color: active ? '#ffffff' : '#a3a3a3', borderRadius: '6px' }}
+                                    >
+                                        <Icon size={16} />
+                                        <span>
+                                            <span className="block text-xs font-semibold">{item.label}</span>
+                                            <span className="block text-[11px]" style={{ color: active ? '#ddd6fe' : '#737373' }}>{item.description}</span>
+                                        </span>
+                                    </button>
+                                )
+                            })}
+                        </div>
+                    </fieldset>
+                )}
 
                 {/* Flight Dates */}
                 <div className="space-y-3">
@@ -1372,6 +1463,14 @@ function StepAutomation({ formData, updateFields, onSubmit, back, isPending, med
                                 {segmentationLabel(formData.segmentation)}
                             </span>
                         </div>
+                        {formData.segmentation === 'GOV_FEDERAL' && (
+                            <div>
+                                <span style={{ color: 'var(--text-muted)' }}>Frequencia:</span>
+                                <span className="ml-2 font-bold" style={{ color: 'var(--text-primary)' }}>
+                                    {formData.captureCadence === 'DAILY' ? 'Diaria' : 'Inicio e fim'}
+                                </span>
+                            </div>
+                        )}
                         <div className="col-span-2">
                             <span style={{ color: 'var(--text-muted)' }}>Período:</span>
                             <span className="ml-2 font-bold" style={{ color: 'var(--text-primary)' }}>

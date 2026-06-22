@@ -5,6 +5,11 @@ import { requireAdmin } from '@/lib/auth'
 import { nexusLogStore } from '@/lib/nexusLogStore'
 import { revalidatePath } from 'next/cache'
 import { triggerNexusWorker } from '@/app/actions'
+import {
+    campaignReportScopeKey,
+    dailyReportScopeKey,
+    getBrasiliaDayRange,
+} from '@/lib/governmentReportScope'
 
 const FEDERAL_SEGMENTATION = 'GOV_FEDERAL'
 const DEFAULT_RECIPIENTS = [
@@ -86,7 +91,7 @@ export async function getGovernmentReportDashboard() {
             : Promise.resolve([]),
         piValues.length > 0
             ? prisma.emailDispatch.findMany({
-                where: { pi: { in: piValues }, flightEnd: { not: null } },
+                where: { pi: { in: piValues }, flightEnd: { not: null }, reportScope: 'CAMPAIGN' },
                 orderBy: { updatedAt: 'desc' },
             })
             : Promise.resolve([]),
@@ -203,9 +208,10 @@ export async function queueGovernmentReportManual(pi: string) {
     const flightEnd = campaigns.reduce((latest, campaign) =>
         !latest || (campaign.flightEnd && campaign.flightEnd > latest) ? campaign.flightEnd : latest, null as Date | null)
     if (!flightEnd) return { success: false, error: 'Campanha sem data final' }
+    const scopeKey = campaignReportScopeKey(cleanPi, flightEnd)
 
     const existing = await prisma.emailDispatch.findUnique({
-        where: { pi_flightEnd: { pi: cleanPi, flightEnd } },
+        where: { scopeKey },
     })
 
     if (existing?.status === 'PROCESSING' || existing?.status === 'QUEUED_MANUAL') {
@@ -217,6 +223,8 @@ export async function queueGovernmentReportManual(pi: string) {
             where: { id: existing.id },
             data: {
                 recipients: JSON.stringify(recipients),
+                scopeKey,
+                reportScope: 'CAMPAIGN',
                 dispatchTime: settings.governmentReportTime || '09:00',
                 triggerMode: 'MANUAL',
                 status: 'QUEUED_MANUAL',
@@ -234,6 +242,8 @@ export async function queueGovernmentReportManual(pi: string) {
             data: {
                 pi: cleanPi,
                 flightEnd,
+                scopeKey,
+                reportScope: 'CAMPAIGN',
                 recipients: JSON.stringify(recipients),
                 dispatchTime: settings.governmentReportTime || '09:00',
                 triggerMode: 'MANUAL',
@@ -254,5 +264,96 @@ export async function queueGovernmentReportManual(pi: string) {
         message: triggered
             ? 'Relatorio enfileirado e worker iniciado'
             : 'Relatorio enfileirado; o agendador iniciara o envio em ate 15 minutos',
+    }
+}
+
+export async function queueGovernmentBookDayEmail(pi: string, dateKey: string) {
+    await requireAdmin()
+    const cleanPi = pi.trim()
+    if (!cleanPi) return { success: false, error: 'PI obrigatoria' }
+
+    const dayRange = getBrasiliaDayRange(dateKey)
+    const [settings, campaigns] = await Promise.all([
+        getOrCreateSettings(),
+        prisma.campaign.findMany({
+            where: {
+                pi: cleanPi,
+                segmentation: FEDERAL_SEGMENTATION,
+                isArchived: false,
+            },
+            select: { id: true, flightEnd: true },
+        }),
+    ])
+
+    if (campaigns.length === 0) {
+        return { success: false, error: 'Este Book nao pertence a uma campanha de Governo Federal' }
+    }
+
+    const printCount = await prisma.capture.count({
+        where: {
+            campaignId: { in: campaigns.map(campaign => campaign.id) },
+            status: 'SUCCESS',
+            screenshotPath: { not: '' },
+            createdAt: { gte: dayRange.start, lte: dayRange.end },
+        },
+    })
+    if (printCount === 0) return { success: false, error: 'Este Book nao possui prints validos nesse dia' }
+
+    const recipients = normalizeRecipients(parseRecipients(settings.governmentReportRecipients))
+    const flightEnd = campaigns.reduce((latest, campaign) =>
+        !latest || (campaign.flightEnd && campaign.flightEnd > latest) ? campaign.flightEnd : latest,
+    null as Date | null)
+    if (!flightEnd) return { success: false, error: 'Campanha sem data final' }
+
+    const scopeKey = dailyReportScopeKey(cleanPi, dateKey)
+    const existing = await prisma.emailDispatch.findUnique({ where: { scopeKey } })
+    if (existing?.status === 'PROCESSING' || ['QUEUED_MANUAL', 'QUEUED_AUTO'].includes(existing?.status || '')) {
+        return { success: true, queued: true, message: 'Os prints deste dia ja estao na fila de envio' }
+    }
+
+    if (existing) {
+        await prisma.emailDispatch.update({
+            where: { id: existing.id },
+            data: {
+                recipients: JSON.stringify(recipients),
+                triggerMode: 'MANUAL_DAY',
+                status: 'QUEUED_MANUAL',
+                isActive: true,
+                errorMessage: null,
+                emailMessageId: null,
+                attachmentCount: 0,
+                attachmentBytes: 0,
+                attempts: 0,
+                sendVersion: { increment: 1 },
+            },
+        })
+    } else {
+        await prisma.emailDispatch.create({
+            data: {
+                pi: cleanPi,
+                flightEnd,
+                reportDate: dayRange.start,
+                reportScope: 'DAY',
+                scopeKey,
+                recipients: JSON.stringify(recipients),
+                dispatchTime: '08:00',
+                triggerMode: 'MANUAL_DAY',
+                status: 'QUEUED_MANUAL',
+                isActive: true,
+            },
+        })
+    }
+
+    await nexusLogStore.addLog(`Relatorio Governo Federal: PI ${cleanPi}, dia ${dateKey}, enfileirada manualmente`, 'SYSTEM')
+    const triggered = await triggerNexusWorker()
+    revalidatePath(`/books/${cleanPi}`)
+    revalidatePath(`/books/${cleanPi}?date=${dateKey}`)
+
+    return {
+        success: true,
+        queued: true,
+        message: triggered
+            ? 'Prints do dia enfileirados e worker iniciado'
+            : 'Prints do dia enfileirados; o agendador iniciara o envio',
     }
 }

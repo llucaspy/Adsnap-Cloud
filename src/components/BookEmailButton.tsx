@@ -1,6 +1,9 @@
 'use client'
 
-import { queueGovernmentReportManual } from '@/app/admin/government-report-actions'
+import {
+    queueGovernmentBookDayEmail,
+    queueGovernmentReportManual,
+} from '@/app/admin/government-report-actions'
 import { LoaderCircle, Mail, RotateCcw } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState, useTransition } from 'react'
@@ -8,9 +11,10 @@ import { useState, useTransition } from 'react'
 type BookEmailButtonProps = {
     pi: string
     initialStatus?: string | null
+    reportDate?: string
 }
 
-export function BookEmailButton({ pi, initialStatus }: BookEmailButtonProps) {
+export function BookEmailButton({ pi, initialStatus, reportDate }: BookEmailButtonProps) {
     const router = useRouter()
     const [isPending, startTransition] = useTransition()
     const [status, setStatus] = useState(initialStatus || '')
@@ -23,7 +27,9 @@ export function BookEmailButton({ pi, initialStatus }: BookEmailButtonProps) {
         setMessage('')
         startTransition(async () => {
             try {
-                const result = await queueGovernmentReportManual(pi)
+                const result = reportDate
+                    ? await queueGovernmentBookDayEmail(pi, reportDate)
+                    : await queueGovernmentReportManual(pi)
                 if (!result.success) {
                     setMessage(result.error || 'Nao foi possivel enfileirar o book')
                     return
@@ -44,8 +50,8 @@ export function BookEmailButton({ pi, initialStatus }: BookEmailButtonProps) {
         : isQueued
             ? 'Envio na fila'
             : wasSent
-                ? 'Reenviar book'
-                : 'Enviar book por e-mail'
+                ? reportDate ? 'Reenviar prints do dia' : 'Reenviar book completo'
+                : reportDate ? 'Enviar prints do dia' : 'Enviar book completo'
 
     return (
         <div className="flex min-w-[220px] flex-col items-end gap-2">
@@ -53,7 +59,7 @@ export function BookEmailButton({ pi, initialStatus }: BookEmailButtonProps) {
                 type="button"
                 onClick={sendBook}
                 disabled={isPending || isQueued}
-                title="Enviar o book completo em arquivo ZIP"
+                title={reportDate ? `Enviar somente os prints de ${reportDate}` : 'Enviar o book completo em arquivo ZIP'}
                 className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#7c3aed] px-5 py-2.5 text-sm font-medium text-white transition-[background,transform,opacity] duration-200 hover:-translate-y-px hover:bg-[#6d28d9] active:bg-[#5b21b6] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
             >
                 <Icon size={18} className={isPending || isQueued ? 'animate-spin' : ''} />

@@ -2,6 +2,7 @@ import prisma from './prisma'
 import { gamCrawler } from './gamCrawlerService'
 import { buildGamImportDraft, type GamImportDraft } from './gamImportPlanner'
 import { sendTelegramAlert } from './telegram'
+import { normalizeCaptureCadence, type CaptureCadence } from './governmentReportScope'
 
 const STALE_JOB_MINUTES = 30
 const MAX_JOB_EVENTS = 100
@@ -17,6 +18,7 @@ type GamJobDetails = Partial<GamImportDraft> & {
     mode?: string
     requestedPi?: string
     requestedSegmentation?: string
+    requestedCaptureCadence?: CaptureCadence
     executionLogs?: GamJobEvent[]
 }
 
@@ -110,6 +112,10 @@ export async function processPendingGamJobs(limit = 5, targetJobId?: string) {
                 ...inferredDraft,
                 pi: initialDetails.requestedPi || inferredDraft.pi,
                 segmentation: initialDetails.requestedSegmentation || inferredDraft.segmentation,
+                captureCadence: normalizeCaptureCadence(
+                    initialDetails.requestedSegmentation || inferredDraft.segmentation,
+                    initialDetails.requestedCaptureCadence || inferredDraft.captureCadence,
+                ),
             }
 
             if (draft.mediaEntries.length === 0 && draft.blockedItems.length === 0) {
@@ -123,6 +129,7 @@ export async function processPendingGamJobs(limit = 5, targetJobId?: string) {
                     ...draft,
                     requestedPi: initialDetails.requestedPi || draft.pi,
                     requestedSegmentation: initialDetails.requestedSegmentation || draft.segmentation,
+                    requestedCaptureCadence: initialDetails.requestedCaptureCadence || draft.captureCadence,
                     executionLogs: readDetails(current.details).executionLogs,
                 },
                 `Rascunho pronto com ${draft.mediaEntries.length} formato(s)`,

@@ -20,6 +20,7 @@ model Campaign {
   device               String          @default("desktop")
   status               String          @default("PENDING")
   segmentation         String          @default("PRIVADO")
+  captureCadence       String          @default("DAILY")
   flightStart          DateTime?
   flightEnd            DateTime?
   isArchived           Boolean         @default(false)
@@ -128,9 +129,11 @@ model EmailDispatch {
   attachmentBytes Int    @default(0)
   attempts     Int       @default(0)
   sendVersion  Int       @default(1)
+  reportScope String    @default("CAMPAIGN")
+  reportDate  DateTime?
+  scopeKey    String?   @unique
   campaign     Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
-  @@unique([pi, flightEnd])
   @@index([status, isActive, flightEnd])
 }
 

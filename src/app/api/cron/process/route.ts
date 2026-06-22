@@ -2,18 +2,20 @@ import { NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { nexusLogStore } from '@/lib/nexusLogStore'
 import { triggerNexusWorker } from '@/app/actions'
+import { shouldQueueScheduledCampaign } from '@/lib/campaignSchedule'
 
 export const dynamic = 'force-dynamic'
 
 // This route can be triggered by a Cron service (like Vercel Cron or GitHub Actions)
 // or manually by hitting /api/cron/process
-export async function GET(request: Request) {
+export async function GET() {
     console.log('[Cron] Starting scheduled queuing process...')
 
     try {
         // Generate "today" at 00:00 UTC based on current date in Brasilia (BRT)
         // This allows consistent comparison with Prisma Date objects
-        const brtNowStr = new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' });
+        const now = new Date()
+        const brtNowStr = now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' });
         const brtNow = new Date(brtNowStr);
         const today = new Date(Date.UTC(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate()));
 
@@ -42,7 +44,7 @@ export async function GET(request: Request) {
         let expiredOnlyCount = 0
 
         for (const campaign of candidates) {
-            const hasCaptures = (campaign as any)._count.captures > 0
+            const hasCaptures = campaign._count.captures > 0
             if (hasCaptures) {
                 await prisma.campaign.update({
                     where: { id: campaign.id },
@@ -64,37 +66,18 @@ export async function GET(request: Request) {
                 isScheduled: true,
                 isArchived: false,
                 status: { notIn: ['EXPIRED', 'FINISHED', 'PROCESSING', 'QUEUED'] },
-                OR: [
-                    { flightStart: { lte: today }, flightEnd: { gte: today } },
-                    { flightStart: null, flightEnd: null }
-                ]
-            } as any
-        })
-
-        // Step 3: Filter by scheduled time (Robust: already passed and not yet captured)
-        const campaignsToQueue = scheduledCampaigns.filter((campaign: any) => {
-            try {
-                const times = JSON.parse(campaign.scheduledTimes || '[]') as string[]
-                const lastCapture = campaign.lastCaptureAt ? new Date(campaign.lastCaptureAt) : null;
-
-                return times.some((t: string) => {
-                    const [h, m] = t.split(':').map(Number);
-                    const hasPassed = brtNow.getTime() >= (new Date(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate(), h, m)).getTime();
-                    const notCapturedYet = !lastCapture || lastCapture.getTime() < (new Date(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate(), h, m)).getTime();
-
-                    return hasPassed && notCapturedYet;
-                });
-            } catch (e) {
-                return false
             }
         })
+
+        // Step 3: Use the same Brasilia date and cadence rules as the worker.
+        const campaignsToQueue = scheduledCampaigns.filter(campaign => shouldQueueScheduledCampaign(campaign, now))
 
         console.log(`[Cron] Enqueuing ${campaignsToQueue.length} campaigns.`)
 
         // Step 4: Mark as QUEUED
         if (campaignsToQueue.length > 0) {
             await prisma.campaign.updateMany({
-                where: { id: { in: campaignsToQueue.map((c: any) => c.id) } },
+                where: { id: { in: campaignsToQueue.map(campaign => campaign.id) } },
                 data: { status: 'QUEUED' }
             })
 
@@ -111,6 +94,7 @@ export async function GET(request: Request) {
             message: 'Queuing process completed',
             time: currentTime,
             archivedCount,
+            expiredOnlyCount,
             enqueuedCount: campaignsToQueue.length
         })
     } catch (error) {

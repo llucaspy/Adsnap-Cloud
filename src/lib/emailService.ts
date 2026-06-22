@@ -4,6 +4,7 @@ import JSZip from 'jszip'
 import nodemailer from 'nodemailer'
 import prisma from './prisma'
 import { nexusLogStore } from './nexusLogStore'
+import { getBrasiliaDayRange } from './governmentReportScope'
 
 const FEDERAL_SEGMENTATION = 'GOV_FEDERAL'
 const MAX_RAW_BYTES_PER_EMAIL = 16 * 1024 * 1024
@@ -13,6 +14,7 @@ interface SendReportOptions {
     pi: string
     recipients: string[]
     dispatchId: string
+    reportDate?: string | null
 }
 
 interface CaptureFile {
@@ -185,6 +187,7 @@ function buildEmailHtml(params: {
     printCount: number
     part: number
     totalParts: number
+    reportDate?: string | null
 }) {
     const partLabel = params.totalParts > 1
         ? `Parte ${params.part} de ${params.totalParts}`
@@ -194,7 +197,7 @@ function buildEmailHtml(params: {
         <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; color: #171717;">
             <div style="background: #0f0f0f; color: #ffffff; padding: 28px; border-radius: 8px 8px 0 0;">
                 <p style="margin: 0 0 8px; font-size: 12px; color: #a3a3a3;">ADSNAP CLOUD</p>
-                <h1 style="margin: 0; font-size: 22px;">Prints finais</h1>
+                <h1 style="margin: 0; font-size: 22px;">${params.reportDate ? 'Prints do dia' : 'Prints finais'}</h1>
                 <p style="margin: 8px 0 0; color: #d4d4d4;">Campanha de Governo Federal</p>
             </div>
             <div style="border: 1px solid #e5e5e5; border-top: 0; padding: 28px; border-radius: 0 0 8px 8px;">
@@ -204,6 +207,7 @@ function buildEmailHtml(params: {
                     <tr><td style="padding: 6px 0; font-weight: 700;">Agencia</td><td>${escapeHtml(params.agency)}</td></tr>
                     <tr><td style="padding: 6px 0; font-weight: 700;">Campanha</td><td>${escapeHtml(params.campaignName || '-')}</td></tr>
                     <tr><td style="padding: 6px 0; font-weight: 700;">PI</td><td>${escapeHtml(params.pi)}</td></tr>
+                    ${params.reportDate ? `<tr><td style="padding: 6px 0; font-weight: 700;">Data</td><td>${escapeHtml(params.reportDate.split('-').reverse().join('/'))}</td></tr>` : ''}
 
                     <tr><td style="padding: 6px 0; font-weight: 700;">Formatos</td><td>${params.formats.map(escapeHtml).join(', ')}</td></tr>
                     <tr><td style="padding: 6px 0; font-weight: 700;">Anexo</td><td>${partLabel}, ${params.printCount} print(s)</td></tr>
@@ -214,7 +218,7 @@ function buildEmailHtml(params: {
     `
 }
 
-export async function sendCampaignReport({ pi, recipients, dispatchId }: SendReportOptions): Promise<{
+export async function sendCampaignReport({ pi, recipients, dispatchId, reportDate }: SendReportOptions): Promise<{
     success: boolean
     error?: string
     sentParts?: number
@@ -265,11 +269,17 @@ export async function sendCampaignReport({ pi, recipients, dispatchId }: SendRep
                 : {}),
         }))
 
+        const dayRange = reportDate ? getBrasiliaDayRange(reportDate) : null
         const captures = await prisma.capture.findMany({
             where: {
                 status: 'SUCCESS',
                 screenshotPath: { not: '' },
-                OR: captureFilters,
+                ...(dayRange
+                    ? {
+                        campaignId: { in: campaigns.map(campaign => campaign.id) },
+                        createdAt: { gte: dayRange.start, lte: dayRange.end },
+                    }
+                    : { OR: captureFilters }),
             },
             select: {
                 id: true,
@@ -281,7 +291,9 @@ export async function sendCampaignReport({ pi, recipients, dispatchId }: SendRep
         })
 
         if (captures.length === 0) {
-            throw new Error('Nenhum print foi encontrado no periodo da campanha')
+            throw new Error(reportDate
+                ? `Nenhum print foi encontrado no book de ${reportDate}`
+                : 'Nenhum print foi encontrado no periodo da campanha')
         }
 
         const loaded = await mapWithConcurrency(captures, DOWNLOAD_CONCURRENCY, async capture => {
@@ -330,11 +342,12 @@ export async function sendCampaignReport({ pi, recipients, dispatchId }: SendRep
             if (deliveryProgress.parts[String(part)]) continue
 
             const suffix = zipBuffers.length > 1 ? ` - parte ${part} de ${zipBuffers.length}` : ''
-            const filename = `prints-PI-${sanitizePathSegment(pi)}${zipBuffers.length > 1 ? `-parte-${part}` : ''}.zip`
+            const dateSuffix = reportDate ? `-${reportDate}` : ''
+            const filename = `prints-PI-${sanitizePathSegment(pi)}${dateSuffix}${zipBuffers.length > 1 ? `-parte-${part}` : ''}.zip`
             const info = await transporter.sendMail({
                 from: smtp.from,
                 to: recipients,
-                subject: `Relatorio de prints - ${firstCampaign.client} - PI ${pi}${suffix}`,
+                subject: `Relatorio de prints${reportDate ? ` de ${reportDate.split('-').reverse().join('/')}` : ''} - ${firstCampaign.client} - PI ${pi}${suffix}`,
                 html: buildEmailHtml({
                     client: firstCampaign.client,
                     agency: firstCampaign.agency,
@@ -348,9 +361,12 @@ export async function sendCampaignReport({ pi, recipients, dispatchId }: SendRep
                     printCount: batches[index].length,
                     part,
                     totalParts: zipBuffers.length,
+                    reportDate,
                 }),
                 text: [
-                    'Relatorio final de prints da campanha de Governo Federal.',
+                    reportDate
+                        ? `Relatorio diario de prints da campanha de Governo Federal - ${reportDate.split('-').reverse().join('/')}.`
+                        : 'Relatorio final de prints da campanha de Governo Federal.',
                     `Cliente: ${firstCampaign.client}`,
                     `Campanha: ${firstCampaign.campaignName || '-'}`,
                     `PI: ${pi}`,

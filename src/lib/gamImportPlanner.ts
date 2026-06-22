@@ -1,3 +1,5 @@
+import type { CaptureCadence } from './governmentReportScope'
+
 export interface BannerFormatConfig {
     id: string
     label: string
@@ -61,6 +63,7 @@ export interface GamImportDraft {
     campaignName: string
     pi: string
     segmentation: string
+    captureCadence: CaptureCadence
     flightStart: string | null
     flightEnd: string | null
     isScheduled: boolean
@@ -362,6 +365,7 @@ export function buildGamImportDraft(order: GamOrderImport, bannerFormats: Banner
         campaignName: cleanCampaignName(order),
         pi,
         segmentation,
+        captureCadence: segmentation === 'GOV_FEDERAL' ? 'BOUNDARY' : 'DAILY',
         flightStart,
         flightEnd,
         isScheduled: true,

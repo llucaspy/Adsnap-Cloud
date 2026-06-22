@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { BookCampaignList } from '@/components/BookCampaignList'
 import { BookEmailButton } from '@/components/BookEmailButton'
+import { campaignReportScopeKey, dailyReportScopeKey } from '@/lib/governmentReportScope'
 
 export const dynamic = 'force-dynamic'
 
@@ -104,12 +105,20 @@ export default async function PiDetailPage({
         if (!campaign.flightEnd) return latest
         return !latest || campaign.flightEnd > latest ? campaign.flightEnd : latest
     }, null)
-    const reportDispatch = latestFlightEnd
-        ? await prisma.emailDispatch.findUnique({
-            where: { pi_flightEnd: { pi, flightEnd: latestFlightEnd } },
-            select: { status: true },
-        })
-        : null
+    const [reportDispatch, dailyReportDispatch] = await Promise.all([
+        latestFlightEnd
+            ? prisma.emailDispatch.findUnique({
+                where: { scopeKey: campaignReportScopeKey(pi, latestFlightEnd) },
+                select: { status: true },
+            })
+            : null,
+        date && federalCampaigns.length > 0
+            ? prisma.emailDispatch.findUnique({
+                where: { scopeKey: dailyReportScopeKey(pi, date) },
+                select: { status: true },
+            })
+            : null,
+    ])
 
     return (
         <div className="space-y-12 animate-slide-up">
@@ -158,7 +167,10 @@ export default async function PiDetailPage({
                         </p>
                     </div>
 
-                    <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start">
+                    <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-start md:max-w-[520px] md:justify-end">
+                        {date && federalCampaigns.length > 0 && (
+                            <BookEmailButton pi={pi} reportDate={date} initialStatus={dailyReportDispatch?.status} />
+                        )}
                         {latestFlightEnd && (
                             <BookEmailButton pi={pi} initialStatus={reportDispatch?.status} />
                         )}
