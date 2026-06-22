@@ -309,12 +309,15 @@ function isStandaloneCreativeAsset(assetUrl: string) {
     }
 }
 
-interface FrameQuality {
+export interface FrameQuality {
     score: number
     acceptable: boolean
     deviation: number
     edgeDensity: number
     blankRatio: number
+    dominantColorRatio: number
+    colorEntropy: number
+    flatColor: boolean
 }
 
 interface SelectedFrame {
@@ -323,7 +326,7 @@ interface SelectedFrame {
     frame: number
 }
 
-async function scoreCreativeFrame(
+export async function scoreCreativeFrame(
     screenshot: Buffer,
     box: { x: number; y: number; width: number; height: number },
     viewport: { width: number; height: number }
@@ -350,6 +353,7 @@ async function scoreCreativeFrame(
     let nearWhite = 0
     let nearBlack = 0
     let chromaSum = 0
+    const colorHistogram = new Uint32Array(512)
 
     for (let pixel = 0; pixel < luminance.length; pixel++) {
         const offset = pixel * info.channels
@@ -362,6 +366,8 @@ async function scoreCreativeFrame(
         if (value >= 246) nearWhite++
         if (value <= 9) nearBlack++
         chromaSum += Math.max(r, g, b) - Math.min(r, g, b)
+        const colorBucket = ((r >> 5) << 6) | ((g >> 5) << 3) | (b >> 5)
+        colorHistogram[colorBucket]++
     }
 
     const mean = sum / luminance.length
@@ -389,10 +395,42 @@ async function scoreCreativeFrame(
     const edgeDensity = comparisons ? edges / comparisons : 0
     const blankRatio = Math.max(nearWhite, nearBlack) / luminance.length
     const chroma = chromaSum / luminance.length
-    const score = (deviation * 0.9) + (edgeDensity * 45) + (chroma * 0.15) + ((1 - blankRatio) * 20)
-    const acceptable = deviation >= 10 && blankRatio < 0.92 && (edgeDensity >= 0.025 || chroma >= 8)
+    let dominantColorPixels = 0
+    let colorEntropy = 0
+    for (const count of colorHistogram) {
+        if (count === 0) continue
+        dominantColorPixels = Math.max(dominantColorPixels, count)
+        const probability = count / luminance.length
+        colorEntropy -= probability * Math.log2(probability)
+    }
 
-    return { score, acceptable, deviation, edgeDensity, blankRatio }
+    const dominantColorRatio = dominantColorPixels / luminance.length
+    const flatColor = (
+        (dominantColorRatio >= 0.93 && edgeDensity < 0.025)
+        || (dominantColorRatio >= 0.72 && colorEntropy < 1.1 && edgeDensity < 0.018)
+        || (deviation < 7 && edgeDensity < 0.012)
+    )
+    const hasVisualStructure = edgeDensity >= 0.012
+        && deviation >= 8
+        && (colorEntropy >= 0.45 || dominantColorRatio < 0.88)
+    const acceptable = blankRatio < 0.94 && !flatColor && hasVisualStructure
+    const score = (deviation * 0.7)
+        + (edgeDensity * 130)
+        + (colorEntropy * 8)
+        + ((1 - dominantColorRatio) * 24)
+        + (chroma * 0.04)
+        - (flatColor ? 80 : 0)
+
+    return {
+        score,
+        acceptable,
+        deviation,
+        edgeDensity,
+        blankRatio,
+        dominantColorRatio,
+        colorEntropy,
+        flatColor,
+    }
 }
 
 async function captureBestCreativeFrame(
@@ -404,7 +442,10 @@ async function captureBestCreativeFrame(
     if (!viewport) throw new Error('Viewport indisponivel para analise do criativo')
 
     const startedAt = Date.now()
-    const selection: { current: SelectedFrame | null } = { current: null }
+    const selection: { bestAccepted: SelectedFrame | null; bestObserved: SelectedFrame | null } = {
+        bestAccepted: null,
+        bestObserved: null,
+    }
     let frameNumber = 0
 
     await nexusLogStore.addLog(
@@ -417,7 +458,7 @@ async function captureBestCreativeFrame(
     await page.waitForLoadState('networkidle', { timeout: 3_000 }).catch(() => null)
     await page.evaluate(() => document.fonts?.ready).catch(() => null)
 
-    const sampleBurst = async (count: number) => {
+    const sampleBurst = async (count: number, intervalMs: number) => {
         for (let index = 0; index < count; index++) {
             frameNumber++
             const scroll = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }))
@@ -430,28 +471,44 @@ async function captureBestCreativeFrame(
             const screenshot = await page.screenshot({ type: 'png', animations: 'allow' })
             const quality = await scoreCreativeFrame(screenshot, viewportBox, viewport)
 
-            if (!selection.current || quality.score > selection.current.quality.score) {
-                selection.current = { buffer: screenshot, quality, frame: frameNumber }
+            const candidate = { buffer: screenshot, quality, frame: frameNumber }
+            if (!selection.bestObserved || quality.score > selection.bestObserved.quality.score) {
+                selection.bestObserved = candidate
+            }
+            if (quality.acceptable && (!selection.bestAccepted || quality.score > selection.bestAccepted.quality.score)) {
+                selection.bestAccepted = candidate
             }
 
-            if (index < count - 1) await page.waitForTimeout(400)
+            if (index < count - 1) await page.waitForTimeout(intervalMs)
         }
     }
 
-    await sampleBurst(6)
-    if (!selection.current?.quality.acceptable) {
-        await page.waitForTimeout(700)
-        await sampleBurst(4)
+    await sampleBurst(7, 450)
+    if (!selection.bestAccepted) {
+        await page.waitForTimeout(800)
+        await sampleBurst(5, 550)
     }
 
-    const best = selection.current
-    if (!best) throw new Error('Nao foi possivel capturar frames do criativo')
+    const best = selection.bestAccepted
+    if (!best) {
+        const observed = selection.bestObserved
+        const diagnostic = observed
+            ? `score ${observed.quality.score.toFixed(1)} | cor dominante ${(observed.quality.dominantColorRatio * 100).toFixed(0)}% | entropia ${observed.quality.colorEntropy.toFixed(2)} | bordas ${(observed.quality.edgeDensity * 100).toFixed(1)}%`
+            : 'nenhum frame capturado'
+        await nexusLogStore.addLog(
+            'Nexus: Criativo sem frame visualmente valido',
+            'ERROR',
+            `${frameNumber} frames analisados | ${diagnostic}`,
+            campaignId
+        )
+        throw new Error(`FRAME_QUALITY_REJECTED: ${diagnostic}`)
+    }
 
     const elapsedMs = Date.now() - startedAt
     await nexusLogStore.addLog(
-        best.quality.acceptable ? 'Nexus: Melhor frame selecionado' : 'Nexus: Melhor frame disponivel selecionado',
-        best.quality.acceptable ? 'SUCCESS' : 'INFO',
-        `Frame ${best.frame}/${frameNumber} | score ${best.quality.score.toFixed(1)} | vazio ${(best.quality.blankRatio * 100).toFixed(0)}% | ${(elapsedMs / 1000).toFixed(1)}s`,
+        'Nexus: Melhor frame selecionado',
+        'SUCCESS',
+        `Frame ${best.frame}/${frameNumber} | score ${best.quality.score.toFixed(1)} | cor dominante ${(best.quality.dominantColorRatio * 100).toFixed(0)}% | entropia ${best.quality.colorEntropy.toFixed(2)} | bordas ${(best.quality.edgeDensity * 100).toFixed(1)}% | ${(elapsedMs / 1000).toFixed(1)}s`,
         campaignId
     )
 
