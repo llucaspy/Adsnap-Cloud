@@ -45,6 +45,7 @@
     "**/test-*.js",
     "**/migrate-*.js",
     "*.js",
+    "PLANO DE HUB",
     ".reference_ui",
     "supabase"
   ]

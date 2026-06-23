@@ -1,6 +1,6 @@
 'use client'
 
-import { LayoutDashboard, Activity, PlusCircle, Library, Archive, Settings, Sparkles, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database, MessageCircle, Menu, X } from 'lucide-react'
+import { LayoutDashboard, Activity, PlusCircle, Library, Archive, Settings, Sparkles, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database, MessageCircle, Menu, X, ServerCog } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
@@ -23,23 +23,23 @@ function StorageMonitor() {
     const isCriticalUsage = usage.percentage > 95
 
     return (
-        <div className="px-4 py-4 rounded-2xl bg-white/3 border border-white/8 space-y-3">
+        <div className="px-4 py-4 rounded-xl space-y-3" style={{ background: '#ede9e1' }}>
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                    <Database size={14} className={isCriticalUsage ? 'text-red-500' : isHighUsage ? 'text-orange-500' : 'text-white/50'} />
-                    <span className="text-[10px] font-black uppercase tracking-widest text-white/30">Storage</span>
+                    <Database size={14} className={isCriticalUsage ? 'text-red-500' : isHighUsage ? 'text-orange-500' : 'text-[#a89f8c]'} />
+                    <span className="text-[10px] uppercase tracking-widest text-[#a89f8c]" style={{fontWeight: 600}}>Storage</span>
                 </div>
-                <span className="text-[10px] font-bold text-white/50">{usage.percentage.toFixed(1)}%</span>
+                <span className="text-[10px] font-bold text-[#1c1917]">{usage.percentage.toFixed(1)}%</span>
             </div>
 
-            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+            <div className="h-1 w-full rounded-[2px] overflow-hidden" style={{ background: '#e8e5df' }}>
                 <div
-                    className={`h-full transition-all duration-1000 ${isCriticalUsage ? 'bg-red-500' : isHighUsage ? 'bg-orange-500' : 'bg-white/60'}`}
+                    className={`h-full transition-all duration-1000 ${isCriticalUsage ? 'bg-red-500' : isHighUsage ? 'bg-orange-500' : 'bg-[#1c1917]'}`}
                     style={{ width: `${usage.percentage}%` }}
                 />
             </div>
 
-            <p className="text-[9px] font-medium text-white/25 text-center">
+            <p className="text-[9px] font-medium text-[#a89f8c] text-center">
                 {usage.formattedUsed} de 1024 MB usados
             </p>
         </div>
@@ -63,7 +63,6 @@ export function Sidebar() {
             .catch(() => setUser(null))
     }, [])
 
-
     const handleLogout = async () => {
         try {
             await fetch('/api/auth', { method: 'DELETE' })
@@ -78,6 +77,7 @@ export function Sidebar() {
         { icon: Sparkles, label: 'Nexus Zero', href: '/' },
         { icon: LayoutDashboard, label: 'Resumo', href: '/dashboard' },
         { icon: Activity, label: 'Monitoramento', href: '/monitoring' },
+        { icon: ServerCog, label: 'Workers', href: '/workers' },
         { icon: PlusCircle, label: 'Novo Setup', href: '/campaigns' },
         { icon: Library, label: 'Books', href: '/books' },
         { icon: Archive, label: 'Arquivado', href: '/archive' },
@@ -109,11 +109,11 @@ export function Sidebar() {
             )}
 
             <aside
-                className={`w-72 flex flex-col h-screen fixed inset-y-0 left-0 z-70 glass transition-transform duration-500 lg:sticky lg:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'
+                className={`w-72 flex flex-col h-screen fixed inset-y-0 left-0 z-70 transition-transform duration-500 lg:sticky lg:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'
                     }`}
                 style={{
-                    background: 'var(--bg-secondary)',
-                    borderRight: '1px solid var(--border)'
+                    background: '#f3f0ea',
+                    borderRight: '0.5px solid #e8e5df'
                 }}
             >
                 {/* Logo Area */}
@@ -124,13 +124,13 @@ export function Sidebar() {
                     {/* Header with Close Button for Mobile */}
                     <div className="flex items-center justify-between">
                         <div className="flex items-center px-1">
-                            <span className="text-[11px] font-black uppercase tracking-[0.4em] text-white/50">
-                                Adsnap <span className="text-white/20">Cloud</span>
+                            <span className="text-[11px] font-black uppercase tracking-[0.4em] text-[#1c1917]">
+                                Adsnap <span className="text-[#a89f8c]">Cloud</span>
                             </span>
                         </div>
                         <button
                             onClick={() => setIsOpen(false)}
-                            className="lg:hidden p-2 text-white/30 hover:text-white transition-colors"
+                            className="lg:hidden p-2 text-[#a89f8c] hover:text-[#1c1917] transition-colors"
                         >
                             <X size={20} />
                         </button>
@@ -147,15 +147,9 @@ export function Sidebar() {
                             Client Workplace
                         </div>
 
-                        <div className="bg-white border border-gray-200 rounded-2xl shadow-xl p-5 flex flex-col items-center gap-3">
-                            <img
-                                src="https://assets.metroimg.com/images/logo-maisacessado.gif"
-                                alt="Metrópoles"
-                                className="h-10 w-auto object-contain"
-                            />
-                            <div className="h-px w-8 bg-gray-100" />
-                            <span className="text-[10px] font-bold tracking-[0.15em] uppercase text-gray-900">
-                                Metrópoles
+                        <div className="bg-transparent py-4 flex flex-col items-center justify-center">
+                            <span className="text-[11px] font-[600] tracking-[0.07em] uppercase text-[#a89f8c]">
+                                ADSNAP CLOUD
                             </span>
                         </div>
                     </div>
@@ -170,141 +164,92 @@ export function Sidebar() {
                                 key={item.href}
                                 href={item.href}
                                 onClick={() => setIsOpen(false)}
-                                className="flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all duration-300 group relative overflow-hidden"
+                                className="flex items-center gap-3 px-4 py-3.5 transition-all duration-300 group relative overflow-hidden rounded-lg hover:bg-[#ede9e1]"
                                 style={{
-                                    background: isActive ? 'rgba(255,255,255,0.07)' : 'transparent',
+                                    background: isActive ? '#e8e4dd' : 'transparent',
                                 }}
                             >
-                                {/* Subtle hover overlay */}
-                                <div
-                                    className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                                    style={{ background: 'var(--gradient-glow)' }}
-                                />
-
                                 <item.icon
-                                    size={20}
-                                    style={{
-                                        color: isActive ? '#ffffff' : 'var(--text-muted)',
-                                    }}
-                                    className="relative z-10 group-hover:scale-110 transition-transform duration-300"
+                                    size={16}
+                                    style={{ color: '#a89f8c' }}
+                                    className="relative z-10 transition-transform duration-300 group-hover:-translate-y-0.5"
                                 />
                                 <span
-                                    className="relative z-10 text-sm font-semibold transition-colors duration-300"
+                                    className="text-[13px] transition-colors duration-300 relative z-10"
                                     style={{
-                                        color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-                                        fontFamily: 'var(--font-body)'
+                                        color: '#1c1917',
+                                        fontFamily: 'var(--font-body)',
+                                        fontWeight: isActive ? 600 : 500
                                     }}
                                 >
                                     {item.label}
                                 </span>
-                                {isActive && (
-                                    <div
-                                        className="ml-auto w-2 h-2 rounded-full animate-pulse-glow relative z-10"
-                                        style={{ background: 'rgba(255,255,255,0.7)' }}
-                                    />
-                                )}
                             </Link>
                         )
                     })}
                 </nav>
 
                 {/* Footer */}
-                <div
-                    className="p-4 space-y-3 mt-auto"
-                    style={{ borderTop: '1px solid var(--border)' }}
-                >
+                    <div
+                        className="p-3"
+                        style={{ borderTop: '0.5px solid #e8e5df' }}
+                    >
                     <Link
                         href="/settings"
                         onClick={() => setIsOpen(false)}
-                        className="flex items-center gap-3 px-4 py-3 w-full rounded-xl transition-all group"
+                        className="flex items-center gap-3 px-4 py-3 w-full rounded-lg transition-all group hover:bg-[#ede9e1]"
                         style={{
-                            color: pathname === '/settings' ? '#ffffff' : 'var(--text-muted)',
-                            background: pathname === '/settings' ? 'rgba(255,255,255,0.07)' : 'transparent'
+                            color: pathname === '/settings' ? '#1c1917' : '#a89f8c',
+                            background: pathname === '/settings' ? '#e8e4dd' : 'transparent',
+                            fontWeight: pathname === '/settings' ? 600 : 500
                         }}
                     >
-                        <Settings size={18} className="group-hover:rotate-90 transition-transform duration-500" />
-                        <span className="text-sm font-medium">Configurações</span>
+                        <Settings size={16} className="group-hover:rotate-90 transition-transform duration-500" />
+                        <span className="text-[13px]">Configurações</span>
                     </Link>
 
                     <button
                         onClick={handleLogout}
-                        className="flex items-center gap-3 px-4 py-3 w-full rounded-xl transition-all group hover:bg-red-500/10 text-white/30 hover:text-red-400"
-                        style={{ background: 'transparent' }}
+                        className="flex items-center gap-3 px-4 py-3 w-full rounded-lg transition-all group mt-1 hover:bg-[#ede9e1]"
+                        style={{ color: '#a89f8c' }}
                     >
-                        <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
-                        <span className="text-sm font-medium">Sair</span>
+                        <LogOut size={16} className="group-hover:-translate-x-1 transition-transform" />
+                        <span className="text-[13px] font-[500]">Sair</span>
                     </button>
 
                     {user?.role === 'admin' && <StorageMonitor />}
 
                     {/* Developer Credits - Lucas Paim */}
-                    <div
-                        className="mt-6 p-px rounded-2xl relative overflow-hidden group transition-all duration-500 hover:shadow-[0_0_30px_rgba(255,255,255,0.08)] hidden lg:block"
-                    >
-                        {/* Animated Border — white conic gradient */}
-                        <div className="absolute inset-0 bg-[conic-gradient(from_0deg,transparent_0%,rgba(255,255,255,0.6)_20%,transparent_40%)] animate-[spin_4s_linear_infinite] opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
-
-                        <div className="relative z-10 p-4 rounded-2xl bg-[#0a0a0a]/95 backdrop-blur-xl flex flex-col gap-4 border border-white/5">
+                    <div className="mt-4 hidden lg:block px-2 pb-4">
+                        <div className="p-[10px] rounded-[8px] flex flex-col gap-3" style={{ background: '#ede9e1' }}>
                             <div className="flex items-center gap-3">
-                                <div className="relative w-12 h-12 rounded-xl overflow-hidden group-hover:scale-105 transition-transform duration-500 shadow-2xl border border-white/10">
+                                <div className="w-8 h-8 rounded-full overflow-hidden">
                                     <img
                                         src="https://images.metroimg.com/2026/02/foto-lucas-paim.png"
                                         alt="Lucas Paim"
-                                        className="w-full h-full object-cover filter grayscale brightness-110 hover:grayscale-0 transition-all duration-700"
+                                        className="w-full h-full object-cover"
                                     />
-                                    <div className="absolute inset-0 bg-linear-to-t from-black/40 to-transparent opacity-60" />
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-1.5 mb-0.5">
-                                        <div className="w-1 h-1 rounded-full bg-white/50 animate-pulse" />
-                                        <p className="text-[9px] font-black uppercase tracking-[0.25em] text-white/50 px-1.5 py-0.5 bg-white/5 rounded-sm">Desenvolvedor:</p>
-                                    </div>
-                                    <p
-                                        className="text-base font-black truncate text-white tracking-tighter"
-                                        style={{ fontFamily: 'var(--font-display)' }}
-                                    >
-                                        LUCAS PAIM
-                                    </p>
+                                    <p className="text-[10px] text-[#a89f8c] mb-0" style={{fontFamily: 'var(--font-body)', fontWeight: 600}}>DEVELOPER</p>
+                                    <p className="text-[13px] font-[600] text-[#1c1917]">Lucas Paim</p>
                                 </div>
                             </div>
 
+
                             {/* Social Links Grid */}
-                            <div className="grid grid-cols-4 gap-2">
-                                <a
-                                    href="https://github.com/llucaspy"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    title="GitHub"
-                                    className="flex items-center justify-center p-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/25 text-white/40 hover:text-white transition-all duration-300 shadow-lg"
-                                >
+                            <div className="flex items-center justify-around mt-2">
+                                <a href="https://github.com/llucaspy" target="_blank" rel="noopener noreferrer" className="text-[#a89f8c] hover:text-[#1c1917] transition-colors">
                                     <Github size={16} />
                                 </a>
-                                <a
-                                    href="https://www.linkedin.com/in/lucas-mendon%C3%A7a-1296412b8?utm_source=share&utm_campaign=share_via&utm_content=profile&utm_medium=android_app"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    title="LinkedIn"
-                                    className="flex items-center justify-center p-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-blue-500/10 hover:border-blue-500/30 text-white/40 hover:text-blue-400 transition-all duration-300 shadow-lg"
-                                >
+                                <a href="https://www.linkedin.com/in/lucas-mendon%C3%A7a-1296412b8" target="_blank" rel="noopener noreferrer" className="text-[#a89f8c] hover:text-[#1c1917] transition-colors">
                                     <Linkedin size={16} />
                                 </a>
-                                <a
-                                    href="https://wa.me/556191761606"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    title="WhatsApp"
-                                    className="flex items-center justify-center p-2.5 rounded-lg bg-green-500/5 border border-white/10 hover:bg-green-500/10 hover:border-green-500/30 text-white/40 hover:text-green-400 transition-all duration-300 shadow-lg"
-                                >
+                                <a href="https://wa.me/556191761606" target="_blank" rel="noopener noreferrer" className="text-[#a89f8c] hover:text-[#1c1917] transition-colors">
                                     <MessageCircle size={16} />
                                 </a>
-                                <a
-                                    href="https://www.instagram.com/llucas.py/"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    title="Instagram"
-                                    className="flex items-center justify-center p-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/25 text-white/40 hover:text-white transition-all duration-300 shadow-lg"
-                                >
-                                    <Instagram size={14} />
+                                <a href="https://www.instagram.com/llucas.py/" target="_blank" rel="noopener noreferrer" className="text-[#a89f8c] hover:text-[#1c1917] transition-colors">
+                                    <Instagram size={16} />
                                 </a>
                             </div>
                         </div>

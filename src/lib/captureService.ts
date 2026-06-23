@@ -7,6 +7,57 @@ import { nexusLogStore } from './nexusLogStore';
 import { alertStore } from './alertStore';
 import { sendTelegramAlert } from './telegram';
 
+export interface CaptureResult {
+    success: boolean
+    filePath?: string
+    error?: string
+    quarantined?: boolean
+    aborted?: boolean
+}
+
+export interface CaptureOptions {
+    signal?: AbortSignal
+}
+
+class CaptureAbortedError extends Error {
+    constructor(message = 'CAPTURE_ABORTED') {
+        super(message)
+        this.name = 'CaptureAbortedError'
+    }
+}
+
+function getAbortMessage(signal?: AbortSignal) {
+    if (!signal?.aborted) return 'CAPTURE_ABORTED'
+    const reason = signal.reason
+    if (reason instanceof Error) return reason.message
+    return reason ? String(reason) : 'CAPTURE_ABORTED'
+}
+
+function throwIfCaptureAborted(signal?: AbortSignal) {
+    if (signal?.aborted) throw new CaptureAbortedError(getAbortMessage(signal))
+}
+
+function isCaptureAborted(error: unknown, signal?: AbortSignal) {
+    return error instanceof CaptureAbortedError || signal?.aborted
+}
+
+function abortableDelay(ms: number, signal?: AbortSignal) {
+    throwIfCaptureAborted(signal)
+    return new Promise<void>((resolve, reject) => {
+        const cleanup = () => signal?.removeEventListener('abort', onAbort)
+        const timeout = setTimeout(() => {
+            cleanup()
+            resolve()
+        }, ms)
+        const onAbort = () => {
+            clearTimeout(timeout)
+            cleanup()
+            reject(new CaptureAbortedError(getAbortMessage(signal)))
+        }
+        signal?.addEventListener('abort', onAbort, { once: true })
+    })
+}
+
 // ============================================================================
 // NEXUS V48 - RASTER COMPOSITION ENGINE (SHARP)
 // ============================================================================
@@ -52,12 +103,13 @@ export async function processComposition(campaignId: string) {
 }
 
 
-export async function processCampaign(campaignId: string) {
+export async function processCampaign(campaignId: string, options: CaptureOptions = {}): Promise<CaptureResult> {
     console.log('[Nexus] ========= INICIANDO CAPTURA =========')
     console.log('[Nexus] Campaign ID:', campaignId)
     await nexusLogStore.addLog(`Nexus: Iniciando processamento da campanha ${campaignId}`, 'SYSTEM', undefined, campaignId);
 
     try {
+        throwIfCaptureAborted(options.signal)
         const settings = await prisma.settings.findUnique({ where: { id: 1 } }) || {
             nexusMaxRetries: 3,
             nexusTimeout: 60000,
@@ -69,19 +121,29 @@ export async function processCampaign(campaignId: string) {
         let lastError = '';
 
         while (retryCount < MAX_RETRIES) {
+            throwIfCaptureAborted(options.signal)
             if (retryCount > 0) {
                 await nexusLogStore.addLog(`Nexus: Tentativa ${retryCount + 1}/${MAX_RETRIES}...`, 'ERROR', undefined, campaignId);
-                await new Promise(resolve => setTimeout(resolve, settings.nexusDelay));
+                await abortableDelay(settings.nexusDelay, options.signal);
             }
 
             console.log('[Nexus] Executando _executeCapture...')
-            const result = await _executeCapture(campaignId, settings);
+            const result = await _executeCapture(campaignId, settings, options);
             console.log('[Nexus] Resultado:', JSON.stringify(result, null, 2))
+
+            if (result.aborted) return result
 
             if (result.success) {
                 await prisma.campaign.update({
                     where: { id: campaignId },
-                    data: { retryCount: 0 }
+                    data: {
+                        retryCount: 0,
+                        processingStartedAt: null,
+                        processingHeartbeatAt: null,
+                        processingRunId: null,
+                        lockedUntil: null,
+                        lastWorkerError: null,
+                    }
                 });
                 await nexusLogStore.addLog(`Nexus: Sucesso total na campanha ${campaignId}`, 'SUCCESS', undefined, campaignId);
                 return result;
@@ -112,11 +174,25 @@ export async function processCampaign(campaignId: string) {
 
         await prisma.campaign.update({
             where: { id: campaignId },
-            data: { status: 'QUARANTINE' }
+            data: {
+                status: 'QUARANTINE',
+                processingStartedAt: null,
+                processingHeartbeatAt: null,
+                processingRunId: null,
+                lockedUntil: null,
+                lastWorkerError: lastError,
+            }
         });
 
         return { success: false, error: lastError, quarantined: true };
     } catch (e) {
+        if (isCaptureAborted(e, options.signal)) {
+            const errorMsg = getAbortMessage(options.signal)
+            console.warn('[Nexus Capture Aborted]', errorMsg)
+            await nexusLogStore.addLog('Nexus: Captura abortada pelo worker', 'ERROR', errorMsg, campaignId)
+            return { success: false, error: errorMsg, aborted: true }
+        }
+
         const errorMsg = e instanceof Error ? e.message : String(e);
         const stack = e instanceof Error ? e.stack : undefined;
         console.error('[Nexus Critical Error]', e);
@@ -436,8 +512,10 @@ export async function scoreCreativeFrame(
 async function captureBestCreativeFrame(
     page: import('playwright').Page,
     documentBox: { x: number; y: number; width: number; height: number },
-    campaignId: string
+    campaignId: string,
+    signal?: AbortSignal
 ) {
+    throwIfCaptureAborted(signal)
     const viewport = page.viewportSize()
     if (!viewport) throw new Error('Viewport indisponivel para analise do criativo')
 
@@ -460,6 +538,7 @@ async function captureBestCreativeFrame(
 
     const sampleBurst = async (count: number, intervalMs: number) => {
         for (let index = 0; index < count; index++) {
+            throwIfCaptureAborted(signal)
             frameNumber++
             const scroll = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }))
             const viewportBox = {
@@ -479,13 +558,13 @@ async function captureBestCreativeFrame(
                 selection.bestAccepted = candidate
             }
 
-            if (index < count - 1) await page.waitForTimeout(intervalMs)
+            if (index < count - 1) await abortableDelay(intervalMs, signal)
         }
     }
 
     await sampleBurst(7, 450)
     if (!selection.bestAccepted) {
-        await page.waitForTimeout(800)
+        await abortableDelay(800, signal)
         await sampleBurst(5, 550)
     }
 
@@ -519,8 +598,9 @@ async function captureBestCreativeFrame(
 // MAIN CAPTURE EXECUTION
 // ============================================================================
 
-async function _executeCapture(campaignId: string, settings: any): Promise<{ success: boolean; filePath?: string; error?: string; quarantined?: boolean }> {
+async function _executeCapture(campaignId: string, settings: any, options: CaptureOptions = {}): Promise<CaptureResult> {
     console.log('[Nexus] _executeCapture() iniciando...')
+    throwIfCaptureAborted(options.signal)
     const campaign = await prisma.campaign.findUnique({
         where: { id: campaignId },
         select: { url: true, format: true, device: true, client: true, agency: true, compositionBox: true }
@@ -583,8 +663,12 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
         throw new Error(error);
     }
 
-    let browser;
+    let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+    const closeBrowserOnAbort = () => {
+        browser?.close().catch(() => {})
+    }
     try {
+        options.signal?.addEventListener('abort', closeBrowserOnAbort, { once: true })
         console.log('[Nexus] Iniciando browser...')
         await nexusLogStore.addLog(`Nexus: Lançando browser Playwright (${targetW}x${targetH})`, 'SYSTEM', undefined, campaignId);
         const isMobile = campaign.device === 'mobile' || (targetW === 320 && (targetH === 100 || targetH === 50));
@@ -599,6 +683,7 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
                 '--font-render-hinting=none'
             ]
         });
+        throwIfCaptureAborted(options.signal)
 
         const context = await browser.newContext(isMobile ? {
             ...devices['iPhone 13'],
@@ -610,6 +695,7 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
         });
 
         const page = await context.newPage();
+        throwIfCaptureAborted(options.signal)
 
         // Navigate
         console.log(`[Nexus] Navegando para: ${campaign.url}`);
@@ -621,6 +707,7 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
                 timeout: settings.nexusTimeout
             });
         } catch (navError) {
+            throwIfCaptureAborted(options.signal)
             const navMsg = navError instanceof Error ? navError.message : String(navError);
             console.log('[Nexus] Navegação inicial finalizada com aviso/timeout:', navMsg);
             await nexusLogStore.addLog(`Nexus: Aviso na navegação (prosseguindo)`, 'INFO', navMsg, campaignId);
@@ -649,10 +736,10 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
                     }, 50);
                 });
             });
-            await page.waitForTimeout(8000);
+            await abortableDelay(8000, options.signal);
         } else {
             console.log('[Nexus] Desktop detectado. Realizando warm-up de slots...');
-            await page.waitForTimeout(5000);
+            await abortableDelay(5000, options.signal);
             await page.evaluate(async () => {
                 return new Promise<void>((resolve) => {
                     let totalHeight = 0;
@@ -669,8 +756,9 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
                     }, 70);
                 });
             });
-            await page.waitForTimeout(5000);
+            await abortableDelay(5000, options.signal);
         }
+        throwIfCaptureAborted(options.signal)
 
         // ====================================================
         // STRATEGY 1: EXPLICIT SELECTOR
@@ -682,6 +770,7 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
             }
 
             for (const selector of selectorCandidates) {
+                throwIfCaptureAborted(options.signal)
                 console.log(`[Nexus] Tentando captura via seletor: ${selector}`);
                 await nexusLogStore.addLog(`Nexus: Buscando seletor configurado: ${selector}`, 'SYSTEM', undefined, campaignId);
 
@@ -693,7 +782,7 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
                     if (!await locator.isVisible()) {
                         console.log('[Nexus] Seletor existe mas não está visível. Tentando scroll...');
                         await locator.scrollIntoViewIfNeeded({ timeout: 5000 });
-                        await page.waitForTimeout(3000);
+                        await abortableDelay(3000, options.signal);
                     }
     
                     await locator.waitFor({ state: 'visible', timeout: 5000 });
@@ -726,20 +815,20 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
                         const targetScrollY = Math.max(0, matchingBox.y + (matchingBox.height / 2) - (viewportHeight / 2));
     
                         await page.evaluate((y) => window.scrollTo(0, y), targetScrollY);
-                        await page.waitForTimeout(3000);
+                        await abortableDelay(3000, options.signal);
     
                         if (standaloneCreativeAssetUrl) {
                             await injectCreativeAsset(locator, standaloneCreativeAssetUrl, targetW, targetH);
-                            await page.waitForTimeout(1500);
+                            await abortableDelay(1500, options.signal);
                         }
 
                         const screenshotBuffer = standaloneCreativeAssetUrl
                             ? await page.screenshot({ type: 'png', animations: 'disabled' })
-                            : await captureBestCreativeFrame(page, matchingBox, campaignId);
+                            : await captureBestCreativeFrame(page, matchingBox, campaignId, options.signal);
                         await browser.close();
     
-                        const finalImage = await compositeStudioImage(screenshotBuffer, campaign.url, isMobile);
-                        return await saveCapture(campaign, finalImage, campaignId);
+                        const finalImage = await compositeStudioImage(screenshotBuffer, campaign.url, isMobile, options.signal);
+                        return await saveCapture(campaign, finalImage, campaignId, options);
                     } else {
                         const measured = describeMeasuredBoxes(measuredBoxes);
                         console.log(`[Nexus] Seletor localizado com dimensao errada. Esperado ${targetW}x${targetH}; medido: ${measured}`);
@@ -761,6 +850,7 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
         await nexusLogStore.addLog('Nexus: Iniciando script de detecção automática', 'SYSTEM', undefined, campaignId);
 
         const candidates = await page.evaluate<BannerCandidate[]>(eval(FIND_BANNER_SCRIPT), [targetW, targetH]);
+        throwIfCaptureAborted(options.signal)
 
         if (!candidates || candidates.length === 0) {
             console.log('[Nexus] Nenhum banner encontrado via script')
@@ -780,11 +870,12 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
         const MIN_FALLBACK_KB = 0.1;
 
         for (const [index, candidate] of candidates.entries()) {
+            throwIfCaptureAborted(options.signal)
             console.log(`[Nexus] Verificando candidato #${index + 1}: ${Math.round(candidate.width)}x${Math.round(candidate.height)}`);
 
             try {
                 await page.evaluate((y) => window.scrollTo(0, y), Math.max(0, candidate.y - 300));
-                await page.waitForTimeout(3000);
+                await abortableDelay(3000, options.signal);
 
                 const clip = {
                     x: candidate.x,
@@ -834,29 +925,37 @@ async function _executeCapture(campaignId: string, settings: any): Promise<{ suc
         console.log(`[Nexus] Scroll final para Y = ${Math.round(targetScrollY)} `);
         await page.evaluate((y) => window.scrollTo(0, y), targetScrollY);
 
-        await page.waitForTimeout(1500);
+        await abortableDelay(1500, options.signal);
 
         console.log('[Nexus] Selecionando melhor frame para screenshot final...')
-        const screenshotBuffer = await captureBestCreativeFrame(page, bestCandidate, campaignId);
+        const screenshotBuffer = await captureBestCreativeFrame(page, bestCandidate, campaignId, options.signal);
         await browser.close();
 
         await nexusLogStore.addLog('Nexus: Browser finalizado. Iniciando composição estética...', 'SYSTEM', undefined, campaignId);
-        const finalImage = await compositeStudioImage(screenshotBuffer, campaign.url, isMobile);
+        const finalImage = await compositeStudioImage(screenshotBuffer, campaign.url, isMobile, options.signal);
 
-        return await saveCapture(campaign, finalImage, campaignId);
+        return await saveCapture(campaign, finalImage, campaignId, options);
 
     } catch (err) {
         if (browser) await browser.close();
+        if (isCaptureAborted(err, options.signal)) {
+            const msg = getAbortMessage(options.signal)
+            await nexusLogStore.addLog('Nexus: Captura interrompida por timeout', 'ERROR', msg, campaignId);
+            return { success: false, error: msg, aborted: true };
+        }
         const msg = err instanceof Error ? err.message : String(err);
         const stack = err instanceof Error ? err.stack : undefined;
         console.error('[Capture Error]', err);
         await nexusLogStore.addLog(`Nexus: Erro fatal durante a captura`, 'ERROR', `${msg}\n\nStack: ${stack}`, campaignId);
         return { success: false, error: msg };
+    } finally {
+        options.signal?.removeEventListener('abort', closeBrowserOnAbort)
     }
 }
 
-async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: string) {
+async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: string, options: CaptureOptions = {}) {
     try {
+        throwIfCaptureAborted(options.signal)
         await nexusLogStore.addLog(`Nexus: Iniciando upload para o Supabase Storage...`, 'SYSTEM', undefined, campaignId);
 
         // 1. Prepare filename and path
@@ -910,7 +1009,12 @@ async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: strin
                 data: {
                     status: 'SUCCESS',
                     lastCaptureAt: new Date(),
-                    retryCount: 0
+                    retryCount: 0,
+                    processingStartedAt: null,
+                    processingHeartbeatAt: null,
+                    processingRunId: null,
+                    lockedUntil: null,
+                    lastWorkerError: null
                 }
             })
         ]);
@@ -927,7 +1031,14 @@ async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: strin
         try {
             await prisma.campaign.update({
                 where: { id: campaignId },
-                data: { status: 'FAILED' }
+                data: {
+                    status: 'FAILED',
+                    processingStartedAt: null,
+                    processingHeartbeatAt: null,
+                    processingRunId: null,
+                    lockedUntil: null,
+                    lastWorkerError: msg
+                }
             });
         } catch (dbErr) {
             console.error('[Nexus saveCapture DB Fallback Error]', dbErr);
@@ -941,8 +1052,10 @@ async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: strin
 // STUDIO COMPOSITION - Premium device frames
 // ============================================================================
 
-async function compositeStudioImage(screenshot: Buffer, url: string, isMobile: boolean): Promise<Buffer> {
+async function compositeStudioImage(screenshot: Buffer, url: string, isMobile: boolean, signal?: AbortSignal): Promise<Buffer> {
+    throwIfCaptureAborted(signal)
     const studioBrowser = await chromium.launch({ headless: true });
+    let closeStudioOnAbort: (() => void) | undefined;
     
     // Timeout de segurança para a composição (60s)
     const timeoutPromise = new Promise<never>((_, reject) => 
@@ -950,6 +1063,8 @@ async function compositeStudioImage(screenshot: Buffer, url: string, isMobile: b
     );
 
     try {
+        closeStudioOnAbort = () => studioBrowser.close().catch(() => {})
+        signal?.addEventListener('abort', closeStudioOnAbort, { once: true })
         const studioPage = await studioBrowser.newPage();
         await studioPage.setViewportSize({ width: 1920, height: 1080 });
 
@@ -1158,15 +1273,17 @@ async function compositeStudioImage(screenshot: Buffer, url: string, isMobile: b
 
         await studioPage.setViewportSize({ width: 1920, height: 1080 });
         await studioPage.setContent(html);
-        await studioPage.waitForTimeout(500);
+        await abortableDelay(500, signal);
 
         const finalBuffer = await Promise.race([
             studioPage.screenshot({ type: 'png' }),
             timeoutPromise
         ]);
 
+        throwIfCaptureAborted(signal)
         return finalBuffer;
     } finally {
+        if (closeStudioOnAbort) signal?.removeEventListener('abort', closeStudioOnAbort)
         await studioBrowser.close();
     }
 }

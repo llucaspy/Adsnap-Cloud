@@ -13,6 +13,10 @@ on:
   repository_dispatch: # Permite gatilhos externos via API
     types: [nexus-trigger]
 
+concurrency:
+  group: nexus-worker-main
+  cancel-in-progress: false
+
 jobs:
   nexus-capture:
     runs-on: ubuntu-latest

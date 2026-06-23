@@ -36,6 +36,12 @@ model Campaign {
   manualDashboardUrl   String?
   dailyGoalThreshold   Int?
   lastThresholdAlertAt DateTime?
+  processingStartedAt  DateTime?
+  processingHeartbeatAt DateTime?
+  processingRunId      String?
+  processingAttempts   Int             @default(0)
+  lastWorkerError      String?
+  lockedUntil          DateTime?
   showOnDashboard      Boolean         @default(false)
   allowedChannels      String?         @default("[]")
   externalChannelId    String?
@@ -45,8 +51,15 @@ model Campaign {
   lastGoal             Int             @default(0)
   lastViewability      Float           @default(0)
   compositionBox       Json?
+  mediaType            String          @default("PORTAL")
+  adOpsStatus          String          @default("ATIVA")
   captures             Capture[]
   emailDispatches      EmailDispatch[]
+
+  @@index([status, isArchived, updatedAt])
+  @@index([isScheduled, isArchived, status, updatedAt])
+  @@index([segmentation, captureCadence, status, updatedAt])
+  @@index([processingRunId])
 }
 
 model Capture {
@@ -64,6 +77,8 @@ model Capture {
   baseCapture    Capture?  @relation("AssemblyBase", fields: [baseCaptureId], references: [id])
   assemblies     Capture[] @relation("AssemblyBase")
   campaign       Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, status, createdAt])
 }
 
 model Settings {
@@ -84,7 +99,7 @@ model Settings {
   telegramChatId        String?
   telegramAlertsEnabled Boolean   @default(true)
   telegramLastAlertAt   DateTime?
-  governmentReportRecipients String @default("[\"opec.gov@metropoles.com\",\"karoliny.sousa@metropoles.com\"]")
+  governmentReportRecipients String  @default("[\"opec.gov@metropoles.com\",\"karoliny.sousa@metropoles.com\"]")
   governmentReportAutoSend   Boolean @default(false)
   governmentReportTime       String  @default("09:00")
   governmentReportAutoSince  DateTime?
@@ -108,31 +123,34 @@ model NexusLog {
   details    String?
   campaignId String?
   createdAt  DateTime @default(now())
+
+  @@index([level, createdAt])
+  @@index([campaignId, createdAt])
 }
 
 model EmailDispatch {
-  id           String    @id @default(cuid())
-  campaignId   String?
-  recipients   String
-  dispatchTime String    @default("09:00")
-  isActive     Boolean   @default(true)
-  lastSentAt   DateTime?
-  status       String    @default("PENDING")
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  pi           String    @default("")
-  flightEnd    DateTime?
-  triggerMode  String    @default("MANUAL")
-  errorMessage String?
-  emailMessageId String?
-  attachmentCount Int    @default(0)
-  attachmentBytes Int    @default(0)
-  attempts     Int       @default(0)
-  sendVersion  Int       @default(1)
-  reportScope String    @default("CAMPAIGN")
-  reportDate  DateTime?
-  scopeKey    String?   @unique
-  campaign     Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  id              String    @id @default(cuid())
+  campaignId      String?
+  recipients      String
+  dispatchTime    String    @default("09:00")
+  isActive        Boolean   @default(true)
+  lastSentAt      DateTime?
+  status          String    @default("PENDING")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  pi              String    @default("")
+  flightEnd       DateTime?
+  triggerMode     String    @default("MANUAL")
+  errorMessage    String?
+  emailMessageId  String?
+  attachmentCount Int       @default(0)
+  attachmentBytes Int       @default(0)
+  attempts        Int       @default(0)
+  sendVersion     Int       @default(1)
+  reportScope     String    @default("CAMPAIGN")
+  reportDate      DateTime?
+  scopeKey        String?   @unique
+  campaign        Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
   @@index([status, isActive, flightEnd])
 }

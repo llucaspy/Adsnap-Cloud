@@ -583,16 +583,19 @@ export async function getScheduleUsage(): Promise<Record<string, number>> {
 export async function getQueueStatus() {
     const campaigns = await prisma.campaign.findMany({
         where: {
-            status: { in: ['QUEUED', 'PROCESSING'] },
-            isArchived: false,
-            updatedAt: { gte: new Date(Date.now() - 20 * 60 * 1000) }
+            status: { in: ['QUEUED', 'PROCESSING', 'AUTOCONFIG'] },
+            isArchived: false
         },
         select: {
             id: true,
             client: true,
             status: true,
-            campaignName: true as any
-        }
+            campaignName: true as any,
+            updatedAt: true,
+            lastWorkerError: true,
+        },
+        orderBy: { updatedAt: 'asc' },
+        take: 25,
     }) as any
     return campaigns
 }

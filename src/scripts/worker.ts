@@ -9,6 +9,109 @@ import { processGovernmentReportQueue } from '../lib/governmentReportAutomation'
 import { isFederalCampaignBoundaryToday, shouldQueueScheduledCampaign } from '../lib/campaignSchedule'
 
 const processedEmailIds = new Set<string>()
+const DEFAULT_CAPTURE_BATCH_SIZE = 5
+const MAX_CAPTURE_BATCH_SIZE = 20
+const DEFAULT_CAPTURE_TIMEOUT_MS = 5 * 60 * 1000
+const DEFAULT_CAPTURE_LEASE_MINUTES = 15
+const MAX_WORKER_RUNTIME_MS = 6 * 60 * 60 * 1000
+
+type WorkerCampaign = {
+    id: string
+    status: string
+    client: string
+    pi: string
+    format: string
+    segmentation: string
+    captureCadence: string
+    lastCaptureAt: Date | null
+}
+
+type WorkerCycleOptions = {
+    drainQueue?: boolean
+}
+
+function readPositiveInt(value: string | undefined, fallback: number, max = Number.MAX_SAFE_INTEGER) {
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback
+    return Math.min(Math.floor(parsed), max)
+}
+
+function readOptionalPositiveInt(value: string | undefined, max = Number.MAX_SAFE_INTEGER) {
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed) || parsed <= 0) return null
+    return Math.min(Math.floor(parsed), max)
+}
+
+function readBooleanFlag(value: string | undefined, fallback: boolean) {
+    if (!value) return fallback
+    return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase())
+}
+
+function createWorkerRunId() {
+    const githubRun = process.env.GITHUB_RUN_ID || process.env.GITHUB_RUN_NUMBER
+    return githubRun ? `gh-${githubRun}` : `local-${Date.now()}`
+}
+
+async function claimCampaignBatch(candidateIds: string[], runId: string, limit: number, statuses: string[] = ['QUEUED', 'AUTOCONFIG']) {
+    if (candidateIds.length === 0 || limit <= 0) return [] as WorkerCampaign[]
+    const leaseMinutes = readPositiveInt(process.env.NEXUS_CAPTURE_LEASE_MINUTES, DEFAULT_CAPTURE_LEASE_MINUTES, 120)
+
+    return await prisma.$queryRawUnsafe<WorkerCampaign[]>(
+        `
+        update "Campaign" c
+        set
+            status = 'PROCESSING',
+            "updatedAt" = now(),
+            "processingStartedAt" = now(),
+            "processingHeartbeatAt" = now(),
+            "processingRunId" = $2,
+            "processingAttempts" = "processingAttempts" + 1,
+            "lastWorkerError" = null,
+            "lockedUntil" = now() + ($4::int * interval '1 minute')
+        where c.id in (
+            select id
+            from "Campaign"
+            where id = any($1::text[])
+              and status = any($3::text[])
+              and "isArchived" = false
+            order by array_position($1::text[], id)
+            limit $5
+            for update skip locked
+        )
+        returning
+            id,
+            status,
+            client,
+            pi,
+            format,
+            segmentation,
+            "captureCadence",
+            "lastCaptureAt"
+        `,
+        candidateIds,
+        runId,
+        statuses,
+        leaseMinutes,
+        limit
+    )
+}
+
+async function processCampaignWithTimeout(campaignId: string, timeoutMs: number) {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => {
+        controller.abort(new Error(`Timeout de ${Math.round(timeoutMs / 60000)}m`))
+    }, timeoutMs)
+
+    try {
+        const result = await processCampaign(campaignId, { signal: controller.signal })
+        if (!result.success && !result.quarantined) {
+            throw new Error(result.error || 'Captura finalizada sem sucesso')
+        }
+        return result
+    } finally {
+        clearTimeout(timeout)
+    }
+}
 
 /**
  * Worker use: check Gmail for new human conversations
@@ -78,11 +181,19 @@ async function cleanupStuckCampaigns() {
     const stuck = await prisma.campaign.updateMany({
         where: {
             status: 'PROCESSING',
-            updatedAt: { lt: oneHourAgo },
-            isArchived: false
+            isArchived: false,
+            OR: [
+                { lockedUntil: { lt: new Date() } },
+                { updatedAt: { lt: oneHourAgo } },
+            ],
         },
         data: {
-            status: 'QUEUED'
+            status: 'QUEUED',
+            processingStartedAt: null,
+            processingHeartbeatAt: null,
+            processingRunId: null,
+            lockedUntil: null,
+            lastWorkerError: 'Worker interrompido ou lease expirado',
         }
     })
 
@@ -127,9 +238,30 @@ async function cleanupOffScheduleFederalQueue(now: Date) {
 /**
  * Main worker logic cycle
  */
-async function runWorkerCycle() {
+async function runWorkerCycle(options: WorkerCycleOptions = {}) {
     console.log('[Nexus Worker] Iniciando ciclo de processamento...')
-    await nexusLogStore.addLog('Nexus Worker: Ciclo iniciado no servidor.', 'SYSTEM')
+    const runId = createWorkerRunId()
+    const cycleStartedAt = Date.now()
+    const captureBatchSize = readPositiveInt(process.env.NEXUS_CAPTURE_BATCH_SIZE, DEFAULT_CAPTURE_BATCH_SIZE, MAX_CAPTURE_BATCH_SIZE)
+    const captureTimeoutMs = readPositiveInt(process.env.NEXUS_CAPTURE_TIMEOUT_MS, DEFAULT_CAPTURE_TIMEOUT_MS, 20 * 60 * 1000)
+    const maxRuntimeMs = readOptionalPositiveInt(process.env.NEXUS_WORKER_MAX_RUNTIME_MS, MAX_WORKER_RUNTIME_MS)
+    const deadlineAt = maxRuntimeMs ? cycleStartedAt + maxRuntimeMs : null
+    const drainQueue = options.drainQueue ?? false
+    const captureSummary = {
+        claimed: 0,
+        success: 0,
+        failed: 0,
+        timeout: 0,
+        quarantine: 0,
+        batchesClaimed: 0,
+        drainPasses: 0,
+        stoppedByDeadline: false,
+    }
+    await nexusLogStore.addLog(
+        'Nexus Worker: Ciclo iniciado no servidor.',
+        'SYSTEM',
+        JSON.stringify({ runId, captureBatchSize, captureTimeoutMs, drainQueue, maxRuntimeMs })
+    )
     const targetedCampaignIds = [...new Set(
         (process.env.TARGET_CAMPAIGN_IDS || '')
             .split(',')
@@ -264,10 +396,28 @@ async function runWorkerCycle() {
 
     // 8. Campaign Capture (movido para o final)
     try {
+        const captureCutoff = new Date()
+        let batchNumber = 0
+
+        while (true) {
+            if (deadlineAt && Date.now() >= deadlineAt) {
+                captureSummary.stoppedByDeadline = true
+                await nexusLogStore.addLog(
+                    `Nexus Worker: drenagem interrompida por limite de runtime apos ${captureSummary.batchesClaimed} lote(s)`,
+                    'ERROR',
+                    JSON.stringify({ runId, captureCutoff, maxRuntimeMs, captureSummary })
+                )
+                break
+            }
+
+            captureSummary.drainPasses++
+            batchNumber++
+
         const queuedCandidates = await prisma.campaign.findMany({
             where: {
                 status: 'QUEUED',
                 isArchived: false,
+                updatedAt: { lte: captureCutoff },
                 ...(targetedCampaignIds.length > 0 ? { id: { in: targetedCampaignIds } } : {})
             },
             orderBy: { updatedAt: 'asc' },
@@ -284,64 +434,96 @@ async function runWorkerCycle() {
             ))
         const queuedCampaigns = targetedCampaignIds.length > 0
             ? regularQueue
-            : [...boundaryFederal, ...regularQueue.slice(0, Math.max(0, 20 - boundaryFederal.length))]
+            : [...boundaryFederal, ...regularQueue.slice(0, Math.max(0, captureBatchSize - boundaryFederal.length))]
 
-        const autoconfigCampaigns = targetedCampaignIds.length > 0 || queuedCampaigns.length >= 20 ? [] : await prisma.campaign.findMany({
+        const autoconfigCampaigns = targetedCampaignIds.length > 0 || queuedCampaigns.length >= captureBatchSize ? [] : await prisma.campaign.findMany({
             where: {
                 status: 'AUTOCONFIG',
-                isArchived: false
+                isArchived: false,
+                updatedAt: { lte: captureCutoff },
             },
             orderBy: { updatedAt: 'asc' },
-            take: 20 - queuedCampaigns.length
+            take: captureBatchSize - queuedCampaigns.length
         })
 
-        const campaigns = [...queuedCampaigns, ...autoconfigCampaigns]
+        const autoconfigIds = new Set(autoconfigCampaigns.map(campaign => campaign.id))
+        const candidateIds = [...queuedCampaigns, ...autoconfigCampaigns].map(campaign => campaign.id)
+        const campaigns = await claimCampaignBatch(candidateIds, runId, captureBatchSize)
+        captureSummary.claimed += campaigns.length
+        if (campaigns.length > 0) captureSummary.batchesClaimed++
 
         if (campaigns.length > 0) {
             if (targetedCampaignIds.length > 0) {
                 await nexusLogStore.addLog(
                     `Nexus Worker: captura manual direcionada para ${campaigns.length} de ${targetedCampaignIds.length} item(ns)`,
-                    'SYSTEM'
+                    'SYSTEM',
+                    JSON.stringify({ runId, batchNumber, captureCutoff })
                 )
             }
-            console.log(`[Nexus Worker] Encontradas ${campaigns.length} campanhas/montagens para processar.`)
-            await nexusLogStore.addLog(`Nexus Worker: Processando lote de ${campaigns.length} itens (incluindo montagem automática)`, 'SYSTEM')
+            console.log(`[Nexus Worker] Lote ${batchNumber}: ${campaigns.length} campanhas/montagens para processar.`)
+            await nexusLogStore.addLog(
+                `Nexus Worker: Processando lote ${batchNumber} com ${campaigns.length} itens`,
+                'SYSTEM',
+                JSON.stringify({ runId, batchNumber, captureCutoff, drainQueue, captureBatchSize })
+            )
 
             for (const campaign of campaigns) {
-                // Atomic claim
-                const claim = await prisma.campaign.updateMany({
-                    where: { id: campaign.id, status: { in: ['QUEUED', 'AUTOCONFIG'] } },
-                    data: { status: 'PROCESSING', updatedAt: new Date() }
-                })
-
-                if (claim.count === 0) continue
-
-                if (campaign.status === 'AUTOCONFIG') {
+                if (autoconfigIds.has(campaign.id)) {
                     console.log(`[Nexus Worker] Realizando MONTAGEM: ${campaign.client} (PI ${campaign.pi})`)
                     try {
                         await processComposition(campaign.id)
+                        captureSummary.success++
                         await nexusLogStore.addLog(`Nexus Worker: Montagem automatizada concluída para ${campaign.client}`, 'SUCCESS', undefined, campaign.id)
                     } catch (err) {
+                        captureSummary.failed++
+                        const message = err instanceof Error ? err.message : String(err)
                         console.error(`[Nexus Worker] Erro na montagem ${campaign.pi}:`, err)
-                        await prisma.campaign.update({ where: { id: campaign.id }, data: { status: 'AUTOCONFIG' } }) // Retry
+                        await prisma.campaign.update({
+                            where: { id: campaign.id },
+                            data: {
+                                status: 'AUTOCONFIG',
+                                processingStartedAt: null,
+                                processingHeartbeatAt: null,
+                                processingRunId: null,
+                                lockedUntil: null,
+                                lastWorkerError: message,
+                            }
+                        }) // Retry
                     }
                     continue
                 }
 
                 console.log(`[Nexus Worker] Capturando: ${campaign.client} (PI ${campaign.pi})`)
                 try {
-                    await Promise.race([
-                        processCampaign(campaign.id),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout de 5m')), 300000))
-                    ])
+                    const result = await processCampaignWithTimeout(campaign.id, captureTimeoutMs)
+                    if (result.success) {
+                        captureSummary.success++
+                    } else if (result.quarantined) {
+                        captureSummary.failed++
+                        captureSummary.quarantine++
+                    }
                 } catch (err) {
+                    captureSummary.failed++
+                    const message = err instanceof Error ? err.message : String(err)
+                    if (message.toLowerCase().includes('timeout')) captureSummary.timeout++
                     console.error(`[Nexus Worker] Erro em ${campaign.pi}:`, err)
                     await prisma.campaign.update({
                         where: { id: campaign.id },
-                        data: { status: 'QUEUED' }
+                        data: {
+                            status: 'QUEUED',
+                            processingStartedAt: null,
+                            processingHeartbeatAt: null,
+                            processingRunId: null,
+                            lockedUntil: null,
+                            lastWorkerError: message,
+                        }
                     })
                 }
+        }
+
             }
+
+            if (campaigns.length === 0 || !drainQueue) break
         }
     } catch (err) {
         console.error('[Nexus Worker] Erro no ciclo de captura:', err)
@@ -355,6 +537,12 @@ async function runWorkerCycle() {
         console.error('[Nexus Worker] Erro nos relatorios apos as capturas:', err)
     }
 
+    const durationMs = Date.now() - cycleStartedAt
+    await nexusLogStore.addLog(
+        `Nexus Worker: Ciclo finalizado (${captureSummary.success} sucesso, ${captureSummary.failed} falha)`,
+        captureSummary.failed > 0 ? 'ERROR' : 'SUCCESS',
+        JSON.stringify({ runId, durationMs, captureSummary, captureBatchSize, captureTimeoutMs, drainQueue, maxRuntimeMs })
+    )
 }
 
 /**
@@ -362,18 +550,19 @@ async function runWorkerCycle() {
  */
 async function startWorker() {
     const isCI = process.env.GITHUB_ACTIONS === 'true' || process.env.NODE_ENV === 'production'
+    const drainQueue = readBooleanFlag(process.env.NEXUS_WORKER_DRAIN_QUEUE, isCI)
     console.log(`[Nexus Worker] Iniciado em modo ${isCI ? 'CI/PROD' : 'LOCAL'}`)
 
     if (isCI) {
         try {
-            await runWorkerCycle()
+            await runWorkerCycle({ drainQueue })
         } finally {
             await prisma.$disconnect()
         }
         process.exit(0)
     } else {
         while (true) {
-            await runWorkerCycle()
+            await runWorkerCycle({ drainQueue })
             await new Promise(r => setTimeout(r, 60000))
         }
     }
