@@ -80,14 +80,16 @@ type BatchMetrics = {
 }
 
 const C = {
-    bg: '#faf9f7',
-    surface: '#f3f0ea',
-    card: '#ede9e1',
-    border: '#e8e5df',
-    borderStrong: '#d4cfc7',
-    text: '#1c1917',
-    muted: '#a89f8c',
-    dim: '#d4cfc7',
+    bg: '#0f0f0f',
+    surface: '#141414',
+    surfaceSoft: '#1a1a1a',
+    card: 'rgba(255,255,255,0.04)',
+    border: 'rgba(255,255,255,0.08)',
+    borderStrong: 'rgba(255,255,255,0.16)',
+    text: '#ffffff',
+    ink: '#e5e5e5',
+    muted: '#a3a3a3',
+    dim: '#737373',
     success: '#22c55e',
     warning: '#f59e0b',
     error: '#ef4444',
@@ -115,22 +117,22 @@ function countBy<T extends CountItem>(items: T[], key: string) {
 }
 
 function levelTone(level: string) {
-    if (level.includes('ERROR') || level === 'QUARANTINE' || level === 'FAILED') return { color: C.error, bg: '#fef2f2', icon: AlertTriangle }
-    if (level.includes('SUCCESS') || level === 'SUCCESS' || level.includes('REVIEW')) return { color: C.success, bg: '#f0fdf4', icon: CheckCircle2 }
-    if (level.includes('RUNNING') || level === 'PROCESSING') return { color: C.purple, bg: '#f5f3ff', icon: Loader2 }
-    if (level === 'QUEUED' || level.includes('PENDING') || level === 'AUTOCONFIG') return { color: C.warning, bg: '#fffbeb', icon: Clock3 }
+    if (level.includes('ERROR') || level === 'QUARANTINE' || level === 'FAILED') return { color: C.error, bg: 'rgba(239,68,68,0.12)', icon: AlertTriangle }
+    if (level.includes('SUCCESS') || level === 'SUCCESS' || level.includes('REVIEW')) return { color: C.success, bg: 'rgba(34,197,94,0.12)', icon: CheckCircle2 }
+    if (level.includes('RUNNING') || level === 'PROCESSING') return { color: C.purple, bg: 'rgba(124,58,237,0.12)', icon: Loader2 }
+    if (level === 'QUEUED' || level.includes('PENDING') || level === 'AUTOCONFIG') return { color: C.warning, bg: 'rgba(245,158,11,0.12)', icon: Clock3 }
     return { color: C.muted, bg: C.surface, icon: Activity }
 }
 
 function StatCard({ label, value, icon: Icon, tone = C.text, hint }: { label: string; value: string | number; icon: any; tone?: string; hint?: string }) {
     return (
         <div className="hover-lift" style={{
-            background: C.bg,
-            border: `0.5px solid ${C.border}`,
-            borderRadius: 8,
+            background: C.card,
+            border: `1px solid ${C.border}`,
+            borderRadius: 12,
             padding: 20,
             minHeight: 116,
-            boxShadow: '0 4px 16px rgba(0,0,0,0.02)',
+            boxShadow: 'rgba(0,0,0,0.30) 0px 8px 24px 0px',
         }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                 <span style={{ fontSize: 10, fontWeight: 700, color: C.muted, letterSpacing: '0.14em', textTransform: 'uppercase' }}>{label}</span>
@@ -160,6 +162,7 @@ function StatusBadge({ value }: { value: string }) {
             borderRadius: 4,
             background: tone.bg,
             color: tone.color,
+            border: `1px solid ${C.border}`,
             fontSize: 10,
             fontWeight: 800,
             letterSpacing: '0.06em',
@@ -226,7 +229,7 @@ export function WorkerLogsPanel({
     const errorLogs = recentLogs.filter(log => log.level.includes('ERROR')).slice(0, 12)
 
     return (
-        <main className="page-enter" style={{ minHeight: '100vh', color: C.text }}>
+        <main className="page-enter" style={{ minHeight: '100vh', color: C.text, background: C.bg }}>
             <header style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 24, marginBottom: 28, flexWrap: 'wrap' }}>
                 <div>
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '4px 10px', borderRadius: 4, background: C.card, color: C.muted, fontSize: 10, fontWeight: 800, letterSpacing: '0.16em', textTransform: 'uppercase', marginBottom: 14 }}>
@@ -249,7 +252,7 @@ export function WorkerLogsPanel({
                         gap: 8,
                         border: `0.5px solid ${C.borderStrong}`,
                         borderRadius: 8,
-                        background: C.bg,
+                        background: C.card,
                         color: C.text,
                         padding: '10px 16px',
                         fontSize: 13,
@@ -283,7 +286,7 @@ export function WorkerLogsPanel({
                     <SectionTitle title="Fila Viva" count={queue.length} />
                     <div style={{ display: 'grid', gap: 10 }}>
                         {queue.length === 0 && (
-                            <div style={{ border: `0.5px dashed ${C.borderStrong}`, borderRadius: 8, padding: 32, color: C.muted, textAlign: 'center', background: C.bg }}>
+                            <div style={{ border: `1px dashed ${C.borderStrong}`, borderRadius: 12, padding: 32, color: C.muted, textAlign: 'center', background: C.card }}>
                                 Fila limpa
                             </div>
                         )}
@@ -299,11 +302,11 @@ export function WorkerLogsPanel({
                                         gridTemplateColumns: 'minmax(0, 1fr) auto',
                                         gap: 16,
                                         textDecoration: 'none',
-                                        background: C.bg,
-                                        border: `0.5px solid ${age > 45 ? '#fecaca' : C.border}`,
-                                        borderRadius: 8,
+                                        background: C.card,
+                                        border: `1px solid ${age > 45 ? 'rgba(239,68,68,0.35)' : C.border}`,
+                                        borderRadius: 12,
                                         padding: 16,
-                                        boxShadow: '0 4px 16px rgba(0,0,0,0.02)',
+                                        boxShadow: 'rgba(0,0,0,0.30) 0px 8px 24px 0px',
                                     }}
                                 >
                                     <div style={{ minWidth: 0 }}>
@@ -343,7 +346,7 @@ export function WorkerLogsPanel({
                         {workerRuns.map(run => {
                             const summary = run.details?.captureSummary as { claimed?: number; success?: number; failed?: number; timeout?: number; quarantine?: number } | undefined
                             return (
-                                <div key={run.id} style={{ background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: 14 }}>
+                                <div key={run.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14 }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
                                         <StatusBadge value={run.level} />
                                         <span style={{ color: C.muted, fontSize: 11, fontWeight: 700 }}>{formatClock(run.createdAt)}</span>
@@ -367,7 +370,7 @@ export function WorkerLogsPanel({
                     <div style={{ display: 'grid', gap: 10 }}>
                         {gamJobs.length === 0 && <SmallEmpty label="Sem jobs GAM recentes" />}
                         {gamJobs.map(job => (
-                            <div key={job.id} style={{ background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 8, padding: 14 }}>
+                            <div key={job.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14 }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
                                     <StatusBadge value={job.level.replace('JOB_GAM_', '')} />
                                     <span style={{ color: C.muted, fontSize: 11, fontWeight: 700 }}>{formatClock(job.createdAt)}</span>
@@ -385,7 +388,7 @@ export function WorkerLogsPanel({
                     <div style={{ display: 'grid', gap: 10 }}>
                         {errorLogs.length === 0 && <SmallEmpty label="Nenhum erro recente" />}
                         {errorLogs.map(log => (
-                            <div key={log.id} style={{ background: C.bg, border: '0.5px solid #fecaca', borderRadius: 8, padding: 14 }}>
+                            <div key={log.id} style={{ background: C.card, border: '1px solid rgba(239,68,68,0.35)', borderRadius: 12, padding: 14 }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
                                     <StatusBadge value={log.level} />
                                     <span style={{ color: C.muted, fontSize: 11, fontWeight: 700 }}>{formatClock(log.createdAt)}</span>
@@ -403,7 +406,7 @@ export function WorkerLogsPanel({
 
                 <div>
                     <SectionTitle title="Linha do Tempo" count={recentLogs.length} />
-                    <div style={{ background: C.bg, border: `0.5px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
+                    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
                         {recentLogs.slice(0, 60).map((log, index) => {
                             const tone = levelTone(log.level)
                             const Icon = tone.icon
@@ -440,7 +443,7 @@ export function WorkerLogsPanel({
 
 function MiniMetric({ label, value }: { label: string; value: number }) {
     return (
-        <div style={{ background: C.surface, border: `0.5px solid ${C.border}`, borderRadius: 6, padding: '7px 8px' }}>
+        <div style={{ background: C.surfaceSoft, border: `1px solid ${C.border}`, borderRadius: 8, padding: '7px 8px' }}>
             <div style={{ color: C.muted, fontSize: 9, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{label}</div>
             <div style={{ color: C.text, fontSize: 15, fontWeight: 800, lineHeight: 1.1 }}>{value}</div>
         </div>
@@ -449,7 +452,7 @@ function MiniMetric({ label, value }: { label: string; value: number }) {
 
 function SmallEmpty({ label }: { label: string }) {
     return (
-        <div style={{ background: C.bg, border: `0.5px dashed ${C.borderStrong}`, borderRadius: 8, padding: 18, color: C.muted, fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ background: C.card, border: `1px dashed ${C.borderStrong}`, borderRadius: 12, padding: 18, color: C.muted, fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
             <FileWarning size={14} />
             {label}
         </div>
