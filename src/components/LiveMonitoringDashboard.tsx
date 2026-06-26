@@ -20,14 +20,24 @@ export function LiveMonitoringDashboard({ campaignId, campaignName }: { campaign
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
+    const [cacheMeta, setCacheMeta] = useState<{ fromCache: boolean; stale: boolean; nextRefreshAt: Date | null }>({
+        fromCache: false,
+        stale: false,
+        nextRefreshAt: null,
+    })
 
-    const fetchData = useCallback(async (isInitial = false) => {
+    const fetchData = useCallback(async (isInitial = false, forceRefresh = false) => {
         if (!isInitial) setLoading(true)
-        const result = await getLiveMetrics(campaignId)
+        const result = await getLiveMetrics(campaignId, { forceRefresh })
         if (result.success) {
             setData(result.data || null)
             setError(null)
-            setLastUpdate(new Date())
+            setLastUpdate(result.fetchedAt ? new Date(result.fetchedAt) : new Date())
+            setCacheMeta({
+                fromCache: Boolean(result.fromCache),
+                stale: Boolean(result.stale),
+                nextRefreshAt: result.nextRefreshAt ? new Date(result.nextRefreshAt) : null,
+            })
         } else {
             setError(result.error || 'Erro ao carregar dados')
         }
@@ -60,7 +70,7 @@ export function LiveMonitoringDashboard({ campaignId, campaignName }: { campaign
                 <h3 className="text-xl font-bold text-white">Falha no Monitoramento</h3>
                 <p className="text-rose-400/60 max-w-md mx-auto">{error}</p>
                 <button 
-                    onClick={() => fetchData(false)}
+                    onClick={() => fetchData(false, true)}
                     className="px-6 py-2 bg-rose-500 text-white rounded-xl font-bold hover:bg-rose-600 transition-colors"
                 >
                     Tentar Novamente
@@ -86,6 +96,12 @@ export function LiveMonitoringDashboard({ campaignId, campaignName }: { campaign
                         <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
                         {lastUpdate.toLocaleTimeString()}
                     </div>
+                    {cacheMeta.fromCache && (
+                        <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-white/25">
+                            {cacheMeta.stale ? 'Snapshot salvo' : 'Delay ativo'}
+                            {cacheMeta.nextRefreshAt ? ` ate ${cacheMeta.nextRefreshAt.toLocaleTimeString()}` : ''}
+                        </p>
+                    )}
                 </div>
             </div>
 

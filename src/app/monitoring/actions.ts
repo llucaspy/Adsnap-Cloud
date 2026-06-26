@@ -8,6 +8,16 @@ import { nexusLogStore } from '@/lib/nexusLogStore'
 // Constants
 // ---------------------------------------------------------------------------
 const FETCH_TIMEOUT_MS = 15_000 // 15 seconds
+const DEFAULT_IMPRESSIONS_REFRESH_DELAY_MINUTES = 10
+
+function getImpressionsRefreshDelayMs() {
+    const configuredMinutes = Number(process.env.MONITORING_IMPRESSIONS_REFRESH_DELAY_MINUTES)
+    const minutes = Number.isFinite(configuredMinutes) && configuredMinutes > 0
+        ? configuredMinutes
+        : DEFAULT_IMPRESSIONS_REFRESH_DELAY_MINUTES
+
+    return minutes * 60 * 1000
+}
 
 // ---------------------------------------------------------------------------
 // Types for 00px GraphQL API responses
@@ -42,7 +52,13 @@ export interface LiveMetricsResult {
     data?: CampaignResponse
     error?: string
     fetchedAt?: string // ISO timestamp
+    fromCache?: boolean
+    stale?: boolean
+    nextRefreshAt?: string
+    cacheAgeMs?: number
 }
+
+const liveMetricsMemoryCache = new Map<string, LiveMetricsResult>()
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -57,6 +73,76 @@ function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number):
         ...options,
         signal: controller.signal,
     }).finally(() => clearTimeout(timer))
+}
+
+function getPurchases(site: SiteData): SitePurchases[] {
+    return Array.isArray(site.purchases) ? site.purchases : [site.purchases].filter(Boolean)
+}
+
+function summarizeMetrics(data: CampaignResponse) {
+    let goal = 0
+    let delivered = 0
+    let viewabilitySum = 0
+    let viewabilityCount = 0
+
+    for (const site of data.sites || []) {
+        for (const purchase of getPurchases(site)) {
+            if (!purchase?.cpm) continue
+
+            const totalData = purchase.cpm.total_data
+            goal += purchase.cpm.quantity || 0
+
+            if (totalData) {
+                delivered += totalData.impressions ?? totalData.valids ?? 0
+                viewabilitySum += totalData.viewability || 0
+                viewabilityCount++
+            }
+        }
+    }
+
+    return {
+        goal,
+        delivered,
+        viewability: viewabilityCount > 0 ? viewabilitySum / viewabilityCount : 0,
+    }
+}
+
+function buildCachedCampaignResponse(campaign: {
+    campaignName: string
+    lastDelivered: number
+    lastGoal: number
+    lastViewability: number
+}): CampaignResponse {
+    return {
+        sites: [{
+            site_name: campaign.campaignName || 'Snapshot de impressoes',
+            purchases: {
+                cpm: {
+                    quantity: campaign.lastGoal,
+                    total_data: {
+                        impressions: campaign.lastDelivered,
+                        valids: campaign.lastDelivered,
+                        viewability: campaign.lastViewability,
+                    },
+                },
+            },
+            data_by_date_purchase: [],
+        }],
+    }
+}
+
+function withCacheMeta(result: LiveMetricsResult, fetchedAt: Date, stale = false): LiveMetricsResult {
+    const delayMs = getImpressionsRefreshDelayMs()
+    const cacheAgeMs = Math.max(0, Date.now() - fetchedAt.getTime())
+
+    return {
+        ...result,
+        fetchedAt: fetchedAt.toISOString(),
+        fromCache: true,
+        stale,
+        cacheAgeMs,
+        nextRefreshAt: new Date(fetchedAt.getTime() + delayMs).toISOString(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -81,20 +167,62 @@ export async function saveMonitoringConfig(campaignId: string, payload: { authUr
     }
 }
 
-export async function getLiveMetrics(campaignId: string): Promise<LiveMetricsResult> {
+export async function getLiveMetrics(campaignId: string, options: { forceRefresh?: boolean } = {}): Promise<LiveMetricsResult> {
     try {
         const campaign = await prisma.campaign.findUnique({
             where: { id: campaignId },
             select: {
                 id: true,
+                campaignName: true,
                 externalAuthUrl: true,
                 externalCampaignId: true,
-                isMonitoringActive: true
+                isMonitoringActive: true,
+                lastDelivered: true,
+                lastFetchedAt: true,
+                lastGoal: true,
+                lastViewability: true,
             }
         })
 
         if (!campaign || !campaign.externalAuthUrl || !campaign.isMonitoringActive) {
             return { success: false, error: 'Monitoramento não configurado ou inativo' }
+        }
+
+        const delayMs = getImpressionsRefreshDelayMs()
+        const now = Date.now()
+        const memoryCached = liveMetricsMemoryCache.get(campaignId)
+
+        if (
+            !options.forceRefresh &&
+            memoryCached?.success &&
+            memoryCached.fetchedAt &&
+            now - new Date(memoryCached.fetchedAt).getTime() < delayMs
+        ) {
+            return withCacheMeta(memoryCached, new Date(memoryCached.fetchedAt))
+        }
+
+        if (
+            !options.forceRefresh &&
+            campaign.lastFetchedAt &&
+            campaign.lastGoal > 0 &&
+            now - campaign.lastFetchedAt.getTime() < delayMs
+        ) {
+            return withCacheMeta({
+                success: true,
+                data: buildCachedCampaignResponse(campaign),
+            }, campaign.lastFetchedAt)
+        }
+
+        const savedSnapshot = (errMsg: string): LiveMetricsResult => {
+            if (campaign.lastFetchedAt && campaign.lastGoal > 0) {
+                return withCacheMeta({
+                    success: true,
+                    data: buildCachedCampaignResponse(campaign),
+                    error: errMsg,
+                }, campaign.lastFetchedAt, true)
+            }
+
+            return { success: false, error: errMsg }
         }
 
         // 1. Handshake JWT -> Session Token (with 15s timeout)
@@ -107,7 +235,7 @@ export async function getLiveMetrics(campaignId: string): Promise<LiveMetricsRes
         if (!authResponse.ok) {
             const errMsg = `Handshake falhou: HTTP ${authResponse.status}`
             await nexusLogStore.addLog(`00px: ${errMsg}`, 'API_ERROR', undefined, campaignId)
-            return { success: false, error: errMsg }
+            return savedSnapshot(errMsg)
         }
 
         const finalUrl = authResponse.url
@@ -117,7 +245,7 @@ export async function getLiveMetrics(campaignId: string): Promise<LiveMetricsRes
         if (!sessionToken) {
             const errMsg = 'Token de sessão não encontrado na resposta 00px'
             await nexusLogStore.addLog(`00px Auth: ${errMsg}`, 'API_ERROR', undefined, campaignId)
-            return { success: false, error: errMsg }
+            return savedSnapshot(errMsg)
         }
 
         // 2. Extract Campaign ID from URL if missing
@@ -136,7 +264,7 @@ export async function getLiveMetrics(campaignId: string): Promise<LiveMetricsRes
         if (!externalId) {
             const errMsg = 'ID da campanha externa não encontrado'
             await nexusLogStore.addLog(`00px: ${errMsg}`, 'API_ERROR', undefined, campaignId)
-            return { success: false, error: errMsg }
+            return savedSnapshot(errMsg)
         }
 
         // 3. GraphQL Query (with 15s timeout)
@@ -176,7 +304,7 @@ export async function getLiveMetrics(campaignId: string): Promise<LiveMetricsRes
         if (!gqlResponse.ok) {
             const errMsg = `GraphQL HTTP ${gqlResponse.status}: ${gqlResponse.statusText}`
             await nexusLogStore.addLog(`00px: ${errMsg}`, 'API_ERROR', undefined, campaignId)
-            return { success: false, error: errMsg }
+            return savedSnapshot(errMsg)
         }
 
         const data = await gqlResponse.json()
@@ -184,21 +312,40 @@ export async function getLiveMetrics(campaignId: string): Promise<LiveMetricsRes
         if (data.errors) {
             const errMsg = data.errors[0]?.message || 'GraphQL error desconhecido'
             await nexusLogStore.addLog(`00px GraphQL: ${errMsg}`, 'API_ERROR', JSON.stringify(data.errors).substring(0, 500), campaignId)
-            return { success: false, error: errMsg }
+            return savedSnapshot(errMsg)
         }
 
         // Validate response structure
         if (!data.data?.campaign?.sites) {
             const errMsg = 'Resposta GraphQL sem dados de campanha/sites'
             await nexusLogStore.addLog(`00px: ${errMsg}`, 'API_ERROR', JSON.stringify(data.data).substring(0, 200), campaignId)
-            return { success: false, error: errMsg }
+            return savedSnapshot(errMsg)
         }
 
-        return {
+        const responseData = data.data.campaign as CampaignResponse
+        const summary = summarizeMetrics(responseData)
+        const fetchedAt = new Date()
+
+        await prisma.campaign.update({
+            where: { id: campaign.id },
+            data: {
+                lastDelivered: Math.round(summary.delivered),
+                lastGoal: Math.round(summary.goal),
+                lastViewability: summary.viewability,
+                lastFetchedAt: fetchedAt,
+            },
+        })
+
+        const result: LiveMetricsResult = {
             success: true,
-            data: data.data.campaign as CampaignResponse,
-            fetchedAt: new Date().toISOString()
+            data: responseData,
+            fetchedAt: fetchedAt.toISOString(),
+            fromCache: false,
+            nextRefreshAt: new Date(fetchedAt.getTime() + delayMs).toISOString()
         }
+
+        liveMetricsMemoryCache.set(campaignId, result)
+        return result
 
     } catch (error) {
         const isTimeout = error instanceof DOMException && error.name === 'AbortError'
@@ -207,6 +354,26 @@ export async function getLiveMetrics(campaignId: string): Promise<LiveMetricsRes
             : (error instanceof Error ? error.message : 'Erro desconhecido')
 
         await nexusLogStore.addLog(`00px Fatal: ${errMsg}`, 'API_ERROR', undefined, campaignId)
+
+        const campaign = await prisma.campaign.findUnique({
+            where: { id: campaignId },
+            select: {
+                campaignName: true,
+                lastDelivered: true,
+                lastFetchedAt: true,
+                lastGoal: true,
+                lastViewability: true,
+            },
+        })
+
+        if (campaign?.lastFetchedAt && campaign.lastGoal > 0) {
+            return withCacheMeta({
+                success: true,
+                data: buildCachedCampaignResponse(campaign),
+                error: errMsg,
+            }, campaign.lastFetchedAt, true)
+        }
+
         return { success: false, error: errMsg }
     }
 }
