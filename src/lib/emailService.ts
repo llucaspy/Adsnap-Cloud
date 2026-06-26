@@ -19,6 +19,7 @@ interface SendReportOptions {
 
 interface CaptureFile {
     id: string
+    campaignId: string
     content: Buffer
     zipPath: string
 }
@@ -33,6 +34,18 @@ interface FormatDefinition {
 interface DeliveryProgress {
     version: number
     parts: Record<string, string>
+}
+
+interface EmailCampaignRow {
+    id: string
+    client: string
+    agency: string
+    campaignName: string
+    formatLabel: string
+    device: string
+    flightStart: Date | null
+    flightEnd: Date | null
+    printCount: number
 }
 
 function getSmtpConfig() {
@@ -184,6 +197,7 @@ function buildEmailHtml(params: {
     flightStart: Date | null
     flightEnd: Date | null
     formats: string[]
+    campaignRows: EmailCampaignRow[]
     printCount: number
     part: number
     totalParts: number
@@ -192,6 +206,18 @@ function buildEmailHtml(params: {
     const partLabel = params.totalParts > 1
         ? `Parte ${params.part} de ${params.totalParts}`
         : 'Arquivo completo'
+    const rowHtml = params.campaignRows.map((campaign, index) => `
+        <tr>
+            <td style="padding: 10px 8px; border-top: 1px solid #eeeeee; color: #737373;">${index + 1}</td>
+            <td style="padding: 10px 8px; border-top: 1px solid #eeeeee;">
+                <strong style="color: #171717;">${escapeHtml(campaign.client)}</strong><br>
+                <span style="color: #737373; font-size: 12px;">${escapeHtml(campaign.campaignName || '-')}</span>
+            </td>
+            <td style="padding: 10px 8px; border-top: 1px solid #eeeeee;">${escapeHtml(campaign.formatLabel)}</td>
+            <td style="padding: 10px 8px; border-top: 1px solid #eeeeee;">${escapeHtml(campaign.device)}</td>
+            <td style="padding: 10px 8px; border-top: 1px solid #eeeeee; text-align: right;">${campaign.printCount}</td>
+        </tr>
+    `).join('')
 
     return `
         <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; color: #171717;">
@@ -212,6 +238,21 @@ function buildEmailHtml(params: {
                     <tr><td style="padding: 6px 0; font-weight: 700;">Formatos</td><td>${params.formats.map(escapeHtml).join(', ')}</td></tr>
                     <tr><td style="padding: 6px 0; font-weight: 700;">Anexo</td><td>${partLabel}, ${params.printCount} print(s)</td></tr>
                 </table>
+                <div style="margin-top: 24px;">
+                    <p style="margin: 0 0 10px; font-size: 13px; font-weight: 700; color: #171717;">Campanhas/formatos selecionados</p>
+                    <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                        <thead>
+                            <tr>
+                                <th align="left" style="padding: 8px; color: #737373; font-size: 11px; text-transform: uppercase;">#</th>
+                                <th align="left" style="padding: 8px; color: #737373; font-size: 11px; text-transform: uppercase;">Campanha</th>
+                                <th align="left" style="padding: 8px; color: #737373; font-size: 11px; text-transform: uppercase;">Formato</th>
+                                <th align="left" style="padding: 8px; color: #737373; font-size: 11px; text-transform: uppercase;">Device</th>
+                                <th align="right" style="padding: 8px; color: #737373; font-size: 11px; text-transform: uppercase;">Prints</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rowHtml}</tbody>
+                    </table>
+                </div>
                 ${params.totalParts > 1 ? '<p style="margin: 20px 0 0; color: #737373; font-size: 12px;">O volume de arquivos exigiu a divisao do relatorio em mais de um e-mail.</p>' : ''}
             </div>
         </div>
@@ -243,6 +284,7 @@ export async function sendCampaignReport({ pi, recipients, dispatchId, reportDat
                 agency: true,
                 campaignName: true,
                 format: true,
+                pi: true,
                 device: true,
                 flightStart: true,
                 flightEnd: true,
@@ -296,6 +338,32 @@ export async function sendCampaignReport({ pi, recipients, dispatchId, reportDat
                 : 'Nenhum print foi encontrado no periodo da campanha')
         }
 
+        const capturesByCampaignId = new Map<string, number>()
+        for (const capture of captures) {
+            capturesByCampaignId.set(capture.campaignId, (capturesByCampaignId.get(capture.campaignId) || 0) + 1)
+        }
+
+        const campaignRows: EmailCampaignRow[] = campaigns.map(campaign => ({
+            id: campaign.id,
+            client: campaign.client,
+            agency: campaign.agency,
+            campaignName: campaign.campaignName,
+            formatLabel: formatLabelById.get(campaign.format) || campaign.format,
+            device: campaign.device,
+            flightStart: campaign.flightStart,
+            flightEnd: campaign.flightEnd,
+            printCount: capturesByCampaignId.get(campaign.id) || 0,
+        }))
+        const missingCampaignRows = campaignRows.filter(campaign => campaign.printCount === 0)
+        if (missingCampaignRows.length > 0) {
+            const missingList = missingCampaignRows
+                .slice(0, 8)
+                .map(campaign => `${campaign.client} / ${campaign.formatLabel} (${campaign.device})`)
+                .join('; ')
+            const suffix = missingCampaignRows.length > 8 ? `; +${missingCampaignRows.length - 8} item(ns)` : ''
+            throw new Error(`Relatorio incompleto: ${missingCampaignRows.length} campanha(s)/formato(s) sem print no periodo. ${missingList}${suffix}`)
+        }
+
         const loaded = await mapWithConcurrency(captures, DOWNLOAD_CONCURRENCY, async capture => {
             try {
                 const campaign = campaignById.get(capture.campaignId)
@@ -303,14 +371,16 @@ export async function sendCampaignReport({ pi, recipients, dispatchId, reportDat
 
                 const content = await loadCapture(capture.screenshotPath)
                 const formatLabel = sanitizePathSegment(formatLabelById.get(campaign.format) || campaign.format)
+                const campaignFolder = sanitizePathSegment(`${campaign.client} - ${campaign.campaignName || campaign.pi}`)
                 const dateFolder = getBrtDateKey(capture.createdAt)
                 const timeKey = getBrtTimeKey(capture.createdAt)
                 const extension = path.extname(new URL(capture.screenshotPath, 'https://adsnap.local').pathname) || '.png'
 
                 return {
                     id: capture.id,
+                    campaignId: capture.campaignId,
                     content,
-                    zipPath: `${dateFolder}/${formatLabel}/${formatLabel}_${timeKey}_${capture.id.slice(0, 8)}${extension}`,
+                    zipPath: `${dateFolder}/${campaignFolder}/${formatLabel}/${formatLabel}_${campaign.device}_${timeKey}_${capture.id.slice(0, 8)}${extension}`,
                 } satisfies CaptureFile
             } catch (error) {
                 console.error(`[Government Report] Falha ao baixar captura ${capture.id}:`, error)
@@ -358,6 +428,7 @@ export async function sendCampaignReport({ pi, recipients, dispatchId, reportDat
                     flightEnd: campaigns.reduce<Date | null>((max, campaign) =>
                         !max || (campaign.flightEnd && campaign.flightEnd > max) ? campaign.flightEnd : max, null),
                     formats,
+                    campaignRows,
                     printCount: batches[index].length,
                     part,
                     totalParts: zipBuffers.length,
@@ -370,6 +441,10 @@ export async function sendCampaignReport({ pi, recipients, dispatchId, reportDat
                     `Cliente: ${firstCampaign.client}`,
                     `Campanha: ${firstCampaign.campaignName || '-'}`,
                     `PI: ${pi}`,
+                    'Campanhas/formatos selecionados:',
+                    ...campaignRows.map((campaign, rowIndex) =>
+                        `${rowIndex + 1}. ${campaign.client} - ${campaign.campaignName || '-'} - ${campaign.formatLabel} (${campaign.device}) - ${campaign.printCount} print(s)`
+                    ),
                     `Anexo: ${filename}`,
                 ].join('\n'),
                 attachments: [{
