@@ -15,6 +15,7 @@ import {
     MessageSquare,
     RefreshCw,
     Sparkles,
+    Trash2,
     User,
     Zap,
 } from 'lucide-react'
@@ -38,7 +39,7 @@ type ChatMessage = {
 const quickActions = [
     { label: 'Cadastrar order', command: 'Cadastrar order GAM: ' },
     { label: 'Prints geral', command: 'Disparar prints geral' },
-    { label: 'Capturar PI', command: 'Capturar PI ' },
+    { label: 'Capturar PI', command: 'Capturar PI' },
     { label: 'Baixar prints', command: 'Baixar prints PI ' },
 ]
 
@@ -337,6 +338,11 @@ export function NexusOrderConsole({ initialJobs }: { initialJobs: NexusOrderJob[
         sendMessage()
     }
 
+    function clearConversation() {
+        setInput('')
+        setMessages([buildWelcome()])
+    }
+
     return (
         <div className="space-y-5">
             <motion.header
@@ -367,18 +373,30 @@ export function NexusOrderConsole({ initialJobs }: { initialJobs: NexusOrderJob[
                                 <p className="text-[11px] truncate" style={{ color: '#737373' }}>Orders, capturas, workers e books</p>
                             </div>
                         </div>
-                        <div className="hidden sm:flex gap-2">
-                            {quickActions.slice(0, 3).map(action => (
-                                <button
-                                    key={action.label}
-                                    type="button"
-                                    onClick={() => handleCommand(action.command, action.command.endsWith(' ') || action.command.endsWith(': ') ? 'prefill' : 'send')}
-                                    className="h-9 px-3 inline-flex items-center gap-2 text-xs font-black"
-                                    style={{ color: '#d4d4d4', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px' }}
-                                >
-                                    {action.label}
-                                </button>
-                            ))}
+                        <div className="flex items-center gap-2 shrink-0">
+                            <div className="hidden sm:flex gap-2">
+                                {quickActions.slice(0, 3).map(action => (
+                                    <button
+                                        key={action.label}
+                                        type="button"
+                                        onClick={() => handleCommand(action.command, action.command.endsWith(' ') || action.command.endsWith(': ') ? 'prefill' : 'send')}
+                                        className="h-9 px-3 inline-flex items-center gap-2 text-xs font-black"
+                                        style={{ color: '#d4d4d4', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px' }}
+                                    >
+                                        {action.label}
+                                    </button>
+                                ))}
+                            </div>
+                            <button
+                                type="button"
+                                onClick={clearConversation}
+                                className="w-9 h-9 inline-flex items-center justify-center"
+                                style={{ color: '#a3a3a3', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px' }}
+                                title="Limpar conversa"
+                                aria-label="Limpar conversa"
+                            >
+                                <Trash2 size={14} />
+                            </button>
                         </div>
                     </div>
 

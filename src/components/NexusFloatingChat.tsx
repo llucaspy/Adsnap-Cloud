@@ -12,6 +12,7 @@ import {
     MessageCircle,
     MessageSquare,
     Minus,
+    Trash2,
     X,
 } from 'lucide-react'
 import { submitNexusAssistantMessage, type NexusAssistantResponse } from '@/app/nexus/actions'
@@ -28,7 +29,7 @@ type FloatingMessage = {
 const quickActions = [
     { label: 'Order GAM', command: 'Cadastrar order GAM: ' },
     { label: 'Prints geral', command: 'Disparar prints geral' },
-    { label: 'Capturar PI', command: 'Capturar PI ' },
+    { label: 'Capturar PI', command: 'Capturar PI' },
     { label: 'Baixar ZIP', command: 'Baixar prints PI ' },
 ]
 
@@ -300,6 +301,11 @@ export function NexusFloatingChat() {
         sendMessage()
     }
 
+    function clearConversation() {
+        setInput('')
+        setMessages([initialMessage()])
+    }
+
     return (
         <div className="fixed bottom-5 right-5 sm:bottom-6 sm:right-6" style={{ zIndex: 2147483000 }}>
             <AnimatePresence>
@@ -309,7 +315,7 @@ export function NexusFloatingChat() {
                         animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
                         exit={{ opacity: 0, y: 16, scale: 0.97, filter: 'blur(6px)' }}
                         transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
-                        className="fixed left-3 right-3 bottom-24 sm:left-auto sm:right-6 sm:bottom-24 sm:w-[520px] lg:w-[560px] h-[min(760px,calc(100vh-96px))] overflow-hidden"
+                        className="fixed left-3 right-3 bottom-24 sm:left-auto sm:right-6 sm:bottom-24 sm:w-[620px] lg:w-[680px] h-[min(820px,calc(100vh-120px))] overflow-hidden"
                         style={{
                             background: '#0f0f0f',
                             border: '1px solid rgba(255,255,255,0.16)',
@@ -339,6 +345,9 @@ export function NexusFloatingChat() {
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-1">
+                                    <button type="button" onClick={clearConversation} className="w-8 h-8 flex items-center justify-center" style={{ color: '#a3a3a3', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8 }} title="Limpar conversa" aria-label="Limpar conversa">
+                                        <Trash2 size={14} />
+                                    </button>
                                     <Link href="/nexus" className="w-8 h-8 flex items-center justify-center" style={{ color: '#a3a3a3', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8 }} title="Abrir Nexus">
                                         <Maximize2 size={14} />
                                     </Link>

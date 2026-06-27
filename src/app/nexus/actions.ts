@@ -7,6 +7,7 @@ import type { GamImportDraft } from '@/lib/gamImportPlanner'
 import type { GamImportWriteResult } from '@/lib/gamImportWriter'
 import { triggerGamWorker, triggerNexusWorker } from '@/app/actions'
 import { enqueueCaptureJobs } from '@/lib/workerJobs'
+import { getFormatLabelMap, resolveFormatLabel } from '@/lib/formatLabels'
 
 type NexusOrderDetails = Partial<GamImportDraft> & {
     orderUrl?: string
@@ -64,6 +65,23 @@ type CampaignGroup = {
     formats: string[]
     status: string
 }
+
+const CAPTURE_BLOCKED_STATUSES = [
+    'EXPIRED',
+    'FINISHED',
+    'PROCESSING',
+    'QUEUED',
+    'FAILED',
+    'QUARANTINE',
+    'AUTOCONFIG',
+]
+
+const CAPTURE_BLOCKED_ADOPS_STATUSES = [
+    'CONCLUIDA',
+    'PAUSADA',
+    'CANCELADA',
+    'ENCERRADA',
+]
 
 function readDetails(details: string | null): NexusOrderDetails {
     const raw = details || ''
@@ -250,7 +268,7 @@ function cleanupSearchText(message: string) {
         .trim()
 }
 
-function groupCampaigns(campaigns: AssistantCampaign[]): CampaignGroup[] {
+function groupCampaigns(campaigns: AssistantCampaign[], formatLabelMap = new Map<string, string>()): CampaignGroup[] {
     const groups = new Map<string, CampaignGroup>()
 
     for (const campaign of campaigns) {
@@ -265,24 +283,36 @@ function groupCampaigns(campaigns: AssistantCampaign[]): CampaignGroup[] {
         }
 
         current.campaignIds.push(campaign.id)
-        current.formats.push(`${campaign.format}${campaign.device ? `/${campaign.device}` : ''}`)
+        current.formats.push(`${resolveFormatLabel(formatLabelMap, campaign.format)}${campaign.device ? `/${campaign.device}` : ''}`)
         groups.set(key, current)
     }
 
     return Array.from(groups.values())
 }
 
+function getBrtTodayStart(now = new Date()) {
+    const brtNowStr = now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })
+    const brtNow = new Date(brtNowStr)
+    return new Date(Date.UTC(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate()))
+}
+
+function activeCaptureWhere(now = new Date()) {
+    const today = getBrtTodayStart(now)
+
+    return {
+        isArchived: false,
+        status: { notIn: CAPTURE_BLOCKED_STATUSES },
+        adOpsStatus: { notIn: CAPTURE_BLOCKED_ADOPS_STATUSES },
+        AND: [
+            { OR: [{ flightStart: null }, { flightStart: { lte: today } }] },
+            { OR: [{ flightEnd: null }, { flightEnd: { gte: today } }] },
+        ],
+    }
+}
+
 async function findActiveCampaigns() {
-    const now = new Date()
     return prisma.campaign.findMany({
-        where: {
-            isArchived: false,
-            status: { notIn: ['EXPIRED', 'FINISHED', 'PROCESSING'] },
-            AND: [
-                { OR: [{ flightStart: null }, { flightStart: { lte: now } }] },
-                { OR: [{ flightEnd: null }, { flightEnd: { gte: now } }] },
-            ],
-        },
+        where: activeCaptureWhere(),
         select: {
             id: true,
             pi: true,
@@ -301,22 +331,11 @@ async function findActiveCampaigns() {
 async function findCampaignGroups(message: string, activeOnly: boolean) {
     const pi = extractPi(message)
     const searchText = cleanupSearchText(message)
-    const now = new Date()
-
-    const dateFilter = activeOnly
-        ? {
-            AND: [
-                { OR: [{ flightStart: null }, { flightStart: { lte: now } }] },
-                { OR: [{ flightEnd: null }, { flightEnd: { gte: now } }] },
-            ],
-        }
-        : {}
+    const baseWhere = activeOnly ? activeCaptureWhere() : { isArchived: false }
 
     const campaigns = await prisma.campaign.findMany({
         where: {
-            isArchived: false,
-            ...(activeOnly ? { status: { notIn: ['EXPIRED', 'FINISHED', 'PROCESSING'] } } : {}),
-            ...dateFilter,
+            ...baseWhere,
             ...(pi
                 ? { pi }
                 : searchText.length >= 2
@@ -344,7 +363,8 @@ async function findCampaignGroups(message: string, activeOnly: boolean) {
         take: 80,
     })
 
-    return groupCampaigns(campaigns)
+    const formatLabelMap = await getFormatLabelMap()
+    return groupCampaigns(campaigns, formatLabelMap)
 }
 
 function campaignCards(groups: CampaignGroup[], action: 'capture' | 'download'): NexusAssistantCard[] {
@@ -404,7 +424,7 @@ function capabilityResponse(): NexusAssistantResponse {
         actions: [
             { label: 'Cadastrar order GAM', command: 'Cadastrar order GAM' },
             { label: 'Disparar prints geral', command: 'Disparar prints geral', variant: 'primary' },
-            { label: 'Capturar PI especifico', command: 'Capturar PI ' },
+            { label: 'Capturar PI especifico', command: 'Capturar PI' },
             { label: 'Baixar prints por PI', command: 'Baixar prints PI ' },
         ],
     }
@@ -472,18 +492,20 @@ export async function submitNexusAssistantMessage(message: string): Promise<Nexu
     }
 
     if (wantsCapture(input)) {
+        const selectedPi = extractPi(input)
+        const hasSpecificSearch = cleanupSearchText(input).length >= 2
         const groups = await findCampaignGroups(input, true)
         if (groups.length === 0) {
             return {
                 tone: 'warning',
-                text: 'Nao encontrei uma campanha ativa com esse termo. Me mande o PI ou um nome mais especifico.',
+                text: 'Nao encontrei campanha ativa e elegivel para captura com esse termo. Me mande o PI ou um nome mais especifico.',
                 actions: [{ label: 'Exemplo', command: 'capturar PI 402716' }],
             }
         }
-        if (groups.length > 1 && !extractPi(input)) {
+        if (!selectedPi && (!hasSpecificSearch || groups.length > 1)) {
             return {
                 tone: 'info',
-                text: `Encontrei ${groups.length} campanhas possiveis. Escolha qual PI devo capturar.`,
+                text: `Encontrei ${groups.length} PI(s) ativo(s) para captura. Escolha qual devo capturar.`,
                 cards: campaignCards(groups, 'capture'),
             }
         }
