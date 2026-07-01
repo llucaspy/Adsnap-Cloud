@@ -58,6 +58,32 @@ function abortableDelay(ms: number, signal?: AbortSignal) {
     })
 }
 
+function readPositiveMsEnv(name: string, fallback: number, max = 30_000) {
+    const parsed = Number(process.env[name])
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback
+    return Math.min(Math.floor(parsed), max)
+}
+
+const FAST_CAPTURE_NAVIGATION_TIMEOUT_MS = readPositiveMsEnv('NEXUS_FAST_NAVIGATION_TIMEOUT_MS', 2_500, 10_000)
+const FAST_SELECTOR_ATTACHED_TIMEOUT_MS = readPositiveMsEnv('NEXUS_FAST_SELECTOR_ATTACHED_TIMEOUT_MS', 2_000, 10_000)
+const FAST_SELECTOR_VISIBLE_TIMEOUT_MS = readPositiveMsEnv('NEXUS_FAST_SELECTOR_VISIBLE_TIMEOUT_MS', 1_500, 8_000)
+const FAST_SCROLL_SETTLE_MS = readPositiveMsEnv('NEXUS_FAST_SCROLL_SETTLE_MS', 350, 2_000)
+const FAST_SCREENSHOT_TIMEOUT_MS = readPositiveMsEnv('NEXUS_FAST_SCREENSHOT_TIMEOUT_MS', 2_500, 10_000)
+const FAST_FRAME_SETTLE_MS = readPositiveMsEnv('NEXUS_FAST_FRAME_SETTLE_MS', 100, 1_000)
+const FAST_FRAME_TIMEOUT_MS = readPositiveMsEnv('NEXUS_FAST_FRAME_TIMEOUT_MS', 3_000, 10_000)
+
+type ChromiumBrowser = Awaited<ReturnType<typeof chromium.launch>>
+
+async function prepareFinalCaptureImage(
+    screenshot: Buffer,
+    url: string,
+    isMobile: boolean,
+    browser: ChromiumBrowser,
+    signal?: AbortSignal,
+) {
+    return compositeStudioImage(screenshot, url, isMobile, signal, browser)
+}
+
 // ============================================================================
 // NEXUS V48 - RASTER COMPOSITION ENGINE (SHARP)
 // ============================================================================
@@ -128,6 +154,7 @@ export async function processCampaign(campaignId: string, options: CaptureOption
             }
 
             console.log('[Nexus] Executando _executeCapture...')
+            const attemptStartedAt = Date.now()
             const result = await _executeCapture(campaignId, settings, options);
             console.log('[Nexus] Resultado:', JSON.stringify(result, null, 2))
 
@@ -145,7 +172,12 @@ export async function processCampaign(campaignId: string, options: CaptureOption
                         lastWorkerError: null,
                     }
                 });
-                await nexusLogStore.addLog(`Nexus: Sucesso total na campanha ${campaignId}`, 'SUCCESS', undefined, campaignId);
+                await nexusLogStore.addLog(
+                    `Nexus: Sucesso total na campanha ${campaignId}`,
+                    'SUCCESS',
+                    `Duracao: ${((Date.now() - attemptStartedAt) / 1000).toFixed(1)}s`,
+                    campaignId
+                );
                 return result;
             }
 
@@ -361,7 +393,7 @@ async function injectCreativeAsset(locator: Locator, assetUrl: string, width: nu
     }, { assetUrl, width, height });
 
     const image = locator.locator('img[data-adsnap-creative="true"]').first();
-    await image.waitFor({ state: 'visible', timeout: 15000 });
+    await image.waitFor({ state: 'visible', timeout: FAST_SELECTOR_VISIBLE_TIMEOUT_MS });
     await image.evaluate((node: HTMLImageElement) => {
         if (node.complete && node.naturalWidth > 0) return;
         return new Promise<void>((resolve, reject) => {
@@ -395,8 +427,7 @@ async function captureScreenshotAfterConfiguredDelay(
     throwIfCaptureAborted(signal)
     const delaySeconds = normalizeCaptureDelaySeconds(captureDelaySeconds)
 
-    await page.waitForLoadState('networkidle', { timeout: 3_000 }).catch(() => null)
-    await page.evaluate(() => document.fonts?.ready).catch(() => null)
+    await page.waitForLoadState('domcontentloaded', { timeout: FAST_SCROLL_SETTLE_MS }).catch(() => null)
     await nexusLogStore.addLog(
         `Nexus: Aguardando ${delaySeconds}s antes do print`,
         'SYSTEM',
@@ -405,7 +436,7 @@ async function captureScreenshotAfterConfiguredDelay(
     )
     await abortableDelay(delaySeconds * 1000, signal)
     throwIfCaptureAborted(signal)
-    return page.screenshot({ type: 'png', animations })
+    return page.screenshot({ type: 'png', animations, timeout: FAST_SCREENSHOT_TIMEOUT_MS })
 }
 
 // ============================================================================
@@ -502,6 +533,13 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
                 '--disable-gpu',
+                '--disable-extensions',
+                '--disable-background-networking',
+                '--disable-background-timer-throttling',
+                '--disable-renderer-backgrounding',
+                '--disable-sync',
+                '--mute-audio',
+                '--no-first-run',
                 '--font-render-hinting=none'
             ]
         });
@@ -510,11 +548,22 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         const context = await browser.newContext(isMobile ? {
             ...devices['iPhone 13'],
             viewport: { width: 390, height: 722 },
-            timezoneId: 'America/Sao_Paulo'
+            timezoneId: 'America/Sao_Paulo',
+            serviceWorkers: 'block',
         } : {
             viewport: { width: 1920, height: 928 },
-            timezoneId: 'America/Sao_Paulo'
+            timezoneId: 'America/Sao_Paulo',
+            serviceWorkers: 'block',
         });
+        context.setDefaultTimeout(FAST_SELECTOR_VISIBLE_TIMEOUT_MS)
+        context.setDefaultNavigationTimeout(FAST_CAPTURE_NAVIGATION_TIMEOUT_MS)
+        await context.route('**/*', route => {
+            const resourceType = route.request().resourceType()
+            if (resourceType === 'font' || resourceType === 'manifest' || resourceType === 'websocket' || resourceType === 'eventsource') {
+                return route.abort().catch(() => undefined)
+            }
+            return route.continue().catch(() => undefined)
+        })
 
         const page = await context.newPage();
         throwIfCaptureAborted(options.signal)
@@ -526,7 +575,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         try {
             await page.goto(campaign.url, {
                 waitUntil: 'domcontentloaded',
-                timeout: settings.nexusTimeout
+                timeout: Math.min(Number(settings.nexusTimeout) || FAST_CAPTURE_NAVIGATION_TIMEOUT_MS, FAST_CAPTURE_NAVIGATION_TIMEOUT_MS)
             });
         } catch (navError) {
             throwIfCaptureAborted(options.signal)
@@ -538,7 +587,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         // WARM-UP: Smart Scroll
         // Sempre realiza o scroll para mobile para garantir o carregamento de banners lazy-load (ex: Metrópoles)
         // O usuário confirmou que 320x100 funciona, vamos garantir que 320x50 siga o mesmo fluxo robusto
-        if (isMobile) {
+        if (!bannerConfig?.selector && isMobile) {
             console.log('[Nexus] Realizando scroll de aquecimento (Lazy Load Check)...');
             await nexusLogStore.addLog('Nexus: Realizando scroll para carregar anúncios (Lazy Load)', 'SYSTEM', undefined, campaignId);
             await page.evaluate(async () => {
@@ -550,18 +599,18 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                         window.scrollBy(0, distance);
                         totalHeight += distance;
 
-                        if (totalHeight >= scrollHeight || totalHeight > 4000) {
+                        if (totalHeight >= scrollHeight || totalHeight > 1600) {
                             clearInterval(timer);
                             window.scrollTo(0, 0); // Reset to top
                             resolve();
                         }
-                    }, 50);
+                    }, 25);
                 });
             });
-            await abortableDelay(8000, options.signal);
-        } else {
+            await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
+        } else if (!bannerConfig?.selector) {
             console.log('[Nexus] Desktop detectado. Realizando warm-up de slots...');
-            await abortableDelay(5000, options.signal);
+            await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
             await page.evaluate(async () => {
                 return new Promise<void>((resolve) => {
                     let totalHeight = 0;
@@ -570,15 +619,15 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                         window.scrollBy(0, distance);
                         totalHeight += distance;
 
-                        if (totalHeight > 4500) {
+                        if (totalHeight > 2200) {
                             clearInterval(timer);
                             window.scrollTo(0, 0);
                             resolve();
                         }
-                    }, 70);
+                    }, 25);
                 });
             });
-            await abortableDelay(5000, options.signal);
+            await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
         }
         throwIfCaptureAborted(options.signal)
 
@@ -599,15 +648,15 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                 try {
                     const locator = page.locator(selector).first();
 
-                    await locator.waitFor({ state: 'attached', timeout: 20000 });
+                    await locator.waitFor({ state: 'attached', timeout: FAST_SELECTOR_ATTACHED_TIMEOUT_MS });
     
                     if (!await locator.isVisible()) {
                         console.log('[Nexus] Seletor existe mas não está visível. Tentando scroll...');
-                        await locator.scrollIntoViewIfNeeded({ timeout: 5000 });
-                        await abortableDelay(3000, options.signal);
+                        await locator.scrollIntoViewIfNeeded({ timeout: FAST_SELECTOR_VISIBLE_TIMEOUT_MS });
+                        await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
                     }
     
-                    await locator.waitFor({ state: 'visible', timeout: 5000 });
+                    await locator.waitFor({ state: 'visible', timeout: FAST_SELECTOR_VISIBLE_TIMEOUT_MS });
     
                     if (standaloneCreativeAssetUrl) {
                         console.log(`[Nexus] Injetando asset autenticado do GAM no slot (${targetW}x${targetH})`);
@@ -621,7 +670,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                         console.log('[Nexus] Dimensões pequenas. Buscando iframe...');
                         const frameLocator = locator.locator('iframe').first();
                         if (await frameLocator.count() > 0) {
-                            await frameLocator.waitFor({ state: 'visible', timeout: 5000 });
+                            await frameLocator.waitFor({ state: 'visible', timeout: FAST_SELECTOR_VISIBLE_TIMEOUT_MS });
                         }
                     }
     
@@ -637,19 +686,18 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                         const targetScrollY = Math.max(0, matchingBox.y + (matchingBox.height / 2) - (viewportHeight / 2));
     
                         await page.evaluate((y) => window.scrollTo(0, y), targetScrollY);
-                        await abortableDelay(3000, options.signal);
+                        await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
     
                         if (standaloneCreativeAssetUrl) {
                             await injectCreativeAsset(locator, standaloneCreativeAssetUrl, targetW, targetH);
-                            await abortableDelay(1500, options.signal);
+                            await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
                         }
 
                         const screenshotBuffer = standaloneCreativeAssetUrl
                             ? await captureScreenshotAfterConfiguredDelay(page, campaignId, campaign.captureDelaySeconds, options.signal, 'disabled')
                             : await captureScreenshotAfterConfiguredDelay(page, campaignId, campaign.captureDelaySeconds, options.signal);
+                        const finalImage = await prepareFinalCaptureImage(screenshotBuffer, campaign.url, isMobile, browser, options.signal);
                         await browser.close();
-    
-                        const finalImage = await compositeStudioImage(screenshotBuffer, campaign.url, isMobile, options.signal);
                         return await saveCapture(campaign, finalImage, campaignId, options);
                     } else {
                         const measured = describeMeasuredBoxes(measuredBoxes);
@@ -697,7 +745,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
 
             try {
                 await page.evaluate((y) => window.scrollTo(0, y), Math.max(0, candidate.y - 300));
-                await abortableDelay(3000, options.signal);
+                await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
 
                 const clip = {
                     x: candidate.x,
@@ -706,7 +754,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                     height: candidate.height
                 };
 
-                const bannerBuffer = await page.screenshot({ clip });
+                const bannerBuffer = await page.screenshot({ clip, timeout: FAST_SCREENSHOT_TIMEOUT_MS });
                 const sizeKB = bannerBuffer.length / 1024;
                 console.log(`[Nexus] Candidato #${index + 1} - Tamanho: ${sizeKB.toFixed(2)} KB`);
 
@@ -747,14 +795,14 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         console.log(`[Nexus] Scroll final para Y = ${Math.round(targetScrollY)} `);
         await page.evaluate((y) => window.scrollTo(0, y), targetScrollY);
 
-        await abortableDelay(1500, options.signal);
+        await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
 
         console.log('[Nexus] Aguardando delay configurado para screenshot final...')
         const screenshotBuffer = await captureScreenshotAfterConfiguredDelay(page, campaignId, campaign.captureDelaySeconds, options.signal);
-        await browser.close();
+        await nexusLogStore.addLog('Nexus: Print capturado. Aplicando moldura obrigatoria...', 'SYSTEM', undefined, campaignId);
 
-        await nexusLogStore.addLog('Nexus: Browser finalizado. Iniciando composição estética...', 'SYSTEM', undefined, campaignId);
-        const finalImage = await compositeStudioImage(screenshotBuffer, campaign.url, isMobile, options.signal);
+        const finalImage = await prepareFinalCaptureImage(screenshotBuffer, campaign.url, isMobile, browser, options.signal);
+        await browser.close();
 
         return await saveCapture(campaign, finalImage, campaignId, options);
 
@@ -874,20 +922,41 @@ async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: strin
 // STUDIO COMPOSITION - Premium device frames
 // ============================================================================
 
-async function compositeStudioImage(screenshot: Buffer, url: string, isMobile: boolean, signal?: AbortSignal): Promise<Buffer> {
+async function compositeStudioImage(
+    screenshot: Buffer,
+    url: string,
+    isMobile: boolean,
+    signal?: AbortSignal,
+    existingBrowser?: ChromiumBrowser,
+): Promise<Buffer> {
     throwIfCaptureAborted(signal)
-    const studioBrowser = await chromium.launch({ headless: true });
+    const ownsBrowser = !existingBrowser
+    const studioBrowser = existingBrowser || await chromium.launch({
+        headless: true,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-extensions',
+            '--disable-background-networking',
+            '--disable-sync',
+            '--mute-audio',
+            '--no-first-run',
+        ]
+    });
     let closeStudioOnAbort: (() => void) | undefined;
+    let studioPage: import('playwright').Page | undefined;
+    let compositionTimeout: ReturnType<typeof setTimeout> | undefined;
     
-    // Timeout de segurança para a composição (60s)
-    const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Studio Composition Timeout')), 60000)
-    );
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        compositionTimeout = setTimeout(() => reject(new Error('Studio Composition Timeout')), FAST_FRAME_TIMEOUT_MS)
+    });
 
     try {
         closeStudioOnAbort = () => studioBrowser.close().catch(() => {})
         signal?.addEventListener('abort', closeStudioOnAbort, { once: true })
-        const studioPage = await studioBrowser.newPage();
+        studioPage = await studioBrowser.newPage();
         await studioPage.setViewportSize({ width: 1920, height: 1080 });
 
         const base64 = screenshot.toString('base64');
@@ -1094,18 +1163,20 @@ async function compositeStudioImage(screenshot: Buffer, url: string, isMobile: b
                 `;
 
         await studioPage.setViewportSize({ width: 1920, height: 1080 });
-        await studioPage.setContent(html);
-        await abortableDelay(500, signal);
+        await studioPage.setContent(html, { waitUntil: 'domcontentloaded' });
+        await abortableDelay(FAST_FRAME_SETTLE_MS, signal);
 
         const finalBuffer = await Promise.race([
-            studioPage.screenshot({ type: 'png' }),
+            studioPage.screenshot({ type: 'png', timeout: FAST_SCREENSHOT_TIMEOUT_MS }),
             timeoutPromise
         ]);
 
         throwIfCaptureAborted(signal)
         return finalBuffer;
     } finally {
+        if (compositionTimeout) clearTimeout(compositionTimeout)
         if (closeStudioOnAbort) signal?.removeEventListener('abort', closeStudioOnAbort)
-        await studioBrowser.close();
+        await studioPage?.close().catch(() => {})
+        if (ownsBrowser) await studioBrowser.close();
     }
 }
