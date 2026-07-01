@@ -409,7 +409,7 @@ function isStandaloneCreativeAsset(assetUrl: string) {
         const isAdfLayer = url.hostname === 'creatives.adftech.com.br'
             && /\/\d{2}\.(?:png|jpe?g|webp)$/i.test(url.pathname)
         const isRocketLayer = /(^|\.)00px\.net$/i.test(url.hostname)
-            && /\/rocket\/[^/]+\/resources\//i.test(url.pathname)
+            && /\/rocket\/[^/]+\/(?:resources\/)?\d{2}\.(?:png|jpe?g|webp)$/i.test(url.pathname)
 
         return !isAdfLayer && !isRocketLayer && /\.(?:png|jpe?g|webp)(?:$|\?)/i.test(url.toString())
     } catch {
