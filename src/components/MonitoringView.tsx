@@ -1,13 +1,19 @@
 'use client'
 
-import React, { useState, useMemo, useTransition } from 'react'
+import React, { useEffect, useState, useMemo, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Monitor, Smartphone, Activity, Globe, Clock, Zap, Pencil, ShieldAlert, CheckCircle2, Timer, Search, X, Filter, Radio } from 'lucide-react'
+import { Monitor, Smartphone, Activity, Globe, Clock, Zap, Pencil, ShieldAlert, CheckCircle2, Timer, Search, X, Radio, Save } from 'lucide-react'
 import { format as formatDate, isAfter, isBefore } from 'date-fns'
 import Link from 'next/link'
 import { QueueIndicator } from '@/components/QueueIndicator'
 import { NetworkIndicator } from '@/components/NetworkIndicator'
 import { EditCampaignModal } from '@/components/EditCampaignModal'
+import {
+    DEFAULT_CAPTURE_DELAY_SECONDS,
+    MAX_CAPTURE_DELAY_SECONDS,
+    MIN_CAPTURE_DELAY_SECONDS,
+    normalizeCaptureDelaySeconds,
+} from '@/lib/captureTiming'
 
 /* ─── Palette ─────────────────────────────────────── */
 const C = {
@@ -44,6 +50,7 @@ interface Campaign {
     id: string; pi: string; client: string; agency: string; url: string
     device: string; format: string; flightStart: string | null; flightEnd: string | null
     isMonitoringActive: boolean
+    captureDelaySeconds?: number | null
 }
 
 interface PIGroup {
@@ -489,6 +496,178 @@ function MobileFilterButton({ active, onClick, icon, label, dotColor }: { active
     )
 }
 
+function getCaptureDelaySummary(campaigns: Campaign[]) {
+    const values = campaigns.map(campaign => normalizeCaptureDelaySeconds(campaign.captureDelaySeconds))
+    const value = values[0] ?? DEFAULT_CAPTURE_DELAY_SECONDS
+
+    return {
+        value,
+        isMixed: values.some(delay => delay !== value),
+    }
+}
+
+function CaptureDelayControl({ campaigns, router, tone = 'light' }: { campaigns: Campaign[]; router: any; tone?: 'light' | 'dark' }) {
+    const summary = useMemo(() => getCaptureDelaySummary(campaigns), [campaigns])
+    const [value, setValue] = useState(summary.value)
+    const [savedValue, setSavedValue] = useState(summary.value)
+    const [isMixed, setIsMixed] = useState(summary.isMixed)
+    const [error, setError] = useState('')
+    const [isSaving, startSaving] = useTransition()
+    const isDark = tone === 'dark'
+    const hasChanges = isMixed || value !== savedValue
+
+    useEffect(() => {
+        setValue(summary.value)
+        setSavedValue(summary.value)
+        setIsMixed(summary.isMixed)
+        setError('')
+    }, [summary.value, summary.isMixed])
+
+    const handleSave = () => {
+        if (!hasChanges || isSaving) return
+
+        setError('')
+        startSaving(async () => {
+            try {
+                const { updateCampaignsCaptureDelay } = await import('@/app/actions')
+                const result = await updateCampaignsCaptureDelay(campaigns.map(campaign => campaign.id), value)
+
+                setValue(result.captureDelaySeconds)
+                setSavedValue(result.captureDelaySeconds)
+                setIsMixed(false)
+                router.refresh()
+            } catch (err) {
+                console.error('[Monitoring] Failed to update capture delay:', err)
+                setError('Falha ao salvar')
+            }
+        })
+    }
+
+    const palette = isDark
+        ? {
+            bg: M.glass,
+            border: M.hairline,
+            text: M.ink,
+            title: M.inkDeep,
+            muted: M.slate,
+            subtle: M.charcoal,
+            buttonIdle: M.surfaceSoft,
+            buttonText: M.charcoal,
+            accent: M.primary,
+        }
+        : {
+            bg: C.surface,
+            border: C.border,
+            text: C.text,
+            title: C.text,
+            muted: C.muted,
+            subtle: C.dim,
+            buttonIdle: '#faf9f7',
+            buttonText: C.muted,
+            accent: '#7c3aed',
+        }
+
+    return (
+        <div
+            style={{
+                padding: isDark ? 12 : 10,
+                borderRadius: 8,
+                background: palette.bg,
+                border: `${isDark ? 1 : 0.5}px solid ${palette.border}`,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+            }}
+        >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                    <span
+                        style={{
+                            width: isDark ? 30 : 24,
+                            height: isDark ? 30 : 24,
+                            borderRadius: 8,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexShrink: 0,
+                            background: isDark ? M.surfaceSoft : C.card,
+                            color: palette.muted,
+                        }}
+                    >
+                        <Clock size={isDark ? 15 : 12} />
+                    </span>
+                    <div style={{ minWidth: 0 }}>
+                        <p style={{ margin: 0, color: palette.title, fontSize: isDark ? 13 : 11, fontWeight: 700, lineHeight: 1.25 }}>
+                            Espera do print
+                        </p>
+                        <p style={{ margin: '2px 0 0', color: palette.muted, fontSize: isDark ? 11 : 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                            {isMixed ? 'Tempos diferentes' : 'Tempo atual'}
+                        </p>
+                    </div>
+                </div>
+                <strong style={{ color: isDark ? M.inkDeep : palette.text, fontSize: isDark ? 22 : 18, lineHeight: 1, fontWeight: 700 }}>
+                    {value}s
+                </strong>
+            </div>
+
+            <input
+                type="range"
+                min={MIN_CAPTURE_DELAY_SECONDS}
+                max={MAX_CAPTURE_DELAY_SECONDS}
+                step={1}
+                value={value}
+                onChange={event => {
+                    setError('')
+                    setValue(normalizeCaptureDelaySeconds(event.target.value))
+                }}
+                style={{
+                    width: '100%',
+                    accentColor: palette.accent,
+                    cursor: 'pointer',
+                }}
+                aria-label="Tempo de espera antes do print"
+            />
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <span style={{ color: palette.subtle, fontSize: isDark ? 11 : 9, fontWeight: 600 }}>{MIN_CAPTURE_DELAY_SECONDS}s</span>
+                <button
+                    type="button"
+                    onClick={handleSave}
+                    disabled={!hasChanges || isSaving}
+                    style={{
+                        minWidth: isDark ? 96 : 82,
+                        height: isDark ? 34 : 28,
+                        padding: '0 10px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6,
+                        borderRadius: 8,
+                        border: `1px solid ${hasChanges ? palette.accent : palette.border}`,
+                        background: hasChanges ? palette.accent : palette.buttonIdle,
+                        color: hasChanges ? '#ffffff' : palette.buttonText,
+                        fontSize: isDark ? 12 : 10,
+                        fontWeight: 700,
+                        cursor: hasChanges && !isSaving ? 'pointer' : 'default',
+                        opacity: isSaving ? 0.72 : 1,
+                        transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)',
+                    }}
+                >
+                    <Save size={isDark ? 13 : 11} />
+                    {isSaving ? 'Salvando' : hasChanges ? 'Salvar' : 'Salvo'}
+                </button>
+                <span style={{ color: palette.subtle, fontSize: isDark ? 11 : 9, fontWeight: 600 }}>{MAX_CAPTURE_DELAY_SECONDS}s</span>
+            </div>
+
+            {error && (
+                <p style={{ margin: 0, color: isDark ? M.error : '#ef4444', fontSize: isDark ? 11 : 10, fontWeight: 600 }}>
+                    {error}
+                </p>
+            )}
+        </div>
+    )
+}
+
 function MobilePISection({ section, sectionIndex, router, isPending, startTransition, formats }: any) {
     return (
         <section style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -604,6 +783,8 @@ function MobilePiCard({ group, router, isPending, startTransition, formats, acce
                             </div>
                         </div>
                     )}
+
+                    <CaptureDelayControl campaigns={group.campaigns} router={router} tone="dark" />
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {group.campaigns.slice(0, 4).map((campaign: any) => (
@@ -810,6 +991,8 @@ function PiCard({ group, router, isPending, startTransition, formats }: { group:
                             </div>
                         </div>
                     )}
+
+                    <CaptureDelayControl campaigns={group.campaigns} router={router} />
                 </div>
 
                 {/* Footer */}

@@ -71,6 +71,34 @@ export async function runCaptureBatch(campaignIds: string[]) {
     return { success: true, count: campaignIds.length }
 }
 
+export async function updateCampaignsCaptureDelay(campaignIds: string[], captureDelaySecondsInput: number) {
+    const ids = Array.from(new Set(
+        (campaignIds || []).filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+    ))
+
+    if (ids.length === 0) {
+        throw new Error('Nenhuma campanha selecionada para atualizar o tempo do print')
+    }
+
+    const captureDelaySeconds = normalizeCaptureDelaySeconds(captureDelaySecondsInput)
+
+    const result = await prisma.campaign.updateMany({
+        where: { id: { in: ids } },
+        data: { captureDelaySeconds }
+    })
+
+    await nexusLogStore.addLog(
+        `Nexus: Tempo de espera do print atualizado para ${captureDelaySeconds}s em ${result.count} formato(s).`,
+        'SYSTEM',
+        undefined,
+        ids.length === 1 ? ids[0] : undefined
+    )
+
+    revalidatePath('/')
+    revalidatePath('/monitoring')
+    return { success: true, count: result.count, captureDelaySeconds }
+}
+
 export async function getCampaignDetailsByPi(pi: string) {
     const campaign = await prisma.campaign.findFirst({
         where: { pi },
