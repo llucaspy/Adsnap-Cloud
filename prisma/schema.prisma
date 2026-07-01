@@ -21,6 +21,7 @@ model Campaign {
   status               String          @default("PENDING")
   segmentation         String          @default("PRIVADO")
   captureCadence       String          @default("DAILY")
+  captureDelaySeconds  Int             @default(3)
   flightStart          DateTime?
   flightEnd            DateTime?
   isArchived           Boolean         @default(false)

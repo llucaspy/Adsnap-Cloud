@@ -6,6 +6,7 @@ import { nexusLogStore } from '@/lib/nexusLogStore'
 import type { GamImportDraft } from '@/lib/gamImportPlanner'
 import { createCampaignsFromGamDraft as writeCampaignsFromGamDraft } from '@/lib/gamImportWriter'
 import { normalizeCaptureCadence, type CaptureCadence } from '@/lib/governmentReportScope'
+import { normalizeCaptureDelaySeconds } from '@/lib/captureTiming'
 
 export async function getNexusActivity() {
     try {
@@ -83,6 +84,7 @@ export async function getCampaignDetailsByPi(pi: string) {
             device: true,
             segmentation: true,
             captureCadence: true,
+            captureDelaySeconds: true,
             flightStart: true,
             flightEnd: true
         }
@@ -100,6 +102,7 @@ export async function createCampaign(formData: FormData) {
     const device = (formData.get('device') as string) || 'desktop'
     const segmentation = (formData.get('segmentation') as string) || 'PRIVADO'
     const captureCadence = normalizeCaptureCadence(segmentation, formData.get('captureCadence') as string | null)
+    const captureDelaySeconds = normalizeCaptureDelaySeconds(formData.get('captureDelaySeconds'))
 
     // Flight dates
     const flightStartStr = formData.get('flightStart') as string
@@ -127,6 +130,7 @@ export async function createCampaign(formData: FormData) {
             device,
             segmentation,
             captureCadence,
+            captureDelaySeconds,
             flightStart,
             flightEnd,
             status: 'PENDING',
@@ -146,6 +150,7 @@ export async function createMultipleCampaigns(payload: {
     pi: string
     segmentation: string
     captureCadence: CaptureCadence
+    captureDelaySeconds?: number
     flightStart: string | null
     flightEnd: string | null
     isScheduled: boolean
@@ -164,6 +169,7 @@ export async function createMultipleCampaigns(payload: {
 }) {
     const {
         agency, client, campaignName, pi, segmentation, captureCadence,
+        captureDelaySeconds,
         flightStart: flightStartStr, flightEnd: flightEndStr,
         isScheduled, scheduledTimes, mediaEntries
     } = payload
@@ -191,6 +197,7 @@ export async function createMultipleCampaigns(payload: {
                 device: entry.device || 'desktop',
                 segmentation,
                 captureCadence: normalizeCaptureCadence(segmentation, captureCadence),
+                captureDelaySeconds: normalizeCaptureDelaySeconds(captureDelaySeconds),
                 flightStart,
                 flightEnd,
                 status: 'PENDING',
@@ -451,6 +458,9 @@ export async function updateCampaign(id: string, formData: FormData) {
     const url = formData.get('url') as string
     const device = (formData.get('device') as string) || 'desktop'
     const segmentation = (formData.get('segmentation') as string) || 'PRIVADO'
+    const captureDelaySeconds = formData.has('captureDelaySeconds')
+        ? normalizeCaptureDelaySeconds(formData.get('captureDelaySeconds'))
+        : null
 
     // Flight dates
     const flightStartStr = formData.get('flightStart') as string
@@ -478,6 +488,7 @@ export async function updateCampaign(id: string, formData: FormData) {
             url,
             device,
             segmentation,
+            ...(captureDelaySeconds ? { captureDelaySeconds } : {}),
             flightStart,
             flightEnd,
             isScheduled,
@@ -507,6 +518,7 @@ export async function addFormatToCampaign(data: {
     pi: string
     segmentation: string
     captureCadence?: CaptureCadence
+    captureDelaySeconds?: number | null
     url: string
     device: string
     format: string
@@ -531,6 +543,7 @@ export async function addFormatToCampaign(data: {
             device: data.device || 'desktop',
             segmentation: data.segmentation || 'PRIVADO',
             captureCadence: normalizeCaptureCadence(data.segmentation || 'PRIVADO', data.captureCadence),
+            captureDelaySeconds: normalizeCaptureDelaySeconds(data.captureDelaySeconds),
             flightStart: data.flightStart ? new Date(data.flightStart) : null,
             flightEnd: data.flightEnd ? new Date(data.flightEnd) : null,
             status: 'PENDING',
@@ -826,6 +839,7 @@ export async function bulkCreateCampaigns(campaigns: any[]) {
                     device: data.device || 'desktop',
                     segmentation: data.segmentation || 'PRIVADO',
                     captureCadence: normalizeCaptureCadence(data.segmentation || 'PRIVADO', data.captureCadence),
+                    captureDelaySeconds: normalizeCaptureDelaySeconds(data.captureDelaySeconds),
                     flightStart: data.flightStart ? new Date(data.flightStart) : null,
                     flightEnd: data.flightEnd ? new Date(data.flightEnd) : null,
                     status: 'PENDING',

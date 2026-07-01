@@ -1,6 +1,6 @@
 'use client'
 
-import { LayoutDashboard, Activity, PlusCircle, Library, Archive, Settings, Sparkles, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database, MessageCircle, Menu, X, ServerCog, MailCheck } from 'lucide-react'
+import { LayoutDashboard, Activity, PlusCircle, Library, Archive, Settings, Sparkles, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database, MessageCircle, Menu, X, ServerCog, Landmark } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
@@ -80,13 +80,13 @@ export function Sidebar() {
         { icon: ServerCog, label: 'Workers', href: '/workers' },
         { icon: PlusCircle, label: 'Novo Setup', href: '/campaigns' },
         { icon: Library, label: 'Books', href: '/books' },
+        { icon: Landmark, label: 'Gov Federal', href: '/books/governo' },
         { icon: Archive, label: 'Arquivado', href: '/archive' },
     ]
 
     const menuItems = user?.role === 'admin'
         ? [
             ...baseMenuItems,
-            { icon: MailCheck, label: 'Gov Books', href: '/books/governo' },
             { icon: ShieldCheck, label: 'Admin', href: '/admin' }
         ]
         : baseMenuItems

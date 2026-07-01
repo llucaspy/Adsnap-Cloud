@@ -42,7 +42,7 @@ export async function middleware(request: NextRequest) {
         const { payload } = await jwtVerify(token, getJwtSecret())
 
         // Verificação extra: rotas operacionais exigem role 'admin'
-        if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin') || pathname.startsWith('/books/governo')) {
+        if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
             if (payload.role !== 'admin') {
                 if (pathname.startsWith('/api/')) {
                     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

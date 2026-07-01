@@ -20,6 +20,12 @@ import {
     Loader2, CircleCheck, CircleX, RotateCcw, Terminal, Square
 } from 'lucide-react'
 import { MultiTimePicker } from './MultiTimePicker'
+import {
+    DEFAULT_CAPTURE_DELAY_SECONDS,
+    MAX_CAPTURE_DELAY_SECONDS,
+    MIN_CAPTURE_DELAY_SECONDS,
+    normalizeCaptureDelaySeconds,
+} from '@/lib/captureTiming'
 
 interface MediaEntry {
     url: string
@@ -114,6 +120,7 @@ export function CreateCampaignFlow({
         pi: '',
         segmentation: 'PRIVADO',
         captureCadence: 'DAILY' as CaptureCadence,
+        captureDelaySeconds: DEFAULT_CAPTURE_DELAY_SECONDS,
         flightStart: '',
         flightEnd: '',
         isScheduled: false,
@@ -184,6 +191,7 @@ export function CreateCampaignFlow({
             pi: draft.pi,
             segmentation: draft.segmentation,
             captureCadence: draft.captureCadence || (draft.segmentation === 'GOV_FEDERAL' ? 'BOUNDARY' : 'DAILY'),
+            captureDelaySeconds: DEFAULT_CAPTURE_DELAY_SECONDS,
             flightStart: draft.flightStart || '',
             flightEnd: draft.flightEnd || '',
             isScheduled: draft.isScheduled,
@@ -282,6 +290,7 @@ export function CreateCampaignFlow({
                     pi: formData.pi,
                     segmentation: formData.segmentation,
                     captureCadence: formData.captureCadence,
+                    captureDelaySeconds: formData.captureDelaySeconds,
                     flightStart: formData.flightStart || null,
                     flightEnd: formData.flightEnd || null,
                     isScheduled: formData.isScheduled,
@@ -1064,6 +1073,49 @@ function StepSegmentation({ formData, updateFields, next, back }: StepProps) {
                     </fieldset>
                 )}
 
+                <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-4">
+                        <p className="text-xs font-bold uppercase tracking-widest flex items-center gap-2" style={{ color: 'var(--text-muted)' }}>
+                            <Clock size={14} />
+                            Espera antes do print
+                        </p>
+                        <span
+                            className="min-w-16 rounded-lg px-3 py-1 text-center text-sm font-bold"
+                            style={{ background: '#7c3aed', color: '#ffffff' }}
+                        >
+                            {normalizeCaptureDelaySeconds(formData.captureDelaySeconds)}s
+                        </span>
+                    </div>
+                    <div className="rounded-xl p-4" style={{ background: '#1a1a1a', border: '1px solid rgba(255,255,255,0.08)' }}>
+                        <input
+                            type="range"
+                            min={MIN_CAPTURE_DELAY_SECONDS}
+                            max={MAX_CAPTURE_DELAY_SECONDS}
+                            step={1}
+                            value={normalizeCaptureDelaySeconds(formData.captureDelaySeconds)}
+                            onChange={event => updateFields({ captureDelaySeconds: normalizeCaptureDelaySeconds(event.target.value) })}
+                            className="w-full accent-[#7c3aed]"
+                            aria-label="Tempo de espera antes do print"
+                        />
+                        <div className="mt-3 flex justify-between text-[11px] font-semibold" style={{ color: '#737373' }}>
+                            {Array.from({ length: MAX_CAPTURE_DELAY_SECONDS }, (_, index) => index + 1).map(second => (
+                                <button
+                                    key={second}
+                                    type="button"
+                                    onClick={() => updateFields({ captureDelaySeconds: second })}
+                                    className="h-7 w-7 rounded-md transition-colors"
+                                    style={{
+                                        color: normalizeCaptureDelaySeconds(formData.captureDelaySeconds) === second ? '#ffffff' : '#737373',
+                                        background: normalizeCaptureDelaySeconds(formData.captureDelaySeconds) === second ? '#7c3aed' : 'transparent',
+                                    }}
+                                >
+                                    {second}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+
                 {/* Flight Dates */}
                 <div className="space-y-3">
                     <label
@@ -1471,6 +1523,12 @@ function StepAutomation({ formData, updateFields, onSubmit, back, isPending, med
                                 </span>
                             </div>
                         )}
+                        <div>
+                            <span style={{ color: 'var(--text-muted)' }}>Espera do print:</span>
+                            <span className="ml-2 font-bold" style={{ color: 'var(--text-primary)' }}>
+                                {normalizeCaptureDelaySeconds(formData.captureDelaySeconds)}s
+                            </span>
+                        </div>
                         <div className="col-span-2">
                             <span style={{ color: 'var(--text-muted)' }}>Período:</span>
                             <span className="ml-2 font-bold" style={{ color: 'var(--text-primary)' }}>

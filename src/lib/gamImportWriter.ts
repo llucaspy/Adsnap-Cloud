@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client'
 import type { GamImportDraft, GamImportMediaEntry } from './gamImportPlanner'
+import { DEFAULT_CAPTURE_DELAY_SECONDS } from './captureTiming'
 
 export interface GamImportWriteResult {
     created: number
@@ -78,6 +79,7 @@ export async function createCampaignsFromGamDraft(
                 pi: draft.pi,
                 segmentation: draft.segmentation,
                 captureCadence: draft.captureCadence,
+                captureDelaySeconds: DEFAULT_CAPTURE_DELAY_SECONDS,
                 flightStart: draft.flightStart ? new Date(`${draft.flightStart}T00:00:00-03:00`) : null,
                 flightEnd: draft.flightEnd ? new Date(`${draft.flightEnd}T23:59:59-03:00`) : null,
                 isScheduled: draft.isScheduled,

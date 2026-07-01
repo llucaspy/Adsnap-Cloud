@@ -1,11 +1,11 @@
 import { chromium, devices, Locator } from 'playwright';
-import sharp from 'sharp';
 import { compositeWithSharp } from './rasterService';
 import prisma from './prisma';
 import { supabase } from './supabase';
 import { nexusLogStore } from './nexusLogStore';
 import { alertStore } from './alertStore';
 import { sendTelegramAlert } from './telegram';
+import { normalizeCaptureDelaySeconds } from './captureTiming';
 
 export interface CaptureResult {
     success: boolean
@@ -385,213 +385,27 @@ function isStandaloneCreativeAsset(assetUrl: string) {
     }
 }
 
-export interface FrameQuality {
-    score: number
-    acceptable: boolean
-    deviation: number
-    edgeDensity: number
-    blankRatio: number
-    dominantColorRatio: number
-    colorEntropy: number
-    flatColor: boolean
-}
-
-interface SelectedFrame {
-    buffer: Buffer
-    quality: FrameQuality
-    frame: number
-}
-
-export async function scoreCreativeFrame(
-    screenshot: Buffer,
-    box: { x: number; y: number; width: number; height: number },
-    viewport: { width: number; height: number }
-): Promise<FrameQuality> {
-    const metadata = await sharp(screenshot).metadata()
-    const imageWidth = metadata.width || viewport.width
-    const imageHeight = metadata.height || viewport.height
-    const scaleX = imageWidth / viewport.width
-    const scaleY = imageHeight / viewport.height
-    const left = Math.max(0, Math.min(imageWidth - 1, Math.floor(box.x * scaleX)))
-    const top = Math.max(0, Math.min(imageHeight - 1, Math.floor(box.y * scaleY)))
-    const width = Math.max(1, Math.min(imageWidth - left, Math.ceil(box.width * scaleX)))
-    const height = Math.max(1, Math.min(imageHeight - top, Math.ceil(box.height * scaleY)))
-
-    const { data, info } = await sharp(screenshot)
-        .extract({ left, top, width, height })
-        .resize({ width: 160, height: 100, fit: 'inside', withoutEnlargement: true })
-        .removeAlpha()
-        .raw()
-        .toBuffer({ resolveWithObject: true })
-
-    const luminance = new Float32Array(info.width * info.height)
-    let sum = 0
-    let nearWhite = 0
-    let nearBlack = 0
-    let chromaSum = 0
-    const colorHistogram = new Uint32Array(512)
-
-    for (let pixel = 0; pixel < luminance.length; pixel++) {
-        const offset = pixel * info.channels
-        const r = data[offset]
-        const g = data[offset + 1]
-        const b = data[offset + 2]
-        const value = (r * 0.2126) + (g * 0.7152) + (b * 0.0722)
-        luminance[pixel] = value
-        sum += value
-        if (value >= 246) nearWhite++
-        if (value <= 9) nearBlack++
-        chromaSum += Math.max(r, g, b) - Math.min(r, g, b)
-        const colorBucket = ((r >> 5) << 6) | ((g >> 5) << 3) | (b >> 5)
-        colorHistogram[colorBucket]++
-    }
-
-    const mean = sum / luminance.length
-    let varianceSum = 0
-    let edges = 0
-    let comparisons = 0
-
-    for (let y = 0; y < info.height; y++) {
-        for (let x = 0; x < info.width; x++) {
-            const index = (y * info.width) + x
-            const value = luminance[index]
-            varianceSum += (value - mean) ** 2
-            if (x > 0) {
-                if (Math.abs(value - luminance[index - 1]) >= 18) edges++
-                comparisons++
-            }
-            if (y > 0) {
-                if (Math.abs(value - luminance[index - info.width]) >= 18) edges++
-                comparisons++
-            }
-        }
-    }
-
-    const deviation = Math.sqrt(varianceSum / luminance.length)
-    const edgeDensity = comparisons ? edges / comparisons : 0
-    const blankRatio = Math.max(nearWhite, nearBlack) / luminance.length
-    const chroma = chromaSum / luminance.length
-    let dominantColorPixels = 0
-    let colorEntropy = 0
-    for (const count of colorHistogram) {
-        if (count === 0) continue
-        dominantColorPixels = Math.max(dominantColorPixels, count)
-        const probability = count / luminance.length
-        colorEntropy -= probability * Math.log2(probability)
-    }
-
-    const dominantColorRatio = dominantColorPixels / luminance.length
-    const flatColor = (
-        (dominantColorRatio >= 0.93 && edgeDensity < 0.025)
-        || (dominantColorRatio >= 0.72 && colorEntropy < 1.1 && edgeDensity < 0.018)
-        || (deviation < 7 && edgeDensity < 0.012)
-    )
-    const hasVisualStructure = edgeDensity >= 0.012
-        && deviation >= 8
-        && (colorEntropy >= 0.45 || dominantColorRatio < 0.88)
-    const acceptable = blankRatio < 0.94 && !flatColor && hasVisualStructure
-    const score = (deviation * 0.7)
-        + (edgeDensity * 130)
-        + (colorEntropy * 8)
-        + ((1 - dominantColorRatio) * 24)
-        + (chroma * 0.04)
-        - (flatColor ? 80 : 0)
-
-    return {
-        score,
-        acceptable,
-        deviation,
-        edgeDensity,
-        blankRatio,
-        dominantColorRatio,
-        colorEntropy,
-        flatColor,
-    }
-}
-
-async function captureBestCreativeFrame(
+async function captureScreenshotAfterConfiguredDelay(
     page: import('playwright').Page,
-    documentBox: { x: number; y: number; width: number; height: number },
     campaignId: string,
-    signal?: AbortSignal
+    captureDelaySeconds: number,
+    signal?: AbortSignal,
+    animations: 'allow' | 'disabled' = 'allow',
 ) {
     throwIfCaptureAborted(signal)
-    const viewport = page.viewportSize()
-    if (!viewport) throw new Error('Viewport indisponivel para analise do criativo')
-
-    const startedAt = Date.now()
-    const selection: { bestAccepted: SelectedFrame | null; bestObserved: SelectedFrame | null } = {
-        bestAccepted: null,
-        bestObserved: null,
-    }
-    let frameNumber = 0
-
-    await nexusLogStore.addLog(
-        'Nexus: Selecionando melhor frame do criativo',
-        'SYSTEM',
-        'Amostragem curta com descarte de frames vazios e de transicao',
-        campaignId
-    )
+    const delaySeconds = normalizeCaptureDelaySeconds(captureDelaySeconds)
 
     await page.waitForLoadState('networkidle', { timeout: 3_000 }).catch(() => null)
     await page.evaluate(() => document.fonts?.ready).catch(() => null)
-
-    const sampleBurst = async (count: number, intervalMs: number) => {
-        for (let index = 0; index < count; index++) {
-            throwIfCaptureAborted(signal)
-            frameNumber++
-            const scroll = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }))
-            const viewportBox = {
-                x: documentBox.x - scroll.x,
-                y: documentBox.y - scroll.y,
-                width: documentBox.width,
-                height: documentBox.height,
-            }
-            const screenshot = await page.screenshot({ type: 'png', animations: 'allow' })
-            const quality = await scoreCreativeFrame(screenshot, viewportBox, viewport)
-
-            const candidate = { buffer: screenshot, quality, frame: frameNumber }
-            if (!selection.bestObserved || quality.score > selection.bestObserved.quality.score) {
-                selection.bestObserved = candidate
-            }
-            if (quality.acceptable && (!selection.bestAccepted || quality.score > selection.bestAccepted.quality.score)) {
-                selection.bestAccepted = candidate
-            }
-
-            if (index < count - 1) await abortableDelay(intervalMs, signal)
-        }
-    }
-
-    await sampleBurst(7, 450)
-    if (!selection.bestAccepted) {
-        await abortableDelay(800, signal)
-        await sampleBurst(5, 550)
-    }
-
-    const best = selection.bestAccepted
-    if (!best) {
-        const observed = selection.bestObserved
-        const diagnostic = observed
-            ? `score ${observed.quality.score.toFixed(1)} | cor dominante ${(observed.quality.dominantColorRatio * 100).toFixed(0)}% | entropia ${observed.quality.colorEntropy.toFixed(2)} | bordas ${(observed.quality.edgeDensity * 100).toFixed(1)}%`
-            : 'nenhum frame capturado'
-        await nexusLogStore.addLog(
-            'Nexus: Criativo sem frame visualmente valido',
-            'ERROR',
-            `${frameNumber} frames analisados | ${diagnostic}`,
-            campaignId
-        )
-        throw new Error(`FRAME_QUALITY_REJECTED: ${diagnostic}`)
-    }
-
-    const elapsedMs = Date.now() - startedAt
     await nexusLogStore.addLog(
-        'Nexus: Melhor frame selecionado',
-        'SUCCESS',
-        `Frame ${best.frame}/${frameNumber} | score ${best.quality.score.toFixed(1)} | cor dominante ${(best.quality.dominantColorRatio * 100).toFixed(0)}% | entropia ${best.quality.colorEntropy.toFixed(2)} | bordas ${(best.quality.edgeDensity * 100).toFixed(1)}% | ${(elapsedMs / 1000).toFixed(1)}s`,
-        campaignId
+        `Nexus: Aguardando ${delaySeconds}s antes do print`,
+        'SYSTEM',
+        'Captura por tempo configurado; selecao automatica de frame desativada',
+        campaignId,
     )
-
-    return best.buffer
+    await abortableDelay(delaySeconds * 1000, signal)
+    throwIfCaptureAborted(signal)
+    return page.screenshot({ type: 'png', animations })
 }
 
 // ============================================================================
@@ -603,7 +417,15 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
     throwIfCaptureAborted(options.signal)
     const campaign = await prisma.campaign.findUnique({
         where: { id: campaignId },
-        select: { url: true, format: true, device: true, client: true, agency: true, compositionBox: true }
+        select: {
+            url: true,
+            format: true,
+            device: true,
+            client: true,
+            agency: true,
+            compositionBox: true,
+            captureDelaySeconds: true,
+        }
     });
 
     if (!campaign) throw new Error('Campanha não encontrada');
@@ -823,8 +645,8 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                         }
 
                         const screenshotBuffer = standaloneCreativeAssetUrl
-                            ? await page.screenshot({ type: 'png', animations: 'disabled' })
-                            : await captureBestCreativeFrame(page, matchingBox, campaignId, options.signal);
+                            ? await captureScreenshotAfterConfiguredDelay(page, campaignId, campaign.captureDelaySeconds, options.signal, 'disabled')
+                            : await captureScreenshotAfterConfiguredDelay(page, campaignId, campaign.captureDelaySeconds, options.signal);
                         await browser.close();
     
                         const finalImage = await compositeStudioImage(screenshotBuffer, campaign.url, isMobile, options.signal);
@@ -927,8 +749,8 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
 
         await abortableDelay(1500, options.signal);
 
-        console.log('[Nexus] Selecionando melhor frame para screenshot final...')
-        const screenshotBuffer = await captureBestCreativeFrame(page, bestCandidate, campaignId, options.signal);
+        console.log('[Nexus] Aguardando delay configurado para screenshot final...')
+        const screenshotBuffer = await captureScreenshotAfterConfiguredDelay(page, campaignId, campaign.captureDelaySeconds, options.signal);
         await browser.close();
 
         await nexusLogStore.addLog('Nexus: Browser finalizado. Iniciando composição estética...', 'SYSTEM', undefined, campaignId);
