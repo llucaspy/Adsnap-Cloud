@@ -5,6 +5,7 @@ import nodemailer from 'nodemailer'
 import prisma from './prisma'
 import { nexusLogStore } from './nexusLogStore'
 import { getBrasiliaDayRange } from './governmentReportScope'
+import { getCampaignDateKey } from './campaignSchedule'
 
 const FEDERAL_SEGMENTATION = 'GOV_FEDERAL'
 const MAX_RAW_BYTES_PER_EMAIL = 16 * 1024 * 1024
@@ -58,7 +59,8 @@ async function getSmtpConfig() {
     const secrets = new Map(secretRows.map(secret => [secret.name, secret.value]))
 
     const host = process.env.SMTP_HOST || secrets.get('SMTP_HOST') || 'smtp.gmail.com'
-    const port = Number(process.env.SMTP_PORT || secrets.get('SMTP_PORT') || 465)
+    const parsedPort = Number(process.env.SMTP_PORT || secrets.get('SMTP_PORT') || 465)
+    const port = Number.isFinite(parsedPort) ? parsedPort : 465
     const user = process.env.SMTP_USER || secrets.get('SMTP_USER')
     const pass = process.env.SMTP_PASS || secrets.get('SMTP_PASS')
     const from = process.env.SMTP_FROM || secrets.get('SMTP_FROM') || (user ? `Adsnap Cloud <${user}>` : undefined)
@@ -133,6 +135,18 @@ function getBrtTimeKey(date: Date) {
         second: '2-digit',
         hour12: false,
     }).format(date).replace(/:/g, '-')
+}
+
+function getCampaignCaptureRange(flightStart: Date | null, flightEnd: Date | null) {
+    if (!flightStart || !flightEnd) return null
+
+    try {
+        const startRange = getBrasiliaDayRange(getCampaignDateKey(flightStart))
+        const endRange = getBrasiliaDayRange(getCampaignDateKey(flightEnd))
+        return { gte: startRange.start, lte: endRange.end }
+    } catch {
+        return { gte: flightStart, lte: flightEnd }
+    }
 }
 
 async function mapWithConcurrency<T, R>(items: T[], limit: number, mapper: (item: T) => Promise<R>): Promise<R[]> {
@@ -273,7 +287,7 @@ export async function sendCampaignReport({ pi, recipients, dispatchId, reportDat
     sentParts?: number
     attachmentBytes?: number
 }> {
-    console.log(`[Government Report] Preparando anexos da PI ${pi}.`)
+    console.log(`[Government Report] Preparando anexos da PI ${pi}${reportDate ? ` no dia ${reportDate}` : ''}.`)
 
     try {
         const dispatch = await prisma.emailDispatch.findUnique({ where: { id: dispatchId } })
@@ -312,12 +326,13 @@ export async function sendCampaignReport({ pi, recipients, dispatchId, reportDat
         ]))
 
         const campaignById = new Map(campaigns.map(campaign => [campaign.id, campaign]))
-        const captureFilters = campaigns.map(campaign => ({
-            campaignId: campaign.id,
-            ...(campaign.flightStart && campaign.flightEnd
-                ? { createdAt: { gte: campaign.flightStart, lte: campaign.flightEnd } }
-                : {}),
-        }))
+        const captureFilters = campaigns.map(campaign => {
+            const campaignRange = getCampaignCaptureRange(campaign.flightStart, campaign.flightEnd)
+            return {
+                campaignId: campaign.id,
+                ...(campaignRange ? { createdAt: campaignRange } : {}),
+            }
+        })
 
         const dayRange = reportDate ? getBrasiliaDayRange(reportDate) : null
         const captures = await prisma.capture.findMany({
@@ -365,6 +380,11 @@ export async function sendCampaignReport({ pi, recipients, dispatchId, reportDat
         const campaignRows = reportDate
             ? allCampaignRows.filter(campaign => campaign.printCount > 0)
             : allCampaignRows
+        if (campaignRows.length === 0) {
+            throw new Error(reportDate
+                ? `Nenhum formato da PI ${pi} possui print no book de ${reportDate}`
+                : `Nenhum formato da PI ${pi} possui print no periodo da campanha`)
+        }
         const missingCampaignRows = campaignRows.filter(campaign => campaign.printCount === 0)
         if (!reportDate && missingCampaignRows.length > 0) {
             const missingList = missingCampaignRows

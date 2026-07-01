@@ -18,6 +18,7 @@ const DEFAULT_RECIPIENTS = [
 ]
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/
+const MANUAL_PROCESSING_STALE_MS = 15 * 60 * 1000
 
 function parseRecipients(value: string | null | undefined) {
     try {
@@ -48,6 +49,12 @@ async function getOrCreateSettings() {
         create: { id: 1 },
         update: {},
     })
+}
+
+function isFreshProcessing(status: string | null | undefined, updatedAt: Date | null | undefined) {
+    if (status !== 'PROCESSING') return false
+    if (!updatedAt) return true
+    return updatedAt.getTime() > Date.now() - MANUAL_PROCESSING_STALE_MS
 }
 
 export async function getGovernmentReportDashboard() {
@@ -214,8 +221,15 @@ export async function queueGovernmentReportManual(pi: string) {
         where: { scopeKey },
     })
 
-    if (existing?.status === 'PROCESSING') {
+    if (isFreshProcessing(existing?.status, existing?.updatedAt)) {
         return { success: true, queued: true, message: 'O relatorio ja esta sendo enviado' }
+    }
+
+    if (existing?.status === 'PROCESSING') {
+        await nexusLogStore.addLog(
+            `Relatorio Governo Federal: PI ${cleanPi} tinha envio manual travado e foi liberado para nova tentativa`,
+            'SYSTEM',
+        )
     }
 
     let dispatchId: string
@@ -234,6 +248,7 @@ export async function queueGovernmentReportManual(pi: string) {
                 emailMessageId: null,
                 attachmentCount: 0,
                 attachmentBytes: 0,
+                lastSentAt: null,
                 attempts: { increment: 1 },
                 sendVersion: { increment: 1 },
             },
@@ -265,11 +280,18 @@ export async function queueGovernmentReportManual(pi: string) {
         reportDate: null,
     })
     revalidatePath('/admin')
+    revalidatePath('/books/governo')
     revalidatePath(`/books/${cleanPi}`)
 
     if (!result.success) return { success: false, error: result.error || 'Falha ao enviar relatorio' }
 
-    return { success: true, sent: true, message: 'Relatorio enviado por e-mail' }
+    return {
+        success: true,
+        sent: true,
+        message: 'Relatorio enviado por e-mail',
+        sentParts: result.sentParts,
+        attachmentBytes: result.attachmentBytes,
+    }
 }
 
 export async function queueGovernmentBookDayEmail(pi: string, dateKey: string) {
@@ -312,8 +334,15 @@ export async function queueGovernmentBookDayEmail(pi: string, dateKey: string) {
 
     const scopeKey = dailyReportScopeKey(cleanPi, dateKey)
     const existing = await prisma.emailDispatch.findUnique({ where: { scopeKey } })
-    if (existing?.status === 'PROCESSING') {
+    if (isFreshProcessing(existing?.status, existing?.updatedAt)) {
         return { success: true, queued: true, message: 'Os prints deste dia ja estao sendo enviados' }
+    }
+
+    if (existing?.status === 'PROCESSING') {
+        await nexusLogStore.addLog(
+            `Relatorio Governo Federal: PI ${cleanPi}, dia ${dateKey}, envio diario travado liberado para nova tentativa`,
+            'SYSTEM',
+        )
     }
 
     let dispatchId: string
@@ -329,6 +358,7 @@ export async function queueGovernmentBookDayEmail(pi: string, dateKey: string) {
                 emailMessageId: null,
                 attachmentCount: 0,
                 attachmentBytes: 0,
+                lastSentAt: null,
                 attempts: { increment: 1 },
                 sendVersion: { increment: 1 },
                 flightEnd,
@@ -366,8 +396,15 @@ export async function queueGovernmentBookDayEmail(pi: string, dateKey: string) {
     })
     revalidatePath(`/books/${cleanPi}`)
     revalidatePath(`/books/${cleanPi}?date=${dateKey}`)
+    revalidatePath('/books/governo')
 
     if (!result.success) return { success: false, error: result.error || 'Falha ao enviar prints do dia' }
 
-    return { success: true, sent: true, message: 'Prints do dia enviados por e-mail' }
+    return {
+        success: true,
+        sent: true,
+        message: 'Prints do dia enviados por e-mail',
+        sentParts: result.sentParts,
+        attachmentBytes: result.attachmentBytes,
+    }
 }

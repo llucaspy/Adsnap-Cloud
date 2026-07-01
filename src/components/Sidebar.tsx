@@ -1,6 +1,6 @@
 'use client'
 
-import { LayoutDashboard, Activity, PlusCircle, Library, Archive, Settings, Sparkles, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database, MessageCircle, Menu, X, ServerCog } from 'lucide-react'
+import { LayoutDashboard, Activity, PlusCircle, Library, Archive, Settings, Sparkles, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database, MessageCircle, Menu, X, ServerCog, MailCheck } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
@@ -86,6 +86,7 @@ export function Sidebar() {
     const menuItems = user?.role === 'admin'
         ? [
             ...baseMenuItems,
+            { icon: MailCheck, label: 'Gov Books', href: '/books/governo' },
             { icon: ShieldCheck, label: 'Admin', href: '/admin' }
         ]
         : baseMenuItems
