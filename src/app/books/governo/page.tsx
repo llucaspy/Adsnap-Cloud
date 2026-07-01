@@ -230,7 +230,7 @@ function MetricCard({
     }[tone]
 
     return (
-        <div className="scroll-reveal rounded-xl border border-white/8 bg-white/[0.04] p-5 shadow-[rgba(0,0,0,0.30)_0px_8px_24px_0px] transition-[transform,box-shadow,border-color] duration-300 hover:-translate-y-1 hover:border-white/16 hover:shadow-[rgba(0,0,0,0.45)_0px_16px_40px_-4px]">
+        <div className="rounded-xl border border-white/8 bg-white/[0.04] p-5 shadow-[rgba(0,0,0,0.30)_0px_8px_24px_0px] transition-[transform,box-shadow,border-color] duration-300 hover:-translate-y-1 hover:border-white/16 hover:shadow-[rgba(0,0,0,0.45)_0px_16px_40px_-4px]">
             <div className="mb-5 flex items-center justify-between gap-3">
                 <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#737373]">{label}</span>
                 <span className={`flex h-9 w-9 items-center justify-center rounded-lg border ${toneClass}`}>
@@ -455,7 +455,7 @@ export default async function GovernmentBooksPage() {
     return (
         <div className="mx-[-1rem] mt-[-1rem] min-h-screen bg-[#0f0f0f] px-4 pb-24 pt-6 text-[#e5e5e5] page-enter md:mx-[-3rem] md:mt-[-3rem] md:px-12 md:pt-10" style={{ fontFamily: 'Inter, var(--font-body)' }}>
             <div className="mx-auto max-w-[1480px] space-y-10">
-                <header className="scroll-reveal flex flex-col gap-6 border-b border-white/8 pb-8 xl:flex-row xl:items-end xl:justify-between">
+                <header className="flex flex-col gap-6 border-b border-white/8 pb-8 xl:flex-row xl:items-end xl:justify-between">
                     <div className="max-w-4xl">
                         <Link
                             href="/books"
@@ -512,7 +512,7 @@ export default async function GovernmentBooksPage() {
                     <MetricCard icon={AlertTriangle} label="Erros" value={String(failedCount)} detail={`${sentCount} envio(s) concluido(s) no historico recente`} tone={failedCount > 0 ? 'error' : 'success'} />
                 </section>
 
-                <section className="scroll-reveal grid gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.6fr)]">
+                <section className="grid gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.6fr)]">
                     <div className="rounded-xl border border-white/8 bg-white/[0.04] p-5 shadow-[rgba(0,0,0,0.30)_0px_8px_24px_0px]">
                         <div className="mb-5 flex items-center gap-3">
                             <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-[#a3a3a3]">
@@ -562,7 +562,7 @@ export default async function GovernmentBooksPage() {
                 </section>
 
                 <section className="space-y-5">
-                    <div className="scroll-reveal flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                         <div>
                             <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#737373]">Campanhas cadastradas</p>
                             <h2 className="mt-2 text-2xl font-semibold tracking-[-0.5px] text-[#ffffff]">PIs elegiveis para e-mail</h2>
@@ -571,20 +571,17 @@ export default async function GovernmentBooksPage() {
                     </div>
 
                     {groups.length === 0 ? (
-                        <div className="scroll-reveal rounded-xl border border-dashed border-white/10 bg-white/[0.025] px-6 py-16 text-center">
+                        <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.025] px-6 py-16 text-center">
                             <Mail size={36} className="mx-auto mb-4 text-[#525252]" />
                             <h3 className="text-lg font-semibold text-[#ffffff]">Nenhuma campanha GOV_FEDERAL cadastrada</h3>
                             <p className="mt-2 text-sm text-[#737373]">Quando houver campanhas ativas desse segmento, elas aparecem aqui.</p>
                         </div>
                     ) : (
                         <div className="grid gap-4">
-                            {groups.map((group, index) => {
-                                const delayClass = ['scroll-delay-100', 'scroll-delay-200', 'scroll-delay-300', 'scroll-delay-400', 'scroll-delay-500'][Math.min(index, 4)]
-
-                                return (
+                            {groups.map((group) => (
                                 <article
                                     key={group.pi}
-                                    className={`scroll-reveal ${delayClass} rounded-xl border border-white/8 bg-[#141414] p-5 shadow-[rgba(0,0,0,0.30)_0px_8px_24px_0px] transition-[transform,box-shadow,border-color] duration-300 hover:-translate-y-1 hover:border-white/16 hover:shadow-[rgba(0,0,0,0.45)_0px_16px_40px_-4px]`}
+                                    className="rounded-xl border border-white/8 bg-[#141414] p-5 shadow-[rgba(0,0,0,0.30)_0px_8px_24px_0px] transition-[transform,box-shadow,border-color] duration-300 hover:-translate-y-1 hover:border-white/16 hover:shadow-[rgba(0,0,0,0.45)_0px_16px_40px_-4px]"
                                 >
                                     <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
                                         <div className="min-w-0 flex-1">
@@ -676,13 +673,12 @@ export default async function GovernmentBooksPage() {
                                         )}
                                     </div>
                                 </article>
-                                )
-                            })}
+                            ))}
                         </div>
                     )}
                 </section>
 
-                <section className="scroll-reveal overflow-hidden rounded-xl border border-white/8 bg-[#141414] shadow-[rgba(0,0,0,0.30)_0px_8px_24px_0px]">
+                <section className="overflow-hidden rounded-xl border border-white/8 bg-[#141414] shadow-[rgba(0,0,0,0.30)_0px_8px_24px_0px]">
                     <div className="flex flex-col gap-2 border-b border-white/8 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
                         <div>
                             <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#737373]">Historico recente</p>
@@ -731,7 +727,7 @@ export default async function GovernmentBooksPage() {
                     </div>
                 </section>
 
-                <section className="scroll-reveal rounded-xl border border-white/8 bg-white/[0.04] p-5">
+                <section className="rounded-xl border border-white/8 bg-white/[0.04] p-5">
                     <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                         <div className="flex items-start gap-3">
                             <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04] text-[#a3a3a3]">
