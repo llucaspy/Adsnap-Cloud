@@ -343,7 +343,7 @@ export async function sendCampaignReport({ pi, recipients, dispatchId, reportDat
             capturesByCampaignId.set(capture.campaignId, (capturesByCampaignId.get(capture.campaignId) || 0) + 1)
         }
 
-        const campaignRows: EmailCampaignRow[] = campaigns.map(campaign => ({
+        const allCampaignRows: EmailCampaignRow[] = campaigns.map(campaign => ({
             id: campaign.id,
             client: campaign.client,
             agency: campaign.agency,
@@ -354,8 +354,11 @@ export async function sendCampaignReport({ pi, recipients, dispatchId, reportDat
             flightEnd: campaign.flightEnd,
             printCount: capturesByCampaignId.get(campaign.id) || 0,
         }))
+        const campaignRows = reportDate
+            ? allCampaignRows.filter(campaign => campaign.printCount > 0)
+            : allCampaignRows
         const missingCampaignRows = campaignRows.filter(campaign => campaign.printCount === 0)
-        if (missingCampaignRows.length > 0) {
+        if (!reportDate && missingCampaignRows.length > 0) {
             const missingList = missingCampaignRows
                 .slice(0, 8)
                 .map(campaign => `${campaign.client} / ${campaign.formatLabel} (${campaign.device})`)
@@ -401,9 +404,9 @@ export async function sendCampaignReport({ pi, recipients, dispatchId, reportDat
             secure: smtp.port === 465,
             auth: { user: smtp.user, pass: smtp.pass },
         })
-        const firstCampaign = campaigns[0]
-        const formats = Array.from(new Set(campaigns.map(campaign =>
-            `${formatLabelById.get(campaign.format) || campaign.format} (${campaign.device})`
+        const firstCampaign = campaignById.get(captures[0].campaignId) || campaigns[0]
+        const formats = Array.from(new Set(campaignRows.map(campaign =>
+            `${campaign.formatLabel} (${campaign.device})`
         )))
         const deliveryProgress = parseDeliveryProgress(dispatch.emailMessageId, dispatch.sendVersion)
 

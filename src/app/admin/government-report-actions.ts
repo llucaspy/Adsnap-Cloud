@@ -4,7 +4,7 @@ import prisma from '@/lib/prisma'
 import { requireAdmin } from '@/lib/auth'
 import { nexusLogStore } from '@/lib/nexusLogStore'
 import { revalidatePath } from 'next/cache'
-import { triggerNexusWorker } from '@/app/actions'
+import { sendCampaignReport } from '@/lib/emailService'
 import {
     campaignReportScopeKey,
     dailyReportScopeKey,
@@ -214,12 +214,13 @@ export async function queueGovernmentReportManual(pi: string) {
         where: { scopeKey },
     })
 
-    if (existing?.status === 'PROCESSING' || existing?.status === 'QUEUED_MANUAL') {
-        return { success: true, queued: true, message: 'O relatorio ja esta na fila de envio' }
+    if (existing?.status === 'PROCESSING') {
+        return { success: true, queued: true, message: 'O relatorio ja esta sendo enviado' }
     }
 
+    let dispatchId: string
     if (existing) {
-        await prisma.emailDispatch.update({
+        const dispatch = await prisma.emailDispatch.update({
             where: { id: existing.id },
             data: {
                 recipients: JSON.stringify(recipients),
@@ -227,18 +228,19 @@ export async function queueGovernmentReportManual(pi: string) {
                 reportScope: 'CAMPAIGN',
                 dispatchTime: settings.governmentReportTime || '09:00',
                 triggerMode: 'MANUAL',
-                status: 'QUEUED_MANUAL',
+                status: 'PROCESSING',
                 isActive: true,
                 errorMessage: null,
                 emailMessageId: null,
                 attachmentCount: 0,
                 attachmentBytes: 0,
-                attempts: 0,
+                attempts: { increment: 1 },
                 sendVersion: { increment: 1 },
             },
         })
+        dispatchId = dispatch.id
     } else {
-        await prisma.emailDispatch.create({
+        const dispatch = await prisma.emailDispatch.create({
             data: {
                 pi: cleanPi,
                 flightEnd,
@@ -247,24 +249,27 @@ export async function queueGovernmentReportManual(pi: string) {
                 recipients: JSON.stringify(recipients),
                 dispatchTime: settings.governmentReportTime || '09:00',
                 triggerMode: 'MANUAL',
-                status: 'QUEUED_MANUAL',
+                status: 'PROCESSING',
                 isActive: true,
+                attempts: 1,
             },
         })
+        dispatchId = dispatch.id
     }
 
-    await nexusLogStore.addLog(`Relatorio Governo Federal: PI ${cleanPi} enfileirada manualmente`, 'SYSTEM')
-    const triggered = await triggerNexusWorker()
+    await nexusLogStore.addLog(`Relatorio Governo Federal: PI ${cleanPi} envio manual iniciado`, 'SYSTEM')
+    const result = await sendCampaignReport({
+        pi: cleanPi,
+        recipients,
+        dispatchId,
+        reportDate: null,
+    })
     revalidatePath('/admin')
     revalidatePath(`/books/${cleanPi}`)
 
-    return {
-        success: true,
-        queued: true,
-        message: triggered
-            ? 'Relatorio enfileirado e worker iniciado'
-            : 'Relatorio enfileirado; o agendador iniciara o envio em ate 15 minutos',
-    }
+    if (!result.success) return { success: false, error: result.error || 'Falha ao enviar relatorio' }
+
+    return { success: true, sent: true, message: 'Relatorio enviado por e-mail' }
 }
 
 export async function queueGovernmentBookDayEmail(pi: string, dateKey: string) {
@@ -307,28 +312,34 @@ export async function queueGovernmentBookDayEmail(pi: string, dateKey: string) {
 
     const scopeKey = dailyReportScopeKey(cleanPi, dateKey)
     const existing = await prisma.emailDispatch.findUnique({ where: { scopeKey } })
-    if (existing?.status === 'PROCESSING' || ['QUEUED_MANUAL', 'QUEUED_AUTO'].includes(existing?.status || '')) {
-        return { success: true, queued: true, message: 'Os prints deste dia ja estao na fila de envio' }
+    if (existing?.status === 'PROCESSING') {
+        return { success: true, queued: true, message: 'Os prints deste dia ja estao sendo enviados' }
     }
 
+    let dispatchId: string
     if (existing) {
-        await prisma.emailDispatch.update({
+        const dispatch = await prisma.emailDispatch.update({
             where: { id: existing.id },
             data: {
                 recipients: JSON.stringify(recipients),
                 triggerMode: 'MANUAL_DAY',
-                status: 'QUEUED_MANUAL',
+                status: 'PROCESSING',
                 isActive: true,
                 errorMessage: null,
                 emailMessageId: null,
                 attachmentCount: 0,
                 attachmentBytes: 0,
-                attempts: 0,
+                attempts: { increment: 1 },
                 sendVersion: { increment: 1 },
+                flightEnd,
+                reportDate: dayRange.start,
+                reportScope: 'DAY',
+                scopeKey,
             },
         })
+        dispatchId = dispatch.id
     } else {
-        await prisma.emailDispatch.create({
+        const dispatch = await prisma.emailDispatch.create({
             data: {
                 pi: cleanPi,
                 flightEnd,
@@ -338,22 +349,25 @@ export async function queueGovernmentBookDayEmail(pi: string, dateKey: string) {
                 recipients: JSON.stringify(recipients),
                 dispatchTime: '08:00',
                 triggerMode: 'MANUAL_DAY',
-                status: 'QUEUED_MANUAL',
+                status: 'PROCESSING',
                 isActive: true,
+                attempts: 1,
             },
         })
+        dispatchId = dispatch.id
     }
 
-    await nexusLogStore.addLog(`Relatorio Governo Federal: PI ${cleanPi}, dia ${dateKey}, enfileirada manualmente`, 'SYSTEM')
-    const triggered = await triggerNexusWorker()
+    await nexusLogStore.addLog(`Relatorio Governo Federal: PI ${cleanPi}, dia ${dateKey}, envio manual iniciado`, 'SYSTEM')
+    const result = await sendCampaignReport({
+        pi: cleanPi,
+        recipients,
+        dispatchId,
+        reportDate: dateKey,
+    })
     revalidatePath(`/books/${cleanPi}`)
     revalidatePath(`/books/${cleanPi}?date=${dateKey}`)
 
-    return {
-        success: true,
-        queued: true,
-        message: triggered
-            ? 'Prints do dia enfileirados e worker iniciado'
-            : 'Prints do dia enfileirados; o agendador iniciara o envio',
-    }
+    if (!result.success) return { success: false, error: result.error || 'Falha ao enviar prints do dia' }
+
+    return { success: true, sent: true, message: 'Prints do dia enviados por e-mail' }
 }

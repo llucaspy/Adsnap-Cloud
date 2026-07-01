@@ -122,22 +122,23 @@ export function GovernmentReportAdmin({ initialData }: Props) {
         startTransition(async () => {
             try {
                 const result = await queueGovernmentReportManual(campaign.pi)
-                if (!result.success) throw new Error(result.error || 'Falha ao enfileirar')
+                if (!result.success) throw new Error(result.error || 'Falha ao enviar')
+                const nextStatus = 'sent' in result && result.sent ? 'SENT' : 'PROCESSING'
                 setCampaigns(current => current.map(item => item.pi === campaign.pi
                     ? {
                         ...item,
                         dispatch: item.dispatch
-                            ? { ...item.dispatch, status: 'QUEUED_MANUAL', errorMessage: null }
+                            ? { ...item.dispatch, status: nextStatus, errorMessage: null }
                             : {
-                                id: '', status: 'QUEUED_MANUAL', triggerMode: 'MANUAL', lastSentAt: null,
+                                id: '', status: nextStatus, triggerMode: 'MANUAL', lastSentAt: null,
                                 errorMessage: null, attachmentCount: 0, attachmentBytes: 0, attempts: 0,
                             },
                     }
                     : item))
-                showFeedback('success', result.message || 'Relatório enfileirado')
+                showFeedback('success', result.message || 'Relatorio enviado')
                 router.refresh()
             } catch (error) {
-                showFeedback('error', error instanceof Error ? error.message : 'Falha ao enfileirar')
+                showFeedback('error', error instanceof Error ? error.message : 'Falha ao enviar')
             } finally {
                 setBusyPi(null)
             }

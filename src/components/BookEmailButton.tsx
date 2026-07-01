@@ -31,14 +31,16 @@ export function BookEmailButton({ pi, initialStatus, reportDate }: BookEmailButt
                     ? await queueGovernmentBookDayEmail(pi, reportDate)
                     : await queueGovernmentReportManual(pi)
                 if (!result.success) {
-                    setMessage(result.error || 'Nao foi possivel enfileirar o book')
+                    setStatus('FAILED')
+                    setMessage(result.error || 'Nao foi possivel enviar o book')
                     return
                 }
 
-                setStatus('QUEUED_MANUAL')
-                setMessage(result.message || 'Book enfileirado para envio')
+                setStatus('sent' in result && result.sent ? 'SENT' : 'PROCESSING')
+                setMessage(result.message || 'Book enviado por e-mail')
                 router.refresh()
             } catch (error) {
+                setStatus('FAILED')
                 setMessage(error instanceof Error ? error.message : 'Falha ao solicitar o envio')
             }
         })
@@ -46,9 +48,9 @@ export function BookEmailButton({ pi, initialStatus, reportDate }: BookEmailButt
 
     const Icon = isPending || isQueued ? LoaderCircle : wasSent ? RotateCcw : Mail
     const label = isPending
-        ? 'Enfileirando...'
+        ? 'Enviando...'
         : isQueued
-            ? 'Envio na fila'
+            ? 'Envio em andamento'
             : wasSent
                 ? reportDate ? 'Reenviar prints do dia' : 'Reenviar book completo'
                 : reportDate ? 'Enviar prints do dia' : 'Enviar book completo'
@@ -68,7 +70,7 @@ export function BookEmailButton({ pi, initialStatus, reportDate }: BookEmailButt
             {message && (
                 <p
                     role="status"
-                    className={`max-w-[320px] text-right text-xs leading-5 ${status === 'QUEUED_MANUAL' ? 'text-[#22c55e]' : 'text-[#ef4444]'}`}
+                    className={`max-w-[320px] text-right text-xs leading-5 ${status === 'FAILED' ? 'text-[#ef4444]' : 'text-[#22c55e]'}`}
                 >
                     {message}
                 </p>
