@@ -48,15 +48,23 @@ interface EmailCampaignRow {
     printCount: number
 }
 
-function getSmtpConfig() {
-    const host = process.env.SMTP_HOST || 'smtp.gmail.com'
-    const port = Number(process.env.SMTP_PORT || 465)
-    const user = process.env.SMTP_USER
-    const pass = process.env.SMTP_PASS
-    const from = process.env.SMTP_FROM || (user ? `Adsnap Cloud <${user}>` : undefined)
+async function getSmtpConfig() {
+    const secretRows = (!process.env.SMTP_USER || !process.env.SMTP_PASS || !process.env.SMTP_FROM)
+        ? await prisma.nexusSecrets.findMany({
+            where: { name: { in: ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM'] } },
+            select: { name: true, value: true },
+        }).catch(() => [])
+        : []
+    const secrets = new Map(secretRows.map(secret => [secret.name, secret.value]))
+
+    const host = process.env.SMTP_HOST || secrets.get('SMTP_HOST') || 'smtp.gmail.com'
+    const port = Number(process.env.SMTP_PORT || secrets.get('SMTP_PORT') || 465)
+    const user = process.env.SMTP_USER || secrets.get('SMTP_USER')
+    const pass = process.env.SMTP_PASS || secrets.get('SMTP_PASS')
+    const from = process.env.SMTP_FROM || secrets.get('SMTP_FROM') || (user ? `Adsnap Cloud <${user}>` : undefined)
 
     if (!user || !pass || !from) {
-        throw new Error('SMTP_USER, SMTP_PASS e SMTP_FROM precisam estar configurados no worker')
+        throw new Error('Credenciais SMTP ausentes. Configure SMTP_USER, SMTP_PASS e SMTP_FROM na Vercel ou em NexusSecrets.')
     }
 
     return { host, port, user, pass, from }
@@ -270,7 +278,7 @@ export async function sendCampaignReport({ pi, recipients, dispatchId, reportDat
     try {
         const dispatch = await prisma.emailDispatch.findUnique({ where: { id: dispatchId } })
         if (!dispatch) throw new Error('Disparo nao encontrado')
-        const smtp = getSmtpConfig()
+        const smtp = await getSmtpConfig()
 
         const campaigns = await prisma.campaign.findMany({
             where: {
