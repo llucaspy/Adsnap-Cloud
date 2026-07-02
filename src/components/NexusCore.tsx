@@ -140,7 +140,7 @@ function NexusOrb({ className = "", isTyping = false, showRays = true, particleC
                 {/* Core surface */}
                 <div className="absolute inset-[8%] rounded-full"
                     style={{
-                        background: 'radial-gradient(ellipse at 38% 32%, rgba(255,255,255,0.4) 0%, rgba(99,102,241,0.2) 40%, rgba(10,10,20,0.95) 100%)',
+                        background: 'radial-gradient(ellipse at 38% 32%, rgba(255,255,255,0.42) 0%, rgba(180,180,180,0.20) 40%, rgba(10,10,10,0.95) 100%)',
                         backdropFilter: 'blur(8px)',
                     }}
                 />

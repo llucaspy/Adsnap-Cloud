@@ -21,7 +21,7 @@ export default async function CampaignsPage({
             <header className="flex items-start gap-3">
                 <div
                     className="w-10 h-10 flex items-center justify-center shrink-0"
-                    style={{ color: '#a78bfa', background: 'rgba(124,58,237,0.12)', borderRadius: '8px' }}
+                    style={{ color: '#f5f5f5', background: 'rgba(255,255,255,0.12)', borderRadius: '8px' }}
                 >
                     <FilePlus2 size={19} />
                 </div>

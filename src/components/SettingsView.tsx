@@ -13,7 +13,7 @@ const C = {
     text: '#ffffff',
     muted: '#a3a3a3',
     dim: '#737373',
-    primary: '#7c3aed',
+    primary: '#e5e5e5',
 }
 
 /* ─── shared helpers ──────────────────────────────── */

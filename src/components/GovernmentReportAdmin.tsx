@@ -175,7 +175,7 @@ export function GovernmentReportAdmin({ initialData }: Props) {
                         rows={3}
                         value={recipientsText}
                         onChange={event => setRecipientsText(event.target.value)}
-                        className="w-full resize-none rounded-lg border border-white/15 bg-white/[0.04] px-3 py-2.5 font-mono text-sm text-white outline-none transition-colors focus:border-[#7c3aed]"
+                        className="w-full resize-none rounded-lg border border-white/15 bg-white/[0.04] px-3 py-2.5 font-mono text-sm text-white outline-none transition-colors focus:border-[#e5e5e5]"
                     />
                 </div>
 
@@ -188,7 +188,7 @@ export function GovernmentReportAdmin({ initialData }: Props) {
                         type="time"
                         value={dispatchTime}
                         onChange={event => setDispatchTime(event.target.value)}
-                        className="h-11 w-full rounded-lg border border-white/15 bg-white/[0.04] px-3 text-sm text-white outline-none transition-colors focus:border-[#7c3aed]"
+                        className="h-11 w-full rounded-lg border border-white/15 bg-white/[0.04] px-3 text-sm text-white outline-none transition-colors focus:border-[#e5e5e5]"
                     />
                 </div>
 
@@ -199,14 +199,14 @@ export function GovernmentReportAdmin({ initialData }: Props) {
                             type="checkbox"
                             checked={autoSend}
                             onChange={event => setAutoSend(event.target.checked)}
-                            className="h-4 w-4 accent-[#7c3aed]"
+                            className="h-4 w-4 accent-[#e5e5e5]"
                         />
                     </label>
                     <button
                         type="button"
                         onClick={saveSettings}
                         disabled={isPending}
-                        className="flex h-11 items-center justify-center gap-2 rounded-lg bg-[#7c3aed] px-4 text-sm font-medium text-white transition-all hover:-translate-y-px hover:bg-[#6d28d9] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="flex h-11 items-center justify-center gap-2 rounded-lg bg-[#e5e5e5] px-4 text-sm font-medium text-[#0f0f0f] transition-all hover:-translate-y-px hover:bg-[#d4d4d4] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                         <Settings2 size={16} />
                         Salvar configuração
@@ -277,7 +277,7 @@ export function GovernmentReportAdmin({ initialData }: Props) {
                                                 onClick={() => sendNow(campaign)}
                                                 disabled={campaign.printCount === 0 || processing || isBusy}
                                                 title={campaign.printCount === 0 ? 'Campanha sem prints disponíveis' : 'Enviar relatório agora'}
-                                                className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/[0.04] px-3 text-xs font-medium text-white/70 transition-all hover:border-[#7c3aed] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                                                className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/[0.04] px-3 text-xs font-medium text-white/70 transition-all hover:border-[#e5e5e5] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
                                             >
                                                 {isBusy ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
                                                 {dispatch?.status === 'SENT' ? 'Reenviar' : 'Enviar agora'}

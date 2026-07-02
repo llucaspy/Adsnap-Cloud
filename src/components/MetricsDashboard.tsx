@@ -94,8 +94,8 @@ export function MetricsDashboard() {
                     value={`${metrics.resend.dailyUsed} / ${metrics.resend.dailyLimit}`}
                     limit="100 Emails"
                     percentage={metrics.resend.percentage}
-                    icon={<Mail className="w-5 h-5 text-purple-400" />}
-                    color="purple"
+                    icon={<Mail className="w-5 h-5 text-white/70" />}
+                    color="neutral"
                     description="Reset à meia-noite"
                 />
 
@@ -134,7 +134,7 @@ function MetricCard({ title, value, limit, percentage, icon, color, description 
     const colors: any = {
         blue: 'from-blue-500/10 to-blue-600/5 border-blue-500/20 text-blue-400 bar-from-blue-500 bar-to-cyan-400',
         emerald: 'from-emerald-500/10 to-emerald-600/5 border-emerald-500/20 text-emerald-400 bar-from-emerald-500 bar-to-teal-400',
-        purple: 'from-purple-500/10 to-purple-600/5 border-purple-500/20 text-purple-400 bar-from-purple-500 bar-to-accent'
+        neutral: 'from-white/10 to-white/5 border-white/15 text-white/70 bar-from-white/70 bar-to-accent'
     }
 
     const c = colors[color] || colors.blue
@@ -162,7 +162,7 @@ function MetricCard({ title, value, limit, percentage, icon, color, description 
                     </div>
                     <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden p-[2px] border border-white/5">
                         <div
-                            className={`h-full bg-linear-to-r ${color === 'blue' ? 'from-blue-500 to-cyan-400' : color === 'emerald' ? 'from-emerald-500 to-teal-400' : 'from-purple-500 to-accent'} transition-all duration-1000`}
+                            className={`h-full bg-linear-to-r ${color === 'blue' ? 'from-blue-500 to-cyan-400' : color === 'emerald' ? 'from-emerald-500 to-teal-400' : 'from-white/70 to-accent'} transition-all duration-1000`}
                             style={{ width: `${Math.min(percentage, 100)}%` }}
                         />
                     </div>

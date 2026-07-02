@@ -168,7 +168,7 @@ export function PrintRangeDownload({ minDate, maxDate, totalPrints }: PrintRange
         <section className="mb-10 rounded-[12px] border border-white/8 bg-white/[0.04] p-4 md:p-6 shadow-[rgba(0,0,0,0.30)_0px_8px_24px_0px] backdrop-blur-[16px]">
             <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
                 <div className="min-w-0">
-                    <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-[8px] border border-white/8 bg-[#7c3aed1a] text-[#7c3aed]">
+                    <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-[8px] border border-white/8 bg-[#ffffff1a] text-[#e5e5e5]">
                         <CalendarDays size={18} />
                     </div>
                     <p className="text-[10px] font-bold uppercase tracking-[0.32em] text-white/30">
@@ -191,7 +191,7 @@ export function PrintRangeDownload({ minDate, maxDate, totalPrints }: PrintRange
                             max={maxDate}
                             onChange={(event) => setStartDate(event.target.value)}
                             disabled={isBusy}
-                            className="h-11 rounded-[8px] border border-white/16 bg-white/[0.04] px-3 text-[14px] font-medium text-[#e5e5e5] outline-none transition-colors focus:border-[#7c3aed] disabled:cursor-not-allowed disabled:opacity-50"
+                            className="h-11 rounded-[8px] border border-white/16 bg-white/[0.04] px-3 text-[14px] font-medium text-[#e5e5e5] outline-none transition-colors focus:border-[#e5e5e5] disabled:cursor-not-allowed disabled:opacity-50"
                         />
                     </label>
 
@@ -206,7 +206,7 @@ export function PrintRangeDownload({ minDate, maxDate, totalPrints }: PrintRange
                             max={maxDate}
                             onChange={(event) => setEndDate(event.target.value)}
                             disabled={isBusy}
-                            className="h-11 rounded-[8px] border border-white/16 bg-white/[0.04] px-3 text-[14px] font-medium text-[#e5e5e5] outline-none transition-colors focus:border-[#7c3aed] disabled:cursor-not-allowed disabled:opacity-50"
+                            className="h-11 rounded-[8px] border border-white/16 bg-white/[0.04] px-3 text-[14px] font-medium text-[#e5e5e5] outline-none transition-colors focus:border-[#e5e5e5] disabled:cursor-not-allowed disabled:opacity-50"
                         />
                     </label>
 
@@ -217,7 +217,7 @@ export function PrintRangeDownload({ minDate, maxDate, totalPrints }: PrintRange
                         className={`inline-flex h-11 items-center justify-center gap-2 rounded-[8px] px-5 text-[14px] font-medium leading-[1.3] transition-all ${
                             isDisabled
                                 ? 'cursor-not-allowed border border-white/8 bg-white/[0.03] text-white/25'
-                                : 'bg-[#7c3aed] text-white hover:-translate-y-px hover:bg-[#6d28d9] active:bg-[#5b21b6]'
+                                : 'bg-[#e5e5e5] text-[#0f0f0f] hover:-translate-y-px hover:bg-[#d4d4d4] active:bg-[#a3a3a3]'
                         }`}
                     >
                         {isBusy ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
@@ -239,7 +239,7 @@ export function PrintRangeDownload({ minDate, maxDate, totalPrints }: PrintRange
                     {isBusy && (
                         <div className="mt-3 h-1.5 overflow-hidden rounded-[4px] bg-white/[0.06]">
                             <div
-                                className="h-full rounded-[4px] bg-[#7c3aed] transition-all duration-300"
+                                className="h-full rounded-[4px] bg-[#e5e5e5] transition-all duration-300"
                                 style={{ width: `${progressPercent}%` }}
                             />
                         </div>

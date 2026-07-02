@@ -78,7 +78,7 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
                         color: activeTab === 'overview' ? '#ffffff' : '#a3a3a3',
                         background: 'none',
                         border: 'none',
-                        borderBottom: activeTab === 'overview' ? '2px solid #7c3aed' : '2px solid transparent',
+                        borderBottom: activeTab === 'overview' ? '2px solid #e5e5e5' : '2px solid transparent',
                         cursor: 'pointer',
                         transition: 'all 0.2s',
                         marginBottom: -1,
@@ -190,8 +190,8 @@ function StatCard({ label, value, icon: Icon, highlight, danger }: any) {
         <div
             className="p-5 transition-all duration-300 hover:-translate-y-0.5"
             style={{
-                background: danger ? 'rgba(239,68,68,0.06)' : highlight ? 'rgba(124,58,237,0.14)' : 'rgba(255,255,255,0.04)',
-                border: `1px solid ${danger ? 'rgba(239,68,68,0.2)' : highlight ? 'rgba(124,58,237,0.35)' : 'rgba(255,255,255,0.08)'}`,
+                background: danger ? 'rgba(239,68,68,0.06)' : highlight ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.04)',
+                border: `1px solid ${danger ? 'rgba(239,68,68,0.2)' : highlight ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.08)'}`,
                 borderRadius: 12,
                 boxShadow: 'rgba(0,0,0,0.30) 0px 8px 24px 0px',
             }}
@@ -199,10 +199,10 @@ function StatCard({ label, value, icon: Icon, highlight, danger }: any) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
                 <div style={{
                     width: 32, height: 32, borderRadius: 6,
-                    background: danger ? 'rgba(239,68,68,0.1)' : highlight ? 'rgba(124,58,237,0.20)' : 'rgba(255,255,255,0.04)',
+                    background: danger ? 'rgba(239,68,68,0.1)' : highlight ? 'rgba(255,255,255,0.20)' : 'rgba(255,255,255,0.04)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
-                    <Icon size={15} style={{ color: danger ? '#ef4444' : highlight ? '#a78bfa' : '#a3a3a3' }} />
+                    <Icon size={15} style={{ color: danger ? '#ef4444' : highlight ? '#f5f5f5' : '#a3a3a3' }} />
                 </div>
                 <p style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: danger ? '#ef4444' : highlight ? '#a3a3a3' : '#a3a3a3' }}>
                     {label}

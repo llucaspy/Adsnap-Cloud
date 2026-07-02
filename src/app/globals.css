@@ -22,13 +22,13 @@
   --text-muted: #737373;
 
   /* Primary Accent */
-  --accent: #7c3aed;
-  --accent-hover: #6d28d9;
-  --accent-pressed: #5b21b6;
-  --accent-muted: #7c3aed1a;
-  --accent-glow: rgba(124, 58, 237, 0.25);
-  --accent-light: #a78bfa;
-  --accent-dark: #6d28d9;
+  --accent: #e5e5e5;
+  --accent-hover: #d4d4d4;
+  --accent-pressed: #a3a3a3;
+  --accent-muted: #ffffff1a;
+  --accent-glow: rgba(255,255,255, 0.25);
+  --accent-light: #f5f5f5;
+  --accent-dark: #d4d4d4;
 
   /* Brand surfaces */
   --brand-navy: #0f0e17;
@@ -67,16 +67,16 @@
   --glass-navbar-blur: 20px;
 
   /* Gradients */
-  --gradient-primary: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
-  --gradient-secondary: linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%);
-  --gradient-glow: linear-gradient(135deg, rgba(124, 58, 237, 0.14) 0%, rgba(124, 58, 237, 0.04) 100%);
+  --gradient-primary: linear-gradient(135deg, #e5e5e5 0%, #d4d4d4 100%);
+  --gradient-secondary: linear-gradient(135deg, #f5f5f5 0%, #e5e5e5 100%);
+  --gradient-glow: linear-gradient(135deg, rgba(255,255,255, 0.14) 0%, rgba(255,255,255, 0.04) 100%);
 
   /* Shadows */
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.6);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.7);
   --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.8);
-  --shadow-glow: 0 0 40px rgba(124, 58, 237, 0.22);
-  --shadow-glow-secondary: 0 0 40px rgba(124, 58, 237, 0.10);
+  --shadow-glow: 0 0 40px rgba(255,255,255, 0.22);
+  --shadow-glow-secondary: 0 0 40px rgba(255,255,255, 0.10);
 
   /* Radii — DESIGN.md tokens */
   --rounded-xs: 4px;
@@ -117,8 +117,8 @@
   --shadow-sm: var(--shadow-1);
   --shadow-md: var(--shadow-2);
   --shadow-lg: var(--shadow-3);
-  --shadow-glow: 0 0 40px rgba(124, 58, 237, 0.25);
-  --shadow-glow-secondary: 0 0 40px rgba(124, 58, 237, 0.10);
+  --shadow-glow: 0 0 40px rgba(255,255,255, 0.25);
+  --shadow-glow-secondary: 0 0 40px rgba(255,255,255, 0.10);
 }
 
 /* ------------------------------------------
@@ -458,8 +458,8 @@ body {
    BOTÕES — DESIGN.md Dark System
    ------------------------------------------ */
 .btn-primary {
-  background: #7c3aed;
-  color: #ffffff;
+  background: #e5e5e5;
+  color: #0f0f0f;
   border-radius: 8px;
   padding: 10px 20px;
   font-size: 14px;
@@ -475,7 +475,7 @@ body {
 }
 
 .btn-primary:hover {
-  background: #6d28d9;
+  background: #d4d4d4;
   transform: translateY(-1px);
 }
 
@@ -520,13 +520,13 @@ body {
    ------------------------------------------ */
 .btn-glow {
   background: var(--gradient-primary);
-  color: #ffffff;
+  color: #0f0f0f;
   box-shadow: var(--shadow-glow);
   transition: all var(--transition-base);
 }
 
 .btn-glow:hover {
-  box-shadow: var(--shadow-glow), 0 0 80px rgba(124, 58, 237, 0.20);
+  box-shadow: var(--shadow-glow), 0 0 80px rgba(255,255,255, 0.20);
   transform: translateY(-2px);
 }
 

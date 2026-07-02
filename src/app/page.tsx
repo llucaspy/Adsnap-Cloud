@@ -205,7 +205,7 @@ export default async function PresentationHome() {
               label="Motor Neural"
               title="Capturas sequenciais ultra‑rápidas"
               desc="O sistema de fila inteligente do Nexus processa múltiplos formatos em paralelo, priorizando campanhas de alta urgência sem degradar a performance dos demais fluxos."
-              accent="rgba(124,58,237,0.08)"
+              accent="rgba(255,255,255,0.08)"
             />
           </ScrollReveal>
 
@@ -287,13 +287,13 @@ function FeatureCardLarge({ icon: Icon, label, title, desc, accent }: any) {
     }}>
       <div style={{
         width: '44px', height: '44px',
-        background: accent || 'rgba(124,58,237,0.12)',
-        border: '1px solid rgba(124,58,237,0.22)',
+        background: accent || 'rgba(255,255,255,0.12)',
+        border: '1px solid rgba(255,255,255,0.22)',
         borderRadius: '8px',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         marginBottom: '28px',
       }}>
-        <Icon size={20} style={{ color: '#a78bfa' }} />
+        <Icon size={20} style={{ color: '#f5f5f5' }} />
       </div>
       <p style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#a3a3a3', marginBottom: '10px' }}>
         {label}
@@ -321,13 +321,13 @@ function FeatureCardMedium({ icon: Icon, label, title, desc }: any) {
     }}>
       <div style={{
         width: '36px', height: '36px',
-        background: 'rgba(124,58,237,0.12)',
-        border: '1px solid rgba(124,58,237,0.22)',
+        background: 'rgba(255,255,255,0.12)',
+        border: '1px solid rgba(255,255,255,0.22)',
         borderRadius: '8px',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         marginBottom: '20px',
       }}>
-        <Icon size={16} style={{ color: '#a78bfa' }} />
+        <Icon size={16} style={{ color: '#f5f5f5' }} />
       </div>
       <p style={{ fontSize: '10px', fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#a3a3a3', marginBottom: '8px' }}>
         {label}
@@ -348,8 +348,8 @@ function FeatureCardStat({ icon: Icon, stat, label, desc, value }: any) {
       padding: '32px',
       height: '100%',
       minHeight: '200px',
-      background: 'rgba(124,58,237,0.10)',
-      border: '1px solid rgba(124,58,237,0.26)',
+      background: 'rgba(255,255,255,0.10)',
+      border: '1px solid rgba(255,255,255,0.26)',
       borderRadius: '12px',
       position: 'relative',
       overflow: 'hidden',
@@ -357,7 +357,7 @@ function FeatureCardStat({ icon: Icon, stat, label, desc, value }: any) {
       <div style={{
         position: 'absolute', bottom: '-20px', right: '-20px',
         fontSize: '96px', fontWeight: 700,
-        color: 'rgba(124,58,237,0.16)',
+        color: 'rgba(255,255,255,0.16)',
         lineHeight: 1, letterSpacing: '-4px',
         pointerEvents: 'none', userSelect: 'none',
       }}>
@@ -365,13 +365,13 @@ function FeatureCardStat({ icon: Icon, stat, label, desc, value }: any) {
       </div>
       <div style={{
         width: '36px', height: '36px',
-        background: 'rgba(124,58,237,0.14)',
-        border: '1px solid rgba(124,58,237,0.24)',
+        background: 'rgba(255,255,255,0.14)',
+        border: '1px solid rgba(255,255,255,0.24)',
         borderRadius: '8px',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         marginBottom: '20px',
       }}>
-        <Icon size={16} style={{ color: '#a78bfa' }} />
+        <Icon size={16} style={{ color: '#f5f5f5' }} />
       </div>
       <div style={{ fontSize: '42px', fontWeight: 700, letterSpacing: '-1px', color: '#ffffff', lineHeight: 1, marginBottom: '8px' }}>
         {stat}

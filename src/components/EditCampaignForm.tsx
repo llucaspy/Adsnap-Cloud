@@ -403,7 +403,7 @@ export function EditCampaignForm({ campaign, existingPis }: { campaign: Campaign
                     <button
                         onClick={handleSubmit}
                         disabled={isPending}
-                        className="flex-1 font-bold py-5 rounded-xl transition-all flex justify-center items-center gap-3 group disabled:opacity-50 text-white btn-glow"
+                        className="flex-1 font-bold py-5 rounded-xl transition-all flex justify-center items-center gap-3 group disabled:opacity-50 text-[#0f0f0f] btn-glow"
                         style={{
                             background: 'var(--gradient-secondary)',
                             fontFamily: 'var(--font-display)'

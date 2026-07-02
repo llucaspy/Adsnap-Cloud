@@ -62,7 +62,7 @@ export function BookEmailButton({ pi, initialStatus, reportDate }: BookEmailButt
                 onClick={sendBook}
                 disabled={isPending || isQueued}
                 title={reportDate ? `Enviar somente os prints de ${reportDate}` : 'Enviar o book completo em arquivo ZIP'}
-                className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#7c3aed] px-5 py-2.5 text-sm font-medium text-white transition-[background,transform,opacity] duration-200 hover:-translate-y-px hover:bg-[#6d28d9] active:bg-[#5b21b6] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
+                className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#e5e5e5] px-5 py-2.5 text-sm font-medium text-[#0f0f0f] transition-[background,transform,opacity] duration-200 hover:-translate-y-px hover:bg-[#d4d4d4] active:bg-[#a3a3a3] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
             >
                 <Icon size={18} className={isPending || isQueued ? 'animate-spin' : ''} />
                 {label}

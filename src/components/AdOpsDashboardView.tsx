@@ -18,7 +18,7 @@ import {
 const C = {
     bg: '#0f0f0f', surface: '#141414', card: 'rgba(255,255,255,0.04)',
     border: 'rgba(255,255,255,0.08)', text: '#ffffff', muted: '#a3a3a3', dim: '#737373',
-    primary: '#7c3aed', primaryMuted: 'rgba(124,58,237,0.12)',
+    primary: '#e5e5e5', primaryMuted: 'rgba(255,255,255,0.12)',
 }
 
 const inputSt = {
@@ -381,7 +381,7 @@ export default function AdOpsDashboardView({ stats: initialStats }: { stats: { t
             <div style={{ display: 'flex', gap: 4, background: C.surface, padding: 4, borderRadius: 12, border: `1px solid ${C.border}`, width: 'fit-content', marginBottom: 24 }}>
                 {(['TUDO', 'PORTAL', 'RADIO', 'PAINEL'] as const).map(t => (
                     <button key={t} onClick={() => setActiveTab(t)}
-                        style={{ padding: '7px 16px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, transition: 'all 0.15s', background: activeTab === t ? C.primaryMuted : 'transparent', color: activeTab === t ? '#ffffff' : C.muted, boxShadow: activeTab === t ? '0 0 0 1px rgba(124,58,237,0.28)' : 'none' }}>
+                        style={{ padding: '7px 16px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, transition: 'all 0.15s', background: activeTab === t ? C.primaryMuted : 'transparent', color: activeTab === t ? '#ffffff' : C.muted, boxShadow: activeTab === t ? '0 0 0 1px rgba(255,255,255,0.28)' : 'none' }}>
                         {t}
                     </button>
                 ))}

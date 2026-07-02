@@ -332,8 +332,8 @@ export function CreateCampaignFlow({
                     onClick={() => setSetupMode('gam')}
                     className="h-9 px-4 flex items-center gap-2 text-sm font-semibold transition-colors"
                     style={{
-                        color: setupMode === 'gam' ? '#ffffff' : '#525252',
-                        background: setupMode === 'gam' ? '#7c3aed' : 'transparent',
+                        color: setupMode === 'gam' ? '#0f0f0f' : '#525252',
+                        background: setupMode === 'gam' ? '#e5e5e5' : 'transparent',
                         borderRadius: '6px',
                     }}
                 >
@@ -344,8 +344,8 @@ export function CreateCampaignFlow({
                     onClick={() => setSetupMode('manual')}
                     className="h-9 px-4 flex items-center gap-2 text-sm font-semibold transition-colors"
                     style={{
-                        color: setupMode === 'manual' ? '#ffffff' : '#525252',
-                        background: setupMode === 'manual' ? '#7c3aed' : 'transparent',
+                        color: setupMode === 'manual' ? '#0f0f0f' : '#525252',
+                        background: setupMode === 'manual' ? '#e5e5e5' : 'transparent',
                         borderRadius: '6px',
                     }}
                 >
@@ -400,7 +400,7 @@ export function CreateCampaignFlow({
                             className="h-1.5 transition-all duration-500"
                             style={{
                                 width: step >= s ? '36px' : '18px',
-                                background: step >= s ? '#7c3aed' : '#1a1a1a',
+                                background: step >= s ? '#e5e5e5' : '#1a1a1a',
                                 borderRadius: '4px',
                             }}
                         />
@@ -527,7 +527,7 @@ function GamImportPanel({
         >
             <div className="px-5 py-4 flex items-center justify-between gap-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
                 <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-9 h-9 flex items-center justify-center shrink-0" style={{ background: 'rgba(124,58,237,0.12)', color: '#a78bfa', borderRadius: '8px' }}>
+                    <div className="w-9 h-9 flex items-center justify-center shrink-0" style={{ background: 'rgba(255,255,255,0.12)', color: '#f5f5f5', borderRadius: '8px' }}>
                         <Wand2 size={17} />
                     </div>
                     <div className="min-w-0">
@@ -579,9 +579,9 @@ function GamImportPanel({
                                             onClick={() => onSegmentationChange(item.value)}
                                             className="h-11 px-3 flex items-center justify-center gap-2 text-xs font-semibold transition-colors"
                                             style={{
-                                                color: active ? '#ffffff' : '#a3a3a3',
-                                                background: active ? '#7c3aed' : '#1a1a1a',
-                                                border: active ? '1px solid #7c3aed' : '1px solid rgba(255,255,255,0.08)',
+                                                color: active ? '#0f0f0f' : '#a3a3a3',
+                                                background: active ? '#e5e5e5' : '#1a1a1a',
+                                                border: active ? '1px solid #e5e5e5' : '1px solid rgba(255,255,255,0.08)',
                                                 borderRadius: '8px',
                                             }}
                                         >
@@ -625,15 +625,15 @@ function GamImportPanel({
                                             onClick={() => onCaptureCadenceChange(item.value)}
                                             className="min-h-14 px-3 py-2 flex items-center gap-3 text-left transition-colors"
                                             style={{
-                                                color: active ? '#ffffff' : '#a3a3a3',
-                                                background: active ? '#7c3aed' : 'transparent',
+                                                color: active ? '#0f0f0f' : '#a3a3a3',
+                                                background: active ? '#e5e5e5' : 'transparent',
                                                 borderRadius: '6px',
                                             }}
                                         >
                                             <Icon size={16} className="shrink-0" />
                                             <span className="min-w-0">
                                                 <span className="block text-xs font-semibold">{item.label}</span>
-                                                <span className="block text-[11px] leading-4" style={{ color: active ? '#ddd6fe' : '#737373' }}>{item.description}</span>
+                                                <span className="block text-[11px] leading-4" style={{ color: active ? '#525252' : '#737373' }}>{item.description}</span>
                                             </span>
                                         </button>
                                     )
@@ -668,8 +668,8 @@ function GamImportPanel({
                         <button
                             onClick={onRequestDraft}
                             disabled={!canRequest}
-                            className="h-11 px-5 shrink-0 flex items-center justify-center gap-2 text-sm font-semibold text-white transition-colors disabled:opacity-40"
-                            style={{ background: '#7c3aed', borderRadius: '8px' }}
+                            className="h-11 px-5 shrink-0 flex items-center justify-center gap-2 text-sm font-semibold transition-colors disabled:opacity-40"
+                            style={{ background: '#e5e5e5', color: '#0f0f0f', borderRadius: '8px' }}
                         >
                             {isPending ? <Loader2 size={16} className="animate-spin" /> : <FileCheck2 size={16} />}
                             {isPending ? 'Enviando...' : 'Gerar rascunho'}
@@ -702,7 +702,7 @@ function GamImportPanel({
                             <div
                                 key={job.id}
                                 className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-5 py-3 items-center cursor-pointer"
-                                style={{ borderTop: '1px solid rgba(255,255,255,0.08)', background: active ? 'rgba(124,58,237,0.08)' : 'transparent' }}
+                                style={{ borderTop: '1px solid rgba(255,255,255,0.08)', background: active ? 'rgba(255,255,255,0.08)' : 'transparent' }}
                                 onClick={() => onSelectJob(job.id)}
                             >
                                 <div className="min-w-0">
@@ -719,7 +719,7 @@ function GamImportPanel({
                                 </div>
                                 <div className="flex items-center gap-2" onClick={event => event.stopPropagation()}>
                                     {job.draft && (
-                                        <button onClick={() => onLoadDraft(job)} className="h-9 px-3 flex items-center gap-2 text-xs font-semibold text-white" style={{ background: '#7c3aed', borderRadius: '8px' }}>
+                                        <button onClick={() => onLoadDraft(job)} className="h-9 px-3 flex items-center gap-2 text-xs font-semibold" style={{ background: '#e5e5e5', color: '#0f0f0f', borderRadius: '8px' }}>
                                             Revisar <ChevronRight size={14} />
                                         </button>
                                     )}
@@ -764,7 +764,7 @@ function GamJobDebugger({ job, onStop, onDelete, presentation }: {
         >
             <div className="px-4 py-3 pr-14 sm:pr-4 flex items-center justify-between gap-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
                 <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-9 h-9 flex items-center justify-center shrink-0" style={{ color: '#7c3aed', background: 'rgba(124,58,237,0.12)', borderRadius: '8px' }}>
+                    <div className="w-9 h-9 flex items-center justify-center shrink-0" style={{ color: '#e5e5e5', background: 'rgba(255,255,255,0.12)', borderRadius: '8px' }}>
                         <Terminal size={17} />
                     </div>
                     <div className="min-w-0">
@@ -779,7 +779,7 @@ function GamJobDebugger({ job, onStop, onDelete, presentation }: {
 
             <div className="flex-1 max-h-72 overflow-y-auto px-4 py-3 space-y-3" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
                 {logs.map((log, index) => {
-                    const color = log.tone === 'error' ? '#ef4444' : log.tone === 'success' ? '#22c55e' : '#7c3aed'
+                    const color = log.tone === 'error' ? '#ef4444' : log.tone === 'success' ? '#22c55e' : '#e5e5e5'
                     const isCurrent = isActive && index === logs.length - 1
                     return (
                         <div key={`${log.at}-${index}`} className="grid grid-cols-[auto_minmax(0,1fr)] gap-3 items-start">
@@ -821,7 +821,7 @@ function GamJobDebugger({ job, onStop, onDelete, presentation }: {
 }
 
 function debuggerPresentation(job: GamImportJob) {
-    if (job.level === 'JOB_GAM_RUNNING') return { label: 'Processando', color: '#7c3aed', background: 'rgba(124,58,237,0.12)' }
+    if (job.level === 'JOB_GAM_RUNNING') return { label: 'Processando', color: '#e5e5e5', background: 'rgba(255,255,255,0.12)' }
     if (job.level === 'JOB_GAM_PENDING') return { label: 'Na fila', color: '#f59e0b', background: 'rgba(245,158,11,0.10)' }
     if (job.level === 'JOB_GAM_REVIEW') return { label: 'Pronto', color: '#22c55e', background: 'rgba(34,197,94,0.10)' }
     if (job.level === 'JOB_GAM_CANCELLED') return { label: 'Encerrado', color: '#f59e0b', background: 'rgba(245,158,11,0.10)' }
@@ -1059,12 +1059,12 @@ function StepSegmentation({ formData, updateFields, next, back }: StepProps) {
                                         type="button"
                                         onClick={() => updateFields({ captureCadence: item.value })}
                                         className="min-h-14 px-3 py-2 flex items-center gap-3 text-left"
-                                        style={{ background: active ? '#7c3aed' : 'transparent', color: active ? '#ffffff' : '#a3a3a3', borderRadius: '6px' }}
+                                        style={{ background: active ? '#e5e5e5' : 'transparent', color: active ? '#0f0f0f' : '#a3a3a3', borderRadius: '6px' }}
                                     >
                                         <Icon size={16} />
                                         <span>
                                             <span className="block text-xs font-semibold">{item.label}</span>
-                                            <span className="block text-[11px]" style={{ color: active ? '#ddd6fe' : '#737373' }}>{item.description}</span>
+                                            <span className="block text-[11px]" style={{ color: active ? '#525252' : '#737373' }}>{item.description}</span>
                                         </span>
                                     </button>
                                 )
@@ -1081,7 +1081,7 @@ function StepSegmentation({ formData, updateFields, next, back }: StepProps) {
                         </p>
                         <span
                             className="min-w-16 rounded-lg px-3 py-1 text-center text-sm font-bold"
-                            style={{ background: '#7c3aed', color: '#ffffff' }}
+                            style={{ background: '#e5e5e5', color: '#0f0f0f' }}
                         >
                             {normalizeCaptureDelaySeconds(formData.captureDelaySeconds)}s
                         </span>
@@ -1094,7 +1094,7 @@ function StepSegmentation({ formData, updateFields, next, back }: StepProps) {
                             step={1}
                             value={normalizeCaptureDelaySeconds(formData.captureDelaySeconds)}
                             onChange={event => updateFields({ captureDelaySeconds: normalizeCaptureDelaySeconds(event.target.value) })}
-                            className="w-full accent-[#7c3aed]"
+                            className="w-full accent-[#e5e5e5]"
                             aria-label="Tempo de espera antes do print"
                         />
                         <div className="mt-3 flex justify-between text-[11px] font-semibold" style={{ color: '#737373' }}>
@@ -1105,8 +1105,8 @@ function StepSegmentation({ formData, updateFields, next, back }: StepProps) {
                                     onClick={() => updateFields({ captureDelaySeconds: second })}
                                     className="h-7 w-7 rounded-md transition-colors"
                                     style={{
-                                        color: normalizeCaptureDelaySeconds(formData.captureDelaySeconds) === second ? '#ffffff' : '#737373',
-                                        background: normalizeCaptureDelaySeconds(formData.captureDelaySeconds) === second ? '#7c3aed' : 'transparent',
+                                        color: normalizeCaptureDelaySeconds(formData.captureDelaySeconds) === second ? '#0f0f0f' : '#737373',
+                                        background: normalizeCaptureDelaySeconds(formData.captureDelaySeconds) === second ? '#e5e5e5' : 'transparent',
                                     }}
                                 >
                                     {second}
@@ -1571,7 +1571,7 @@ function StepAutomation({ formData, updateFields, onSubmit, back, isPending, med
                 <button
                     onClick={onSubmit}
                     disabled={isPending}
-                    className="flex-1 font-bold py-5 rounded-xl transition-all flex justify-center items-center gap-3 group disabled:opacity-50 text-white btn-glow"
+                    className="flex-1 font-bold py-5 rounded-xl transition-all flex justify-center items-center gap-3 group disabled:opacity-50 text-[#0f0f0f] btn-glow"
                     style={{
                         background: 'var(--gradient-primary)',
                         fontFamily: 'var(--font-display)'

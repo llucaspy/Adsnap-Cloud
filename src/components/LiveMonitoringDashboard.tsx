@@ -182,7 +182,7 @@ function SiteCard({ site }: { site: SiteData }) {
                             initial={{ width: 0 }}
                             animate={{ width: `${Math.min(ritmo, 100)}%` }}
                             transition={{ duration: 1, ease: 'easeOut' }}
-                            className="h-full bg-linear-to-r from-accent to-purple-500 rounded-full shadow-[0_0_20px_rgba(168,85,247,0.3)]"
+                            className="h-full bg-linear-to-r from-accent to-white/60 rounded-full shadow-[0_0_20px_rgba(255,255,255,0.22)]"
                         />
                     </div>
                 </div>

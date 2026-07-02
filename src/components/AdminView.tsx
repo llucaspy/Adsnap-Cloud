@@ -192,7 +192,7 @@ export function AdminView() {
                                         </div>
                                     </td>
                                     <td className="px-6 py-4">
-                                        <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${user.role === 'admin' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                                        <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${user.role === 'admin' ? 'bg-white/10 text-white/70 border border-white/20' : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
                                             }`}>
                                             {user.role === 'admin' ? <Shield size={10} /> : <Users size={10} />}
                                             {user.role}
@@ -298,7 +298,7 @@ export function AdminView() {
                                     <button
                                         type="button"
                                         onClick={() => setFormData({ ...formData, role: 'admin' })}
-                                        className={`flex items-center justify-center gap-2 py-3 rounded-xl border text-xs font-bold transition-all ${formData.role === 'admin' ? 'bg-purple-500/10 border-purple-500 text-purple-400' : 'bg-white/5 border-white/5 text-white/40 hover:bg-white/10'
+                                        className={`flex items-center justify-center gap-2 py-3 rounded-xl border text-xs font-bold transition-all ${formData.role === 'admin' ? 'bg-white/10 border-white/25 text-white/80' : 'bg-white/5 border-white/5 text-white/40 hover:bg-white/10'
                                             }`}
                                     >
                                         <Shield size={14} />

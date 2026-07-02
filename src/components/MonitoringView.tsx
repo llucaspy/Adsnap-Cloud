@@ -25,8 +25,8 @@ const C = {
     text: '#ffffff',
     muted: '#a3a3a3',
     dim: '#737373',
-    primary: '#7c3aed',
-    primaryLight: '#a78bfa',
+    primary: '#e5e5e5',
+    primaryLight: '#f5f5f5',
 }
 
 const M = {
@@ -41,8 +41,8 @@ const M = {
     charcoal: '#a3a3a3',
     slate: '#737373',
     muted: '#525252',
-    primary: '#7c3aed',
-    primaryMuted: '#7c3aed1a',
+    primary: '#e5e5e5',
+    primaryMuted: '#ffffff1a',
     success: '#22c55e',
     warning: '#f59e0b',
     error: '#ef4444',
@@ -199,9 +199,9 @@ export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns
                                 <button key={key} onClick={() => setActiveFilter(key)}
                                     style={{
                                         display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, transition: 'all 0.15s',
-                                        background: activeFilter === key ? 'rgba(124,58,237,0.14)' : 'transparent',
+                                        background: activeFilter === key ? 'rgba(255,255,255,0.14)' : 'transparent',
                                         color: activeFilter === key ? '#ffffff' : C.muted,
-                                        boxShadow: activeFilter === key ? '0 0 0 1px rgba(124,58,237,0.28)' : 'none',
+                                        boxShadow: activeFilter === key ? '0 0 0 1px rgba(255,255,255,0.28)' : 'none',
                                     }}>
                                     <Icon size={13} />
                                     {label}
@@ -216,9 +216,9 @@ export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns
                                 <button key={key} onClick={() => setStatusFilter(key as any)}
                                     style={{
                                         display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, transition: 'all 0.15s',
-                                        background: statusFilter === key ? 'rgba(124,58,237,0.14)' : 'transparent',
+                                        background: statusFilter === key ? 'rgba(255,255,255,0.14)' : 'transparent',
                                         color: statusFilter === key ? '#ffffff' : C.muted,
-                                        boxShadow: statusFilter === key ? '0 0 0 1px rgba(124,58,237,0.28)' : 'none',
+                                        boxShadow: statusFilter === key ? '0 0 0 1px rgba(255,255,255,0.28)' : 'none',
                                     }}>
                                     {dot && <span style={{ width: 7, height: 7, borderRadius: '50%', background: dot, display: 'inline-block', flexShrink: 0 }} />}
                                     {label}
@@ -298,7 +298,7 @@ function MobileMonitoringExperience({
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
                     <div style={{ minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                            <span style={{ width: 8, height: 8, borderRadius: 9999, background: M.primary, boxShadow: '0 0 0 4px rgba(124,58,237,0.14)' }} />
+                            <span style={{ width: 8, height: 8, borderRadius: 9999, background: M.primary, boxShadow: '0 0 0 4px rgba(255,255,255,0.14)' }} />
                             <span style={{ fontSize: 11, fontWeight: 600, color: M.slate, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                                 Nexus Monitor
                             </span>
@@ -455,7 +455,7 @@ function MobileMetricCard({ label, value, tone }: { label: string; value: number
                 padding: 16,
                 borderRadius: 12,
                 background: tone === 'primary' ? M.primaryMuted : M.glass,
-                border: `1px solid ${tone === 'primary' ? 'rgba(124,58,237,0.28)' : M.hairline}`,
+                border: `1px solid ${tone === 'primary' ? 'rgba(255,255,255,0.28)' : M.hairline}`,
                 boxShadow: tone === 'primary'
                     ? 'rgba(0,0,0,0.30) 0px 8px 24px 0px'
                     : 'none',
@@ -464,7 +464,7 @@ function MobileMetricCard({ label, value, tone }: { label: string; value: number
                 justifyContent: 'space-between',
             }}
         >
-            <span style={{ color: tone === 'primary' ? '#a78bfa' : M.slate, fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{label}</span>
+            <span style={{ color: tone === 'primary' ? '#f5f5f5' : M.slate, fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{label}</span>
             <strong style={{ color: M.inkDeep, fontSize: tone === 'primary' ? 34 : 26, lineHeight: 1, fontWeight: 600, letterSpacing: '-0.5px' }}>
                 {value.toString().padStart(2, '0')}
             </strong>
@@ -566,7 +566,7 @@ function CaptureDelayControl({ campaigns, router, tone = 'light' }: { campaigns:
             subtle: C.dim,
             buttonIdle: C.surface,
             buttonText: C.muted,
-            accent: '#7c3aed',
+            accent: '#e5e5e5',
         }
 
     return (
@@ -867,7 +867,7 @@ function StatPill({ label, value, accent, active, onClick }: { label: string, va
         <div onClick={onClick}
             style={{
                 display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px',
-                background: active ? (accent === 'green' ? 'rgba(34,197,94,0.12)' : accent === 'red' ? 'rgba(239,68,68,0.12)' : 'rgba(124,58,237,0.14)') : C.surface,
+                background: active ? (accent === 'green' ? 'rgba(34,197,94,0.12)' : accent === 'red' ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.14)') : C.surface,
                 border: `1px solid ${active ? accentColor : C.border}`, borderRadius: 8,
                 cursor: onClick ? 'pointer' : 'default', transition: 'all 0.15s',
             }}>

@@ -93,7 +93,7 @@ const C = {
     success: '#22c55e',
     warning: '#f59e0b',
     error: '#ef4444',
-    purple: '#7c3aed',
+    accent: '#e5e5e5',
 }
 
 function minutesSince(value: string | null) {
@@ -119,7 +119,7 @@ function countBy<T extends CountItem>(items: T[], key: string) {
 function levelTone(level: string) {
     if (level.includes('ERROR') || level === 'QUARANTINE' || level === 'FAILED') return { color: C.error, bg: 'rgba(239,68,68,0.12)', icon: AlertTriangle }
     if (level.includes('SUCCESS') || level === 'SUCCESS' || level.includes('REVIEW')) return { color: C.success, bg: 'rgba(34,197,94,0.12)', icon: CheckCircle2 }
-    if (level.includes('RUNNING') || level === 'PROCESSING') return { color: C.purple, bg: 'rgba(124,58,237,0.12)', icon: Loader2 }
+    if (level.includes('RUNNING') || level === 'PROCESSING') return { color: C.accent, bg: 'rgba(255,255,255,0.12)', icon: Loader2 }
     if (level === 'QUEUED' || level.includes('PENDING') || level === 'AUTOCONFIG') return { color: C.warning, bg: 'rgba(245,158,11,0.12)', icon: Clock3 }
     return { color: C.muted, bg: C.surface, icon: Activity }
 }
@@ -267,14 +267,14 @@ export function WorkerLogsPanel({
 
             <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 16, marginBottom: 18 }}>
                 <StatCard label="Lotes totais" value={batchMetrics.total} icon={Layers} tone={C.text} hint={`${batchMetrics.totalItems} itens - ${batchMetrics.batchSize}/lote`} />
-                <StatCard label="Em execução" value={batchMetrics.running} icon={Loader2} tone={C.purple} hint={`${batchMetrics.runningItems} itens processando`} />
+                <StatCard label="Em execução" value={batchMetrics.running} icon={Loader2} tone={C.accent} hint={`${batchMetrics.runningItems} itens processando`} />
                 <StatCard label="Em espera" value={batchMetrics.waiting} icon={Clock3} tone={C.warning} hint={`${batchMetrics.waitingItems} itens aguardando`} />
                 <StatCard label="Com erro" value={batchMetrics.errors} icon={AlertTriangle} tone={batchMetrics.errors > 0 ? C.error : C.muted} hint={`${batchMetrics.errorItems} itens em falha`} />
             </section>
 
             <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 32 }}>
                 <StatCard label="Na fila" value={stats.queued} icon={Layers} tone={C.warning} />
-                <StatCard label="Processando" value={stats.processing} icon={Loader2} tone={C.purple} />
+                <StatCard label="Processando" value={stats.processing} icon={Loader2} tone={C.accent} />
                 <StatCard label="Autoconfig" value={stats.autoconfig} icon={DatabaseZap} tone={C.text} />
                 <StatCard label="Erros 24h" value={stats.errors24h} icon={ShieldAlert} tone={stats.errors24h > 0 ? C.error : C.muted} />
                 <StatCard label="Sucessos 24h" value={stats.success24h} icon={CheckCircle2} tone={C.success} />

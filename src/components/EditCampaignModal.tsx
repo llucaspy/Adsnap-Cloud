@@ -286,8 +286,8 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                     
                     <div className="flex items-center justify-between p-4 rounded-2xl bg-white/5 border border-white/10">
                         <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center">
-                                <Activity className="text-indigo-400" size={20} />
+                            <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center">
+                                <Activity className="text-white/70" size={20} />
                             </div>
                             <div>
                                 <p className="text-xs font-black text-white uppercase tracking-widest">Exibir no Dashboard de AdOps</p>
@@ -301,7 +301,7 @@ export function EditCampaignModal({ campaigns, formats, onClose, onSaved }: Edit
                                 onChange={e => updateShared({ showOnDashboard: e.target.checked })}
                                 className="sr-only peer"
                             />
-                            <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white/40 after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-500"></div>
+                            <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white/40 after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-white/70"></div>
                         </label>
                     </div>
 

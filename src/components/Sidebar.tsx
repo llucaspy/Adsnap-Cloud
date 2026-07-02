@@ -34,7 +34,7 @@ function StorageMonitor() {
 
             <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
                 <div
-                    className={`h-full transition-all duration-1000 ${isCriticalUsage ? 'bg-red-500' : isHighUsage ? 'bg-orange-500' : 'bg-[#7c3aed]'}`}
+                    className={`h-full transition-all duration-1000 ${isCriticalUsage ? 'bg-red-500' : isHighUsage ? 'bg-orange-500' : 'bg-[#e5e5e5]'}`}
                     style={{ width: `${usage.percentage}%` }}
                 />
             </div>
@@ -142,9 +142,9 @@ export function Sidebar() {
                         {/* Floating Badge for Workplace Identification */}
                         <div
                             className="absolute -top-1 left-4 px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-[0.2em] z-20 shadow-xl flex items-center gap-2"
-                            style={{ background: 'rgba(124,58,237,0.16)', border: '1px solid rgba(124,58,237,0.35)', color: '#e5e5e5', boxShadow: '0 8px 20px rgba(0,0,0,0.35)' }}
+                            style={{ background: 'rgba(255,255,255,0.16)', border: '1px solid rgba(255,255,255,0.35)', color: '#e5e5e5', boxShadow: '0 8px 20px rgba(0,0,0,0.35)' }}
                         >
-                            <div className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] animate-pulse" />
+                            <div className="w-1.5 h-1.5 rounded-full bg-[#e5e5e5] animate-pulse" />
                             Client Workplace
                         </div>
 
@@ -175,19 +175,19 @@ export function Sidebar() {
                                 onClick={() => setIsOpen(false)}
                                 className="flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all duration-300 group relative overflow-hidden"
                                 style={{
-                                    background: isActive ? 'rgba(124,58,237,0.16)' : 'transparent',
-                                    border: isActive ? '1px solid rgba(124,58,237,0.28)' : '1px solid transparent',
+                                    background: isActive ? 'rgba(255,255,255,0.16)' : 'transparent',
+                                    border: isActive ? '1px solid rgba(255,255,255,0.28)' : '1px solid transparent',
                                 }}
                             >
                                 <div
                                     className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                                    style={{ background: 'rgba(124,58,237,0.10)' }}
+                                    style={{ background: 'rgba(255,255,255,0.10)' }}
                                 />
 
                                 <item.icon
                                     size={20}
                                     style={{
-                                        color: isActive ? '#a78bfa' : '#737373',
+                                        color: isActive ? '#f5f5f5' : '#737373',
                                     }}
                                     className="relative z-10 group-hover:scale-110 transition-transform duration-300"
                                 />
@@ -203,7 +203,7 @@ export function Sidebar() {
                                 {isActive && (
                                     <div
                                         className="ml-auto w-2 h-2 rounded-full animate-pulse-glow relative z-10"
-                                        style={{ background: '#7c3aed' }}
+                                        style={{ background: '#e5e5e5' }}
                                     />
                                 )}
                             </Link>
@@ -222,8 +222,8 @@ export function Sidebar() {
                         className="flex items-center gap-3 px-4 py-3 w-full rounded-xl transition-all group"
                         style={{
                             color: pathname === '/settings' ? '#ffffff' : '#737373',
-                            background: pathname === '/settings' ? 'rgba(124,58,237,0.16)' : 'transparent',
-                            border: pathname === '/settings' ? '1px solid rgba(124,58,237,0.28)' : '1px solid transparent',
+                            background: pathname === '/settings' ? 'rgba(255,255,255,0.16)' : 'transparent',
+                            border: pathname === '/settings' ? '1px solid rgba(255,255,255,0.28)' : '1px solid transparent',
                         }}
                     >
                         <Settings size={18} className="group-hover:rotate-90 transition-transform duration-500" />

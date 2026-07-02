@@ -544,11 +544,11 @@ export function NexusChat() {
                 <div className="fixed top-6 right-6 z-10000 animate-in slide-in-from-top-4 fade-in duration-500 max-w-sm">
                     <div className="bg-black/95 border border-white/20 rounded-2xl p-4 shadow-[0_20px_60px_rgba(0,0,0,0.8)] backdrop-blur-xl">
                         <div className="flex items-start gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center shrink-0">
-                                <Mail size={18} className="text-indigo-400" />
+                            <div className="w-10 h-10 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center shrink-0">
+                                <Mail size={18} className="text-white/70" />
                             </div>
                             <div className="flex-1 min-w-0">
-                                <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">Novo E-mail</p>
+                                <p className="text-[10px] font-black text-white/70 uppercase tracking-widest mb-1">Novo E-mail</p>
                                 <p className="text-white text-xs font-bold truncate">{emailToast.from.replace(/<.*>/, '').trim()}</p>
                                 <p className="text-white/50 text-[11px] font-medium truncate mt-0.5">{emailToast.subject}</p>
                             </div>
@@ -561,7 +561,7 @@ export function NexusChat() {
                                 href={`https://mail.google.com/mail/u/0/#all/${emailToast.threadId}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="flex-1 text-center text-[9px] font-black text-indigo-400 hover:text-indigo-300 uppercase tracking-widest py-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 hover:bg-indigo-500/20 transition-all"
+                                className="flex-1 text-center text-[9px] font-black text-white/70 hover:text-white uppercase tracking-widest py-2 rounded-lg bg-white/10 border border-white/15 hover:bg-white/10 transition-all"
                             >
                                 Abrir no Gmail
                             </a>
@@ -602,7 +602,7 @@ export function NexusChat() {
                     <div className="relative w-10 h-10">
                         <NexusSmallCore isTyping={isTyping} />
                         {queueStatus && (
-                            <div className="absolute -top-1 -right-1 w-3 h-3 bg-indigo-500 rounded-full animate-pulse border-2 border-black" />
+                            <div className="absolute -top-1 -right-1 w-3 h-3 bg-[#e5e5e5] rounded-full animate-pulse border-2 border-black" />
                         )}
                     </div>
                 )}
@@ -623,7 +623,7 @@ export function NexusChat() {
                 <div className="p-6 flex items-center justify-between border-b border-white/5 bg-white/[0.02]">
                     <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-2xl bg-white/[0.03] border border-white/10 flex items-center justify-center relative overflow-hidden group">
-                           <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                           <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                            <div className="w-8 h-8">
                                <NexusSmallCore isTyping={isTyping || isGlobalPolling} />
                            </div>
@@ -659,7 +659,7 @@ export function NexusChat() {
                 {/* Messages Area */}
                 <div ref={scrollRef} className="flex-1 overflow-auto p-8 space-y-10 scroll-smooth nexus-scrollbar relative">
                     {/* Background Glow */}
-                    <div className="absolute top-1/4 left-1/4 w-1/2 h-1/2 bg-indigo-500/5 blur-[120px] pointer-events-none" />
+                    <div className="absolute top-1/4 left-1/4 w-1/2 h-1/2 bg-white/5 blur-[120px] pointer-events-none" />
                     
                     {showLogs ? (
                         <div className="space-y-4 animate-in fade-in duration-700 relative z-10">
@@ -673,7 +673,7 @@ export function NexusChat() {
                                             <div className="flex items-center gap-2 mb-1">
                                                 <span className={`font-black tracking-widest ${
                                                     log.level === 'SUCCESS' ? 'text-green-400' : 
-                                                    log.level === 'ERROR' ? 'text-red-400' : 'text-indigo-400'
+                                                    log.level === 'ERROR' ? 'text-red-400' : 'text-white/70'
                                                 }`}>[{log.level}]</span>
                                             </div>
                                             <p className="text-white/60 leading-relaxed break-words">{log.message}</p>
@@ -714,15 +714,15 @@ export function NexusChat() {
                                                         h2: (props) => <h2 className="text-lg font-black text-white mb-4 mt-8" {...props} />,
                                                         h3: (props) => <h3 className="text-[11px] font-black text-white/30 uppercase tracking-[0.25em] mb-4 mt-8 pb-1 border-b border-white/5" {...props} />,
                                                         ul: (props) => <ul className="space-y-3 mb-6 list-none" {...props} />,
-                                                        ol: (props) => <ol className="space-y-3 mb-6 list-decimal pl-5 marker:text-indigo-400 marker:font-black" {...props} />,
+                                                        ol: (props) => <ol className="space-y-3 mb-6 list-decimal pl-5 marker:text-white/70 marker:font-black" {...props} />,
                                                         li: (props) => (
                                                             <li className="flex items-start gap-3 group/li" {...props}>
-                                                                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500/40 mt-2.5 shrink-0 group-hover/li:bg-indigo-400 transition-colors" />
+                                                                <span className="w-1.5 h-1.5 rounded-full bg-white/40 mt-2.5 shrink-0 group-hover/li:bg-white/70 transition-colors" />
                                                                 <span className="flex-1">{props.children}</span>
                                                             </li>
                                                         ),
                                                         strong: (props) => <strong className="font-black text-white" {...props} />,
-                                                        blockquote: (props) => <blockquote className="border-l-4 border-indigo-500/40 bg-white/[0.02] pl-6 py-4 italic text-white/70 my-6 rounded-r-2xl" {...props} />,
+                                                        blockquote: (props) => <blockquote className="border-l-4 border-white/25 bg-white/[0.02] pl-6 py-4 italic text-white/70 my-6 rounded-r-2xl" {...props} />,
                                                         code: ({ node, inline, className, children, ...props }: any) => {
                                                             const match = /language-(\w+)/.exec(className || '')
                                                             if (!inline && match && match[1] === 'mermaid') {
@@ -751,12 +751,12 @@ export function NexusChat() {
 
                                                 {/* AI Command Feedback Bubble */}
                                                 {msg.command && (
-                                                    <div className="mt-4 p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center gap-3 animate-in fade-in zoom-in duration-500 bg-gradient-to-r from-indigo-500/10 to-transparent">
-                                                        <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center shadow-[0_0_20px_rgba(99,102,241,0.4)]">
-                                                            <Zap size={14} className="text-white animate-pulse" />
+                                                    <div className="mt-4 p-4 rounded-2xl bg-white/10 border border-white/15 flex items-center gap-3 animate-in fade-in zoom-in duration-500 bg-gradient-to-r from-white/10 to-transparent">
+                                                        <div className="w-8 h-8 rounded-full bg-[#e5e5e5] flex items-center justify-center shadow-[0_0_20px_rgba(255,255,255,0.25)]">
+                                                            <Zap size={14} className="text-[#0f0f0f] animate-pulse" />
                                                         </div>
                                                         <div className="flex-1">
-                                                            <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest leading-none mb-1">Nexus System Action</p>
+                                                            <p className="text-[10px] font-black text-white/70 uppercase tracking-widest leading-none mb-1">Nexus System Action</p>
                                                             <p className="text-[12px] text-white font-bold">
                                                                 {msg.command.type === 'capture' 
                                                                     ? `🚀 Enfileirando captura: PI ${msg.command.data.pi || '???'} (${msg.command.data.format || 'Filtro Automático'})`
@@ -774,8 +774,8 @@ export function NexusChat() {
 
                                         {msg.type === 'action' && (
                                             <div className="mt-6 pt-5 border-t border-white/5 flex items-center gap-3">
-                                                <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse shadow-[0_0_10px_rgba(99,102,241,0.8)]" />
-                                                <span className="text-[9px] font-black text-indigo-400 uppercase tracking-[0.3em]">Protocol Executed</span>
+                                                <div className="w-2 h-2 rounded-full bg-[#e5e5e5] animate-pulse shadow-[0_0_10px_rgba(255,255,255,0.40)]" />
+                                                <span className="text-[9px] font-black text-white/70 uppercase tracking-[0.3em]">Protocol Executed</span>
                                             </div>
                                         )}
                                     </div>
@@ -791,9 +791,9 @@ export function NexusChat() {
                                 <div className="bg-white/[0.02] border border-white/10 p-4 rounded-2xl rounded-tl-none flex flex-col gap-3 min-w-[300px]">
                                     <div className="flex items-center gap-4">
                                         <div className="flex gap-1.5">
-                                            <div className="w-1.5 h-1.5 bg-indigo-400/60 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                                            <div className="w-1.5 h-1.5 bg-indigo-400/60 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                                            <div className="w-1.5 h-1.5 bg-indigo-400/60 rounded-full animate-bounce" />
+                                            <div className="w-1.5 h-1.5 bg-white/60 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                                            <div className="w-1.5 h-1.5 bg-white/60 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                                            <div className="w-1.5 h-1.5 bg-white/60 rounded-full animate-bounce" />
                                         </div>
                                         <span className="text-[10px] font-black text-white/20 uppercase tracking-widest">
                                             {currentStatus?.replace(/\[⏳ \d+%\]\s*/, '') || 'Nexus is Synthesizing...'}
@@ -804,7 +804,7 @@ export function NexusChat() {
                                     {currentStatus?.includes('%') && (
                                         <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
                                             <div 
-                                                className="h-full bg-indigo-500 transition-all duration-500 ease-out"
+                                                className="h-full bg-[#e5e5e5] transition-all duration-500 ease-out"
                                                 style={{ width: `${currentStatus.match(/(\d+)%/)?.[1] || 0}%` }}
                                             />
                                         </div>
@@ -823,9 +823,9 @@ export function NexusChat() {
                                 <button
                                     key={i}
                                     onClick={() => handleSend(action.cmd)}
-                                    className="px-4 py-2 rounded-xl bg-white/[0.03] border border-white/10 text-[10px] font-bold text-white/40 hover:text-white hover:bg-indigo-500/20 hover:border-indigo-500/40 transition-all flex items-center gap-2 group"
+                                    className="px-4 py-2 rounded-xl bg-white/[0.03] border border-white/10 text-[10px] font-bold text-white/40 hover:text-white hover:bg-white/10 hover:border-white/25 transition-all flex items-center gap-2 group"
                                 >
-                                    <action.icon size={12} className="group-hover:text-indigo-300 transition-colors" />
+                                    <action.icon size={12} className="group-hover:text-white transition-colors" />
                                     {action.label}
                                 </button>
                             ))}
@@ -839,7 +839,7 @@ export function NexusChat() {
                     {pendingFiles.length > 0 && (
                         <div className="flex flex-wrap gap-2 mb-3 px-1">
                             {pendingFiles.map((file, i) => (
-                                <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-xs font-medium text-indigo-300 animate-in fade-in duration-300">
+                                <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/10 border border-white/20 text-xs font-medium text-white animate-in fade-in duration-300">
                                     <ImageIcon size={12} />
                                     <span className="max-w-[160px] truncate">{file.name}</span>
                                     <button
@@ -864,7 +864,7 @@ export function NexusChat() {
                             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
                             placeholder={pendingFiles.length > 0 ? 'Ex: Montar para o dia 30/05...' : 'Fale com o Nexus...'}
                             disabled={isTyping}
-                            className="w-full h-14 pl-14 pr-16 rounded-2xl bg-white/5 border border-white/10 text-white placeholder-white/20 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/30 transition-all disabled:opacity-40"
+                            className="w-full h-14 pl-14 pr-16 rounded-2xl bg-white/5 border border-white/10 text-white placeholder-white/20 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-white/20 focus:border-white/20 transition-all disabled:opacity-40"
                         />
 
                         <label className="absolute left-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center cursor-pointer hover:bg-white/10 transition-all">

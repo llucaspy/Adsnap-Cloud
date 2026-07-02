@@ -194,7 +194,7 @@ export function AdminPrintCleanup() {
                                 setStartDate(event.target.value)
                                 resetPreview()
                             }}
-                            className="h-11 rounded-[8px] border border-white/16 bg-white/[0.04] px-3 text-[14px] font-medium text-[#e5e5e5] outline-none transition-colors focus:border-[#7c3aed] disabled:cursor-not-allowed disabled:opacity-50"
+                            className="h-11 rounded-[8px] border border-white/16 bg-white/[0.04] px-3 text-[14px] font-medium text-[#e5e5e5] outline-none transition-colors focus:border-[#e5e5e5] disabled:cursor-not-allowed disabled:opacity-50"
                         />
                     </label>
 
@@ -210,7 +210,7 @@ export function AdminPrintCleanup() {
                                 setEndDate(event.target.value)
                                 resetPreview()
                             }}
-                            className="h-11 rounded-[8px] border border-white/16 bg-white/[0.04] px-3 text-[14px] font-medium text-[#e5e5e5] outline-none transition-colors focus:border-[#7c3aed] disabled:cursor-not-allowed disabled:opacity-50"
+                            className="h-11 rounded-[8px] border border-white/16 bg-white/[0.04] px-3 text-[14px] font-medium text-[#e5e5e5] outline-none transition-colors focus:border-[#e5e5e5] disabled:cursor-not-allowed disabled:opacity-50"
                         />
                     </label>
 
