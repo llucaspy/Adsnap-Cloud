@@ -67,16 +67,16 @@
   --glass-navbar-blur: 20px;
 
   /* Gradients */
-  --gradient-primary: linear-gradient(135deg, #ffffff 0%, #a3a3a3 100%);
-  --gradient-secondary: linear-gradient(135deg, #737373 0%, #d4d4d4 100%);
-  --gradient-glow: linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, rgba(200, 200, 200, 0.03) 100%);
+  --gradient-primary: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+  --gradient-secondary: linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%);
+  --gradient-glow: linear-gradient(135deg, rgba(124, 58, 237, 0.14) 0%, rgba(124, 58, 237, 0.04) 100%);
 
   /* Shadows */
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.6);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.7);
   --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.8);
-  --shadow-glow: 0 0 40px rgba(255, 255, 255, 0.10);
-  --shadow-glow-secondary: 0 0 40px rgba(200, 200, 200, 0.06);
+  --shadow-glow: 0 0 40px rgba(124, 58, 237, 0.22);
+  --shadow-glow-secondary: 0 0 40px rgba(124, 58, 237, 0.10);
 
   /* Radii — DESIGN.md tokens */
   --rounded-xs: 4px;
@@ -520,7 +520,7 @@ body {
    ------------------------------------------ */
 .btn-glow {
   background: var(--gradient-primary);
-  color: #000000;
+  color: #ffffff;
   box-shadow: var(--shadow-glow);
   transition: all var(--transition-base);
 }
