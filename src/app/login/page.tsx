@@ -524,7 +524,7 @@ export default function LoginPage() {
                                 disabled={loading}
                                 className="btn-glow w-full h-12 rounded-xl font-semibold text-base flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                                 style={{
-                                    color: 'white',
+                                    color: '#0f0f0f',
                                     border: 'none',
                                     fontFamily: 'var(--font-body)',
                                 }}
