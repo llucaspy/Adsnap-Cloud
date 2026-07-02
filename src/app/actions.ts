@@ -7,6 +7,7 @@ import type { GamImportDraft } from '@/lib/gamImportPlanner'
 import { createCampaignsFromGamDraft as writeCampaignsFromGamDraft } from '@/lib/gamImportWriter'
 import { normalizeCaptureCadence, type CaptureCadence } from '@/lib/governmentReportScope'
 import { normalizeCaptureDelaySeconds } from '@/lib/captureTiming'
+import { enqueueCaptureJobs, isWorkerJobStorageMissing } from '@/lib/workerJobs'
 
 export async function getNexusActivity() {
     try {
@@ -31,12 +32,17 @@ export async function getNexusActivity() {
 
 export async function runCapture(campaignId: string) {
     // On Vercel, we only queue. The GitHub worker will do the actual capture.
-    await prisma.campaign.update({
-        where: { id: campaignId },
-        data: { status: 'QUEUED' }
+    const queueResult = await enqueueCaptureJobs([campaignId], {
+        source: 'manual-single',
+        priority: 20,
+        allowTerminalStatuses: true,
     })
 
-    nexusLogStore.addLog(`Nexus: Campanha individual enfileirada.`, 'SYSTEM')
+    nexusLogStore.addLog(
+        `Nexus: Campanha individual enfileirada.`,
+        'SYSTEM',
+        JSON.stringify(queueResult)
+    )
 
     // Attempt to trigger worker immediately
     const triggered = await triggerNexusWorker([campaignId])
@@ -53,12 +59,17 @@ export async function runCaptureBatch(campaignIds: string[]) {
 
     console.log(`[Nexus] Enfileirando lote de ${campaignIds.length} capturas...`)
 
-    await prisma.campaign.updateMany({
-        where: { id: { in: campaignIds } },
-        data: { status: 'QUEUED' }
+    const queueResult = await enqueueCaptureJobs(campaignIds, {
+        source: 'manual-batch',
+        priority: 15,
+        allowTerminalStatuses: true,
     })
 
-    nexusLogStore.addLog(`Nexus: Lote de ${campaignIds.length} campanhas enfileirado via interface.`, 'SYSTEM')
+    nexusLogStore.addLog(
+        `Nexus: Lote de ${campaignIds.length} campanhas enfileirado via interface.`,
+        'SYSTEM',
+        JSON.stringify(queueResult)
+    )
 
     // Trigger GitHub Worker ONCE
     const triggered = await triggerNexusWorker(campaignIds)
@@ -671,13 +682,12 @@ export async function runAllCaptures() {
 
     if (campaigns.length === 0) return { success: true, count: 0 }
 
-    // Mark as QUEUED
     nexusLogStore.addLog(`Nexus: Lote de ${campaigns.length} capturas enfileirado manualmente.`, 'SYSTEM')
 
-    // Batch update to QUEUED
-    await prisma.campaign.updateMany({
-        where: { id: { in: campaigns.map((c: any) => c.id) } },
-        data: { status: 'QUEUED' }
+    await enqueueCaptureJobs(campaigns.map((c: any) => c.id), {
+        source: 'manual-active-all',
+        priority: 10,
+        allowTerminalStatuses: true,
     })
 
     // Trigger GitHub Worker
@@ -904,6 +914,25 @@ export async function bulkCreateCampaigns(campaigns: any[]) {
 // --- NEXUS CONTROL ACTIONS ---
 
 export async function stopAllCaptures() {
+    let stoppedJobs = 0
+    try {
+        const jobs = await prisma.workerJob.updateMany({
+            where: {
+                type: 'CAPTURE',
+                status: { in: ['QUEUED', 'PROCESSING'] },
+            },
+            data: {
+                status: 'FAILED',
+                finishedAt: new Date(),
+                lockedUntil: null,
+                lastError: 'Interrompido manualmente pelo painel',
+            },
+        })
+        stoppedJobs = jobs.count
+    } catch (error) {
+        if (!isWorkerJobStorageMissing(error)) throw error
+    }
+
     // Reset all QUEUED and PROCESSING campaigns to PENDING
     const result = await prisma.campaign.updateMany({
         where: {
@@ -914,9 +943,11 @@ export async function stopAllCaptures() {
     })
 
     nexusLogStore.addLog(`Nexus: Interrupção forçada. ${result.count} campanha(s) resetada(s).`, 'SYSTEM')
+    nexusLogStore.addLog(`Nexus WorkerJob: ${stoppedJobs} job(s) encerrado(s) manualmente.`, 'SYSTEM')
     revalidatePath('/')
+    revalidatePath('/workers')
 
-    return { success: true, stoppedCount: result.count }
+    return { success: true, stoppedCount: result.count, stoppedJobs }
 }
 
 export async function scheduleAllCampaigns(time: string) {

@@ -10,7 +10,7 @@ async function main() {
     const campaigns = await prisma.campaign.findMany({
         where: {
             isArchived: false,
-            status: { notIn: ['EXPIRED', 'FINISHED'] },
+            status: { notIn: ['EXPIRED', 'FINISHED', 'FAILED', 'QUARANTINE', 'PROCESSING', 'QUEUED'] },
             OR: [
                 { flightStart: { lte: today }, flightEnd: { gte: today } },
                 { flightStart: null, flightEnd: null }

@@ -7,11 +7,24 @@ import { classifyEmail } from '../lib/gemini'
 import { processPendingGamJobs } from '../lib/gamJobProcessor'
 import { processGovernmentReportQueue } from '../lib/governmentReportAutomation'
 import { isFederalCampaignBoundaryToday, shouldQueueScheduledCampaign } from '../lib/campaignSchedule'
+import {
+    enqueueCaptureJobs,
+    isWorkerJobStorageMissing,
+    WORKER_JOB_STATUS_FAILED,
+    WORKER_JOB_STATUS_PROCESSING,
+    WORKER_JOB_STATUS_QUEUED,
+    WORKER_JOB_STATUS_SUCCESS,
+    WORKER_JOB_TYPE_CAPTURE,
+} from '../lib/workerJobs'
+import { normalizeCaptureDelaySeconds } from '../lib/captureTiming'
 
 const processedEmailIds = new Set<string>()
 const DEFAULT_CAPTURE_BATCH_SIZE = 5
 const MAX_CAPTURE_BATCH_SIZE = 20
-const DEFAULT_CAPTURE_TIMEOUT_MS = 5 * 60 * 1000
+const DEFAULT_CAPTURE_CONCURRENCY = 2
+const MAX_CAPTURE_CONCURRENCY = 4
+const DEFAULT_CAPTURE_OVERHEAD_MS = 20 * 1000
+const MAX_DERIVED_CAPTURE_TIMEOUT_MS = 60 * 1000
 const DEFAULT_CAPTURE_LEASE_MINUTES = 15
 const MAX_WORKER_RUNTIME_MS = 6 * 60 * 60 * 1000
 
@@ -24,6 +37,16 @@ type WorkerCampaign = {
     segmentation: string
     captureCadence: string
     lastCaptureAt: Date | null
+}
+
+type WorkerJobCampaign = WorkerCampaign & {
+    jobId: string
+    jobStatus: string
+    priority: number
+    attempts: number
+    maxAttempts: number
+    timeoutMs: number | null
+    captureDelaySeconds: number | null
 }
 
 type WorkerCycleOptions = {
@@ -47,9 +70,118 @@ function readBooleanFlag(value: string | undefined, fallback: boolean) {
     return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase())
 }
 
+function deriveCaptureTimeoutMs(captureDelaySeconds: number | null | undefined, configuredTimeoutMs: number | null) {
+    if (configuredTimeoutMs && configuredTimeoutMs > 0) return configuredTimeoutMs
+    const delayMs = normalizeCaptureDelaySeconds(captureDelaySeconds ?? undefined) * 1000
+    return Math.min(MAX_DERIVED_CAPTURE_TIMEOUT_MS, delayMs + DEFAULT_CAPTURE_OVERHEAD_MS)
+}
+
 function createWorkerRunId() {
     const githubRun = process.env.GITHUB_RUN_ID || process.env.GITHUB_RUN_NUMBER
     return githubRun ? `gh-${githubRun}` : `local-${Date.now()}`
+}
+
+async function runWithConcurrency<T>(
+    items: T[],
+    concurrency: number,
+    worker: (item: T, index: number) => Promise<void>,
+) {
+    let cursor = 0
+    const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+        while (cursor < items.length) {
+            const index = cursor
+            cursor += 1
+            await worker(items[index], index)
+        }
+    })
+    await Promise.all(runners)
+}
+
+async function claimWorkerJobBatch(
+    runId: string,
+    limit: number,
+    cutoff: Date,
+    targetedCampaignIds: string[] = [],
+) {
+    if (limit <= 0) return [] as WorkerJobCampaign[]
+    const leaseMinutes = readPositiveInt(process.env.NEXUS_CAPTURE_LEASE_MINUTES, DEFAULT_CAPTURE_LEASE_MINUTES, 120)
+
+    try {
+        const jobs = await prisma.$queryRawUnsafe<WorkerJobCampaign[]>(
+            `
+            with next_jobs as (
+                select j.id
+                from "WorkerJob" j
+                join "Campaign" c on c.id = j."campaignId"
+                where j.type = $1
+                  and j.status = $2
+                  and j."scheduledFor" <= $3
+                  and c."isArchived" = false
+                  and c.status not in ('EXPIRED', 'FINISHED')
+                  and (cardinality($6::text[]) = 0 or c.id = any($6::text[]))
+                order by j.priority desc, j."scheduledFor" asc, j."createdAt" asc
+                limit $4
+                for update of j skip locked
+            )
+            update "WorkerJob" j
+            set
+                status = $7,
+                "runId" = $5,
+                "claimedAt" = now(),
+                "startedAt" = now(),
+                "lockedUntil" = now() + ($8::int * interval '1 minute'),
+                attempts = j.attempts + 1,
+                "lastError" = null,
+                "updatedAt" = now()
+            from next_jobs nj, "Campaign" c
+            where j.id = nj.id
+              and c.id = j."campaignId"
+            returning
+                j.id as "jobId",
+                j.status as "jobStatus",
+                j.priority,
+                j.attempts,
+                j."maxAttempts",
+                j."timeoutMs",
+                c.id,
+                c.status,
+                c.client,
+                c.pi,
+                c.format,
+                c.segmentation,
+                c."captureCadence",
+                c."lastCaptureAt",
+                c."captureDelaySeconds"
+            `,
+            WORKER_JOB_TYPE_CAPTURE,
+            WORKER_JOB_STATUS_QUEUED,
+            cutoff,
+            limit,
+            runId,
+            targetedCampaignIds,
+            WORKER_JOB_STATUS_PROCESSING,
+            leaseMinutes,
+        )
+
+        if (jobs.length > 0) {
+            await prisma.campaign.updateMany({
+                where: { id: { in: jobs.map(job => job.id) } },
+                data: {
+                    status: 'PROCESSING',
+                    processingStartedAt: new Date(),
+                    processingHeartbeatAt: new Date(),
+                    processingRunId: runId,
+                    lockedUntil: new Date(Date.now() + leaseMinutes * 60 * 1000),
+                    lastWorkerError: null,
+                },
+            })
+        }
+
+        return jobs
+    } catch (error) {
+        if (isWorkerJobStorageMissing(error)) return [] as WorkerJobCampaign[]
+        throw error
+    }
 }
 
 async function claimCampaignBatch(candidateIds: string[], runId: string, limit: number, statuses: string[] = ['QUEUED', 'AUTOCONFIG']) {
@@ -99,7 +231,8 @@ async function claimCampaignBatch(candidateIds: string[], runId: string, limit: 
 async function processCampaignWithTimeout(campaignId: string, timeoutMs: number) {
     const controller = new AbortController()
     const timeout = setTimeout(() => {
-        controller.abort(new Error(`Timeout de ${Math.round(timeoutMs / 60000)}m`))
+        const seconds = Math.max(1, Math.round(timeoutMs / 1000))
+        controller.abort(new Error(`Timeout de ${seconds}s`))
     }, timeoutMs)
 
     try {
@@ -171,6 +304,96 @@ async function checkGmail() {
     }
 }
 
+async function cleanupStuckWorkerJobs() {
+    const now = new Date()
+
+    try {
+        const stuckJobs = await prisma.workerJob.findMany({
+            where: {
+                type: WORKER_JOB_TYPE_CAPTURE,
+                status: WORKER_JOB_STATUS_PROCESSING,
+                lockedUntil: { lt: now },
+            },
+            select: {
+                id: true,
+                campaignId: true,
+                attempts: true,
+                maxAttempts: true,
+            },
+            take: 200,
+        })
+
+        if (stuckJobs.length === 0) return
+
+        const retryJobs = stuckJobs.filter(job => job.attempts < job.maxAttempts)
+        const failedJobs = stuckJobs.filter(job => job.attempts >= job.maxAttempts)
+        const retryCampaignIds = retryJobs.map(job => job.campaignId).filter((id): id is string => Boolean(id))
+        const failedCampaignIds = failedJobs.map(job => job.campaignId).filter((id): id is string => Boolean(id))
+
+        if (retryJobs.length > 0) {
+            await prisma.workerJob.updateMany({
+                where: { id: { in: retryJobs.map(job => job.id) } },
+                data: {
+                    status: WORKER_JOB_STATUS_QUEUED,
+                    runId: null,
+                    claimedAt: null,
+                    lockedUntil: null,
+                    lastError: 'Lease expirado; job voltou para fila',
+                },
+            })
+        }
+
+        if (failedJobs.length > 0) {
+            await prisma.workerJob.updateMany({
+                where: { id: { in: failedJobs.map(job => job.id) } },
+                data: {
+                    status: WORKER_JOB_STATUS_FAILED,
+                    finishedAt: now,
+                    lockedUntil: null,
+                    lastError: 'Lease expirado e limite de tentativas atingido',
+                },
+            })
+        }
+
+        if (retryCampaignIds.length > 0) {
+            await prisma.campaign.updateMany({
+                where: { id: { in: retryCampaignIds }, isArchived: false },
+                data: {
+                    status: 'QUEUED',
+                    processingStartedAt: null,
+                    processingHeartbeatAt: null,
+                    processingRunId: null,
+                    lockedUntil: null,
+                    lastWorkerError: 'Lease expirado; job voltou para fila',
+                },
+            })
+        }
+
+        if (failedCampaignIds.length > 0) {
+            await prisma.campaign.updateMany({
+                where: { id: { in: failedCampaignIds }, isArchived: false },
+                data: {
+                    status: 'FAILED',
+                    processingStartedAt: null,
+                    processingHeartbeatAt: null,
+                    processingRunId: null,
+                    lockedUntil: null,
+                    lastWorkerError: 'Lease expirado e limite de tentativas atingido',
+                },
+            })
+        }
+
+        await nexusLogStore.addLog(
+            `Nexus Worker: ${retryJobs.length} job(s) de captura recuperados e ${failedJobs.length} encerrados por lease.`,
+            failedJobs.length > 0 ? 'ERROR' : 'SYSTEM',
+            JSON.stringify({ retryJobs: retryJobs.length, failedJobs: failedJobs.length })
+        )
+    } catch (error) {
+        if (isWorkerJobStorageMissing(error)) return
+        throw error
+    }
+}
+
 /**
  * Requeues campaigns that are stuck in PROCESSING for too long.
  */
@@ -235,6 +458,223 @@ async function cleanupOffScheduleFederalQueue(now: Date) {
     )
 }
 
+async function backfillQueuedCaptureJobs(now: Date, targetedCampaignIds: string[] = []) {
+    if (targetedCampaignIds.length > 0) return
+
+    const queuedCandidates = await prisma.campaign.findMany({
+        where: {
+            status: 'QUEUED',
+            isArchived: false,
+        },
+        orderBy: { updatedAt: 'asc' },
+        take: 200,
+        select: {
+            id: true,
+            segmentation: true,
+            captureCadence: true,
+            flightStart: true,
+            flightEnd: true,
+            scheduledTimes: true,
+            lastCaptureAt: true,
+        },
+    })
+
+    const eligibleIds = queuedCandidates
+        .filter(campaign => (
+            campaign.segmentation.trim().toUpperCase() !== 'GOV_FEDERAL'
+            || campaign.captureCadence.trim().toUpperCase() === 'DAILY'
+            || isFederalCampaignBoundaryToday(campaign, now)
+        ))
+        .map(campaign => campaign.id)
+
+    if (eligibleIds.length === 0) return
+
+    const queueResult = await enqueueCaptureJobs(eligibleIds, {
+        source: 'legacy-queue-backfill',
+        priority: 1,
+    })
+
+    if (queueResult.storageReady && queueResult.created > 0) {
+        await nexusLogStore.addLog(
+            `Nexus Worker: ${queueResult.created} campanha(s) legadas convertidas para WorkerJob`,
+            'SYSTEM',
+            JSON.stringify(queueResult)
+        )
+    }
+}
+
+type CaptureSummary = {
+    claimed: number
+    success: number
+    failed: number
+    timeout: number
+    quarantine: number
+    batchesClaimed: number
+    drainPasses: number
+    stoppedByDeadline: boolean
+    jobsClaimed: number
+    legacyClaimed: number
+    requeued: number
+    deadletter: number
+}
+
+async function finishWorkerJob(jobId: string, status: string, lastError?: string | null) {
+    await prisma.workerJob.update({
+        where: { id: jobId },
+        data: {
+            status,
+            finishedAt: new Date(),
+            lockedUntil: null,
+            lastError: lastError || null,
+        },
+    })
+}
+
+async function retryOrFailWorkerJob(job: WorkerJobCampaign, message: string, summary: CaptureSummary) {
+    const canRetry = job.attempts < job.maxAttempts
+    const nextScheduledFor = new Date(Date.now() + Math.min(15 * 60 * 1000, Math.max(30 * 1000, job.attempts * 45 * 1000)))
+
+    if (canRetry) {
+        summary.requeued++
+        await prisma.$transaction([
+            prisma.workerJob.update({
+                where: { id: job.jobId },
+                data: {
+                    status: WORKER_JOB_STATUS_QUEUED,
+                    runId: null,
+                    claimedAt: null,
+                    lockedUntil: null,
+                    scheduledFor: nextScheduledFor,
+                    lastError: message,
+                },
+            }),
+            prisma.campaign.update({
+                where: { id: job.id },
+                data: {
+                    status: 'QUEUED',
+                    processingStartedAt: null,
+                    processingHeartbeatAt: null,
+                    processingRunId: null,
+                    lockedUntil: null,
+                    lastWorkerError: message,
+                },
+            }),
+        ])
+        return
+    }
+
+    summary.deadletter++
+    await prisma.$transaction([
+        prisma.workerJob.update({
+            where: { id: job.jobId },
+            data: {
+                status: WORKER_JOB_STATUS_FAILED,
+                finishedAt: new Date(),
+                lockedUntil: null,
+                lastError: message,
+            },
+        }),
+        prisma.campaign.update({
+            where: { id: job.id },
+            data: {
+                status: 'FAILED',
+                processingStartedAt: null,
+                processingHeartbeatAt: null,
+                processingRunId: null,
+                lockedUntil: null,
+                lastWorkerError: message,
+            },
+        }),
+    ])
+}
+
+async function processWorkerCaptureJob(
+    job: WorkerJobCampaign,
+    configuredCaptureTimeoutMs: number | null,
+    summary: CaptureSummary,
+) {
+    console.log(`[Nexus Worker] Capturando job ${job.jobId}: ${job.client} (PI ${job.pi})`)
+    const timeoutMs = deriveCaptureTimeoutMs(job.captureDelaySeconds, job.timeoutMs || configuredCaptureTimeoutMs)
+
+    try {
+        const result = await processCampaignWithTimeout(job.id, timeoutMs)
+        if (result.success) {
+            summary.success++
+            await finishWorkerJob(job.jobId, WORKER_JOB_STATUS_SUCCESS)
+        } else if (result.quarantined) {
+            summary.failed++
+            summary.quarantine++
+            await finishWorkerJob(job.jobId, WORKER_JOB_STATUS_FAILED, result.error || 'Campanha em quarentena')
+        }
+    } catch (err) {
+        summary.failed++
+        const message = err instanceof Error ? err.message : String(err)
+        if (message.toLowerCase().includes('timeout')) summary.timeout++
+        console.error(`[Nexus Worker] Erro em ${job.pi}:`, err)
+        await retryOrFailWorkerJob(job, message, summary)
+    }
+}
+
+async function processLegacyCampaign(
+    campaign: WorkerCampaign,
+    autoconfigIds: Set<string>,
+    configuredCaptureTimeoutMs: number | null,
+    summary: CaptureSummary,
+) {
+    if (autoconfigIds.has(campaign.id)) {
+        console.log(`[Nexus Worker] Realizando MONTAGEM: ${campaign.client} (PI ${campaign.pi})`)
+        try {
+            await processComposition(campaign.id)
+            summary.success++
+            await nexusLogStore.addLog(`Nexus Worker: Montagem automatizada concluida para ${campaign.client}`, 'SUCCESS', undefined, campaign.id)
+        } catch (err) {
+            summary.failed++
+            const message = err instanceof Error ? err.message : String(err)
+            console.error(`[Nexus Worker] Erro na montagem ${campaign.pi}:`, err)
+            await prisma.campaign.update({
+                where: { id: campaign.id },
+                data: {
+                    status: 'AUTOCONFIG',
+                    processingStartedAt: null,
+                    processingHeartbeatAt: null,
+                    processingRunId: null,
+                    lockedUntil: null,
+                    lastWorkerError: message,
+                },
+            })
+        }
+        return
+    }
+
+    console.log(`[Nexus Worker] Capturando legado: ${campaign.client} (PI ${campaign.pi})`)
+    try {
+        const timeoutMs = deriveCaptureTimeoutMs(null, configuredCaptureTimeoutMs)
+        const result = await processCampaignWithTimeout(campaign.id, timeoutMs)
+        if (result.success) {
+            summary.success++
+        } else if (result.quarantined) {
+            summary.failed++
+            summary.quarantine++
+        }
+    } catch (err) {
+        summary.failed++
+        const message = err instanceof Error ? err.message : String(err)
+        if (message.toLowerCase().includes('timeout')) summary.timeout++
+        console.error(`[Nexus Worker] Erro em ${campaign.pi}:`, err)
+        await prisma.campaign.update({
+            where: { id: campaign.id },
+            data: {
+                status: 'QUEUED',
+                processingStartedAt: null,
+                processingHeartbeatAt: null,
+                processingRunId: null,
+                lockedUntil: null,
+                lastWorkerError: message,
+            },
+        })
+    }
+}
+
 /**
  * Main worker logic cycle
  */
@@ -243,11 +683,13 @@ async function runWorkerCycle(options: WorkerCycleOptions = {}) {
     const runId = createWorkerRunId()
     const cycleStartedAt = Date.now()
     const captureBatchSize = readPositiveInt(process.env.NEXUS_CAPTURE_BATCH_SIZE, DEFAULT_CAPTURE_BATCH_SIZE, MAX_CAPTURE_BATCH_SIZE)
-    const captureTimeoutMs = readPositiveInt(process.env.NEXUS_CAPTURE_TIMEOUT_MS, DEFAULT_CAPTURE_TIMEOUT_MS, 20 * 60 * 1000)
+    const captureConcurrency = readPositiveInt(process.env.NEXUS_CAPTURE_CONCURRENCY, DEFAULT_CAPTURE_CONCURRENCY, MAX_CAPTURE_CONCURRENCY)
+    const configuredCaptureTimeoutMs = readOptionalPositiveInt(process.env.NEXUS_CAPTURE_TIMEOUT_MS, 20 * 60 * 1000)
+    const captureTimeoutMs = deriveCaptureTimeoutMs(null, configuredCaptureTimeoutMs)
     const maxRuntimeMs = readOptionalPositiveInt(process.env.NEXUS_WORKER_MAX_RUNTIME_MS, MAX_WORKER_RUNTIME_MS)
     const deadlineAt = maxRuntimeMs ? cycleStartedAt + maxRuntimeMs : null
     const drainQueue = options.drainQueue ?? false
-    const captureSummary = {
+    const captureSummary: CaptureSummary = {
         claimed: 0,
         success: 0,
         failed: 0,
@@ -256,11 +698,15 @@ async function runWorkerCycle(options: WorkerCycleOptions = {}) {
         batchesClaimed: 0,
         drainPasses: 0,
         stoppedByDeadline: false,
+        jobsClaimed: 0,
+        legacyClaimed: 0,
+        requeued: 0,
+        deadletter: 0,
     }
     await nexusLogStore.addLog(
         'Nexus Worker: Ciclo iniciado no servidor.',
         'SYSTEM',
-        JSON.stringify({ runId, captureBatchSize, captureTimeoutMs, drainQueue, maxRuntimeMs })
+        JSON.stringify({ runId, captureBatchSize, captureConcurrency, configuredCaptureTimeoutMs, drainQueue, maxRuntimeMs })
     )
     const targetedCampaignIds = [...new Set(
         (process.env.TARGET_CAMPAIGN_IDS || '')
@@ -273,8 +719,17 @@ async function runWorkerCycle(options: WorkerCycleOptions = {}) {
     const brtNowStr = now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })
     const brtNow = new Date(brtNowStr)
     // 0. Cleanup
+    await cleanupStuckWorkerJobs()
     await cleanupStuckCampaigns()
     if (targetedCampaignIds.length === 0) await cleanupOffScheduleFederalQueue(now)
+
+    if (targetedCampaignIds.length > 0) {
+        await enqueueCaptureJobs(targetedCampaignIds, {
+            source: 'worker-targeted-dispatch',
+            priority: 25,
+            allowTerminalStatuses: true,
+        })
+    }
 
     // 1. Gmail Check
     try {
@@ -289,7 +744,7 @@ async function runWorkerCycle(options: WorkerCycleOptions = {}) {
             where: {
                 isScheduled: true,
                 isArchived: false,
-                status: { notIn: ['EXPIRED', 'FINISHED', 'PROCESSING', 'QUEUED'] },
+                status: { notIn: ['EXPIRED', 'FINISHED', 'PROCESSING', 'QUEUED', 'FAILED', 'QUARANTINE'] },
             }
         })
 
@@ -298,14 +753,24 @@ async function runWorkerCycle(options: WorkerCycleOptions = {}) {
             .map(campaign => campaign.id)
 
         if (toQueueIds.length > 0) {
-            await prisma.campaign.updateMany({
-                where: { id: { in: toQueueIds } },
-                data: { status: 'QUEUED' }
+            const queueResult = await enqueueCaptureJobs(toQueueIds, {
+                source: 'worker-schedule',
+                priority: 5,
             })
-            await nexusLogStore.addLog(`Nexus Worker: ${toQueueIds.length} campanhas agendadas enfileiradas automaticamente`, 'SYSTEM')
+            await nexusLogStore.addLog(
+                `Nexus Worker: ${toQueueIds.length} campanhas agendadas enfileiradas automaticamente`,
+                'SYSTEM',
+                JSON.stringify(queueResult)
+            )
         }
     } catch (err) {
         console.error('[Nexus Worker] Erro no agendamento:', err)
+    }
+
+    try {
+        await backfillQueuedCaptureJobs(now, targetedCampaignIds)
+    } catch (err) {
+        console.error('[Nexus Worker] Erro ao converter fila legada em WorkerJob:', err)
     }
 
     // 4. Government campaign final reports
@@ -413,6 +878,34 @@ async function runWorkerCycle(options: WorkerCycleOptions = {}) {
             captureSummary.drainPasses++
             batchNumber++
 
+            const workerJobs = await claimWorkerJobBatch(runId, captureBatchSize, captureCutoff, targetedCampaignIds)
+            captureSummary.claimed += workerJobs.length
+            captureSummary.jobsClaimed += workerJobs.length
+
+            if (workerJobs.length > 0) {
+                captureSummary.batchesClaimed++
+                if (targetedCampaignIds.length > 0) {
+                    await nexusLogStore.addLog(
+                        `Nexus Worker: captura direcionada por WorkerJob para ${workerJobs.length} de ${targetedCampaignIds.length} item(ns)`,
+                        'SYSTEM',
+                        JSON.stringify({ runId, batchNumber, captureCutoff })
+                    )
+                }
+                console.log(`[Nexus Worker] Lote ${batchNumber}: ${workerJobs.length} job(s) de captura para processar.`)
+                await nexusLogStore.addLog(
+                    `Nexus Worker: Processando lote ${batchNumber} com ${workerJobs.length} job(s) estruturados`,
+                    'SYSTEM',
+                    JSON.stringify({ runId, batchNumber, captureCutoff, drainQueue, captureBatchSize, captureConcurrency })
+                )
+
+                await runWithConcurrency(workerJobs, captureConcurrency, async job => {
+                    await processWorkerCaptureJob(job, configuredCaptureTimeoutMs, captureSummary)
+                })
+
+                if (!drainQueue) break
+                continue
+            }
+
         const queuedCandidates = await prisma.campaign.findMany({
             where: {
                 status: 'QUEUED',
@@ -450,6 +943,7 @@ async function runWorkerCycle(options: WorkerCycleOptions = {}) {
         const candidateIds = [...queuedCampaigns, ...autoconfigCampaigns].map(campaign => campaign.id)
         const campaigns = await claimCampaignBatch(candidateIds, runId, captureBatchSize)
         captureSummary.claimed += campaigns.length
+        captureSummary.legacyClaimed += campaigns.length
         if (campaigns.length > 0) captureSummary.batchesClaimed++
 
         if (campaigns.length > 0) {
@@ -541,7 +1035,7 @@ async function runWorkerCycle(options: WorkerCycleOptions = {}) {
     await nexusLogStore.addLog(
         `Nexus Worker: Ciclo finalizado (${captureSummary.success} sucesso, ${captureSummary.failed} falha)`,
         captureSummary.failed > 0 ? 'ERROR' : 'SUCCESS',
-        JSON.stringify({ runId, durationMs, captureSummary, captureBatchSize, captureTimeoutMs, drainQueue, maxRuntimeMs })
+        JSON.stringify({ runId, durationMs, captureSummary, captureBatchSize, captureConcurrency, captureTimeoutMs, configuredCaptureTimeoutMs, drainQueue, maxRuntimeMs })
     )
 }
 

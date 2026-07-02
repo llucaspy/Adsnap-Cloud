@@ -1,4 +1,50 @@
 import prisma from './prisma'
+import { createHash } from 'crypto'
+
+const DEFAULT_ALERT_DEDUPE_MINUTES = 24 * 60
+
+function readAlertDedupeMinutes() {
+    const parsed = Number.parseInt(process.env.TELEGRAM_ALERT_DEDUPE_MINUTES || '', 10)
+    if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_ALERT_DEDUPE_MINUTES
+    return parsed
+}
+
+function buildAlertDedupeKey(title: string, message: string, campaignId?: string) {
+    return createHash('sha256')
+        .update(JSON.stringify({
+            title: title.trim(),
+            message: message.trim(),
+            campaignId: campaignId || 'global',
+        }))
+        .digest('hex')
+        .slice(0, 32)
+}
+
+async function shouldSuppressDuplicateAlert(key: string, dedupeMinutes: number) {
+    if (dedupeMinutes <= 0) return false
+    const since = new Date(Date.now() - dedupeMinutes * 60 * 1000)
+    const existing = await prisma.nexusLog.findFirst({
+        where: {
+            level: 'SYSTEM',
+            message: 'Telegram: alerta enviado',
+            details: { contains: key },
+            createdAt: { gte: since },
+        },
+        select: { id: true },
+    })
+    return Boolean(existing)
+}
+
+async function recordSentAlert(key: string, title: string, campaignId?: string) {
+    await prisma.nexusLog.create({
+        data: {
+            level: 'SYSTEM',
+            message: 'Telegram: alerta enviado',
+            details: JSON.stringify({ key, title, campaignId: campaignId || null }),
+            campaignId,
+        },
+    }).catch(() => null)
+}
 
 /**
  * Sends a Telegram alert message.
@@ -13,6 +59,13 @@ export async function sendTelegramAlert(
     action?: { label: string; url: string }
 ): Promise<boolean> {
     try {
+        const dedupeMinutes = readAlertDedupeMinutes()
+        const dedupeKey = buildAlertDedupeKey(title, message, campaignId)
+        if (await shouldSuppressDuplicateAlert(dedupeKey, dedupeMinutes)) {
+            console.log(`[Telegram] Alerta duplicado suprimido por ${dedupeMinutes}min: ${title} (${campaignId || 'global'})`)
+            return true
+        }
+
         // 1. Get token from env, chatId from env or DB
         const botToken = process.env.NexusTelegram
         if (!botToken) {
@@ -85,6 +138,7 @@ export async function sendTelegramAlert(
         }
 
         console.log('[Telegram] Alerta enviado com sucesso')
+        await recordSentAlert(dedupeKey, title, campaignId)
         return true
     } catch (err) {
         console.error('[Telegram] Erro ao enviar alerta:', err)

@@ -108,7 +108,7 @@ function getRandom(arr: string[]): string {
 
 export async function extractCampaignsFromText(text: string): Promise<Partial<brain.ParsedCampaign>[]> {
     const campaigns: Partial<brain.ParsedCampaign>[] = []
-    
+
     // Helper regex patterns
     const datePattern = /(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?/
     const piPattern = /\b\d{3,6}\b/
@@ -206,7 +206,7 @@ function isOperationalCommand(text: string): boolean {
         'montagem', 'preparar', 'gerar print',
         'admanager', 'gam', 'google ad manager'
     ]
-    
+
     if (t.length < 30) {
         return technicalKeywords.some(kw => t === kw || t.startsWith(kw + ' ') || t.includes(kw))
     }
@@ -215,18 +215,18 @@ function isOperationalCommand(text: string): boolean {
 
 async function handleDirectCommand(prompt: string): Promise<NexusResponse | null> {
     const text = prompt.toLowerCase()
-    
+
     // 1. MONTAGEM (ASSEMBLY) — MUST BE #1 PRIORITY
     if (text.includes('montagem') || (text.includes('gerar') && text.includes('print')) || text.includes('preparar')) {
         console.log('[Nexus FastPath] Triggering Assembly Handler...')
-        
+
         const urlPattern = /https?:\/\/[^\s,]+/g
         const urls: string[] = prompt.match(urlPattern) || []
-        
+
         const dateMatch = prompt.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?/)
         let targetDateStr = new Date().toLocaleDateString('pt-BR')
         let queryDate = new Date()
-        
+
         if (dateMatch) {
             const day = parseInt(dateMatch[1])
             const month = parseInt(dateMatch[2]) - 1
@@ -235,7 +235,7 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
             queryDate = new Date(Date.UTC(year, month, day, 12, 0, 0))
             targetDateStr = `${day.toString().padStart(2, '0')}/${(month + 1).toString().padStart(2, '0')}/${year}`
         }
-        
+
         // Start/End of day in UTC for consistent Prisma filtering
         const startOfDay = new Date(queryDate.getTime())
         startOfDay.setUTCHours(0, 0, 0, 0)
@@ -257,9 +257,9 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
             const results = []
             const settings = await getSettings()
             const bannerFormats: { id: string; width: number; height: number }[] = settings.bannerFormats ? JSON.parse(settings.bannerFormats) : []
-            
+
             const lines = prompt.split('\n')
-            
+
             for (const url of urls) {
                 const line = lines.find(l => l.includes(url)) || ''
                 const formatMatch = line.match(/(\d{3,4})[xX](\d{2,3})/) || url.match(/(\d{3,4})[xX](\d{2,3})/)
@@ -271,7 +271,7 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                 // Priority 1: PI 000 Template (Reference for Montagem)
                 // Try precise match via compositionBox first
                 let campaign = await prisma.campaign.findFirst({
-                    where: { 
+                    where: {
                         pi: '000',
                         compositionBox: { path: ['width'], equals: w },
                         AND: [ { compositionBox: { path: ['height'], equals: h } } ]
@@ -296,7 +296,7 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                 // Find Base Print (Background) for this PI 000 (Strict Date Filtering)
                 let baseCaptureId: string | null = null
                 let templateDetails = ''
-                
+
                 if (campaign) {
                     // Try to find a template EXACTLY in the requested date range
                     let baseCapture = await prisma.capture.findFirst({
@@ -348,10 +348,10 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                         where: { format: formatId, isArchived: false }
                     })
                 }
-                
+
                 if (!targetCampaign) {
                     targetCampaign = await prisma.campaign.findFirst({
-                        where: { 
+                        where: {
                             OR: [
                                 { format: { contains: w.toString() } },
                                 { format: { contains: h.toString() } }
@@ -377,7 +377,7 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
 
                                 // Vision-Assisted Alignment (New!)
                                 // Let AI "see" where the ad placeholder is on the actual template image
-                                let activeBox = { 
+                                let activeBox = {
                                     x: Number(targetPI000.compositionBox.x),
                                     y: Number(targetPI000.compositionBox.y),
                                     width: Number(targetPI000.compositionBox.width),
@@ -390,7 +390,7 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                                     if (visionBox) {
                                         console.log(`[Nexus Assembly] Vision detected precise alignment:`, visionBox);
                                         activeBox = visionBox;
-                                        
+
                                         // Audit log for checking vision accuracy
                                         await prisma.nexusLog.create({
                                             data: {
@@ -420,7 +420,7 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                                 const sbServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
                                 const sbAnonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim()
                                 const uploadPath = `assemblies/${filename}`
-                                
+
                                 // Try with Service Role first, fallback to Anon Key
                                 let success = false
                                 let lastStatusCode = 0
@@ -428,7 +428,7 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
 
                                 for (const key of [sbServiceKey, sbAnonKey]) {
                                     if (!key) continue
-                                    
+
                                     try {
                                         const uploadRes = await fetch(
                                             `${sbUrl}/storage/v1/object/screenshots/${uploadPath}`,
@@ -485,12 +485,12 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                         data: { status: 'SUCCESS', lastCaptureAt: new Date() }
                     })
 
-                    results.push({ 
-                        url: url, 
-                        success: true, 
-                        format: format, 
-                        client: targetCampaign.client, 
-                        baseFound: compositeSuccess, 
+                    results.push({
+                        url: url,
+                        success: true,
+                        format: format,
+                        client: targetCampaign.client,
+                        baseFound: compositeSuccess,
                         compositeUrl: finalScreenshotPath,
                         error: compositionError,
                         diagnostics: templateDetails
@@ -499,14 +499,14 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                     results.push({ url: url, success: false, format: format, error: 'Campanha não encontrada', diagnostics: templateDetails })
                 }
             }
-            
+
             const successCount = results.filter(r => r.success).length
             const baseCount = results.filter(r => r.baseFound).length
             const lastCompositeUrl = results.find(r => r.baseFound)?.compositeUrl
             const failure = results.find(r => r.error)
             const metaInfo = results.map(r => r.diagnostics).filter(Boolean).join(' | ')
-            
-            let message = successCount > 0 
+
+            let message = successCount > 0
                 ? `✅ Protocolo de montagem finalizado!\n- ${successCount} criativos processados para o dia ${targetDateStr}.\n- ${baseCount > 0 ? `Composição visual realizada com sucesso.` : `❌ **Nesta data (${targetDateStr}) não temos print modelo (PI 000) capturado ou houve falha na fusão.**`}`
                 : `⚠️ Formatos não reconhecidos no sistema ou sem PI 000 configurado para ${targetDateStr}.`
 
@@ -529,7 +529,7 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
                 data: lastCompositeUrl ? { url: lastCompositeUrl } : undefined
             }
         }
-        
+
         return {
             message: "Para realizar a montagem, anexe os criativos e informe a data. Ex: 'Fazer montagem desses criativos para o dia 30/04'.",
             success: false
@@ -541,17 +541,12 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
         const result = await brain.getAdOpsSummary()
         if (result.success && result.data) {
             const data = result.data as brain.BIData
-            const { total, healthScore, globalGoal, globalDelivered, globalToday, globalProjected, avgViewability, atRiskCampaigns } = data
-            const emoji = healthScore > 80 ? '✅' : healthScore > 50 ? '⚠️' : '🚨'
-            const progress = ((globalDelivered / globalGoal) * 100).toFixed(1)
-            
-            let message = `### 📊 Relatório BI de AdOps\n\n`
-            message += `- **Saúde Geral:** ${healthScore}% ${emoji}\n`
-            message += `- **Volume Total:** ${globalDelivered.toLocaleString()} / ${globalGoal.toLocaleString()} (${progress}%)\n`
-            message += `- **Entrega Hoje:** ${globalToday.toLocaleString()} ⚡\n`
-            if (atRiskCampaigns?.length > 0) message += `\n⚠️ **Atenção:** ${atRiskCampaigns.join(', ')}\n`
-            
-            return { message, success: true, data: result.data }
+            const { total } = data
+            return {
+                message: `### 📊 Central de Links AdOps\n\nAtualmente existem **${total}** dashboards cadastrados no Hub. Você pode acessá-los diretamente na página AdOps.`,
+                success: true,
+                data: result.data
+            }
         }
         const count = await prisma.campaign.count({ where: { isArchived: false } })
         return { message: `Status do Sistema: ${count} campanhas ativas. Operação normal.`, success: true }
@@ -600,7 +595,7 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
     if (text.includes('campanha') || text.includes('detalhe') || text.includes('ver pi') || text.match(/\b\d{3,6}\b/)) {
         const piMatch = prompt.match(/\b\d{3,6}\b/)
         const query = piMatch ? piMatch[0] : null
-        
+
         if (query) {
             console.log(`[Nexus FastPath] Searching for campaign: "${query}"`)
             return await brain.getCampaign(query)
@@ -616,7 +611,7 @@ async function handleDirectCommand(prompt: string): Promise<NexusResponse | null
  */
 async function executeGamIngestion(url: string): Promise<NexusResponse> {
     const orderId = url.split('order_id=')[1]?.split('&')[0] || 'Unknown';
-    
+
     try {
         console.log(`[Nexus Dispatcher] Enfileirando JOB de ingestão para Order ${orderId}...`)
 
@@ -652,7 +647,7 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
     // URLs do GAM têm prioridade absoluta sobre o LLM para evitar alucinações.
     const gamOrderPattern = /https:\/\/admanager\.google\.com\/.*?order_id=(\d+)/i
     const gamMatch = prompt.match(gamOrderPattern)
-    
+
     if (gamMatch) {
         console.log('[Nexus FastPath v5] Link de Order GAM detectado! Ignorando LLM e disparando RPA...')
         return await executeGamIngestion(gamMatch[0])
@@ -672,10 +667,10 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
         // --- 2. NEURAL BRAIN (v5 XML Router) ---
         console.log('[Nexus AI Action] Chamando Neural Brain (Async)...')
         console.time('NexusAI')
-        
+
         const brainPromise = nexusBrain(prompt)
         const timeoutPromise = new Promise<null>((_, reject) => setTimeout(() => reject(new Error('AI_TIMEOUT')), 12000))
-        
+
         let brainResult: any = null
         try {
             brainResult = await Promise.race([brainPromise, timeoutPromise])
@@ -683,10 +678,10 @@ export async function processNexusCommand(prompt: string): Promise<NexusResponse
             console.warn('[Nexus AI] Brain Error or Timeout:', err)
         }
         console.timeEnd('NexusAI')
-        
+
         if (brainResult?.success) {
             console.log('[Nexus AI] Brain Decision:', brainResult.action)
-            
+
             // Caso a IA decida usar o GAM via Tool Use (XML/JSON Match)
             const toolAction = brainResult.action || brainResult.actionPerformed
             if ((toolAction === 'GAM_INGEST' || toolAction === 'GAM_AUTONOMOUS_INGEST') && (brainResult.params?.url || brainResult.data?.url)) {

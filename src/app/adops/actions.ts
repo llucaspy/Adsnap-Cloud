@@ -1,414 +1,334 @@
 'use server'
 
 import prisma from '@/lib/prisma'
-import { getLiveMetrics, type LiveMetricsResult } from '@/app/monitoring/actions'
-import { nexusLogStore } from '@/lib/nexusLogStore'
-import { differenceInCalendarDays, startOfDay } from 'date-fns'
+import { revalidatePath } from 'next/cache'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-interface FormatEntry {
-    name: string
-    goal: number
-    delivered: number
-    viewability: number
-    pacing: number
+export interface DashboardLink {
+    url: string
+    type: 'PAGO' | 'BONIFICADO'
 }
 
-interface DailyCpmData {
-    impressions?: number
-    viewability?: number
-    total_data_purchase_type_channels?: Record<string, { impressions?: number }>
-}
-
-interface DailyEntry {
-    datetime: string
-    cpm: DailyCpmData | string
+export interface AdOpsDashboard {
+    id: string
+    client: string
+    campaignName: string
+    pi: string
+    agency?: string
+    mediaType?: string // PORTAL, RADIO, PAINEL
+    adOpsStatus?: string // CONCLUIDA, PAUSADA, PROGRAMADA, ATIVA
+    flightStart: Date | null
+    flightEnd: Date | null
+    manualDashboardUrl: string | null
+    createdAt: Date
+    links?: DashboardLink[]
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Tab Mapping (GIDs da planilha)
 // ---------------------------------------------------------------------------
-const isDev = process.env.NODE_ENV === 'development'
+const SPREADSHEET_ID = '1qVJeURbjU-RotNJho4QX2OsoKLrhxmi4hcffoM5ZddE'
+const BASE_URL = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv`
 
-/** Get today's date string in dd/MM/yyyy format, Brazil timezone */
-function getTodayBrazil(): string {
-    return new Intl.DateTimeFormat('pt-BR', {
-        timeZone: 'America/Sao_Paulo',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric'
-    }).format(new Date())
+const TAB_MAP: Record<string, string> = {
+    '07/25': '452617621',
+    '08/25': '1966519621',
+    '09/25': '2078129358',
+    '10/25': '2104598902',
+    '11/25': '453044165',
+    '12/25': '1440222170',
+    '01/26': '154849430',
+    '02/26': '1454293673',
+    '03/26': '577504412',
+    '04/26': '1073679449',
+    '05/26': '1300116486',
 }
 
-/** Safe division that returns a fallback on Infinity/NaN */
-function safeDivide(numerator: number, denominator: number, fallback = 0): number {
-    const result = numerator / denominator
-    return Number.isFinite(result) ? result : fallback
-}
-
-/** Parse JSON scalar data_by_date_purchase into array */
-function parseDailyData(raw: unknown): DailyEntry[] {
-    if (!raw) return []
-    if (typeof raw === 'string') {
-        try { return JSON.parse(raw) as DailyEntry[] } catch { return [] }
+// ---------------------------------------------------------------------------
+// CSV Parser (lida com campos entre aspas)
+// ---------------------------------------------------------------------------
+function parseCSVLine(line: string): string[] {
+    const result: string[] = []
+    let current = ''
+    let inQuotes = false
+    for (let i = 0; i < line.length; i++) {
+        const char = line[i]
+        if (char === '"') {
+            if (inQuotes && line[i + 1] === '"') { current += '"'; i++ }
+            else { inQuotes = !inQuotes }
+        } else if (char === ',' && !inQuotes) {
+            result.push(current.trim()); current = ''
+        } else { current += char }
     }
-    if (Array.isArray(raw)) return raw as DailyEntry[]
-    return []
+    result.push(current.trim())
+    return result
 }
 
-/** Extract impressions from a cpm data object (handles both direct and nested channels) */
-function extractDayImpressions(cpmRaw: DailyCpmData | string | undefined): number {
-    if (!cpmRaw) return 0
-
-    const cpm: DailyCpmData = typeof cpmRaw === 'string' 
-        ? (() => { try { return JSON.parse(cpmRaw) } catch { return {} } })()
-        : cpmRaw
-
-    // 1. Direct impressions field (preferred)
-    if (typeof cpm.impressions === 'number' && cpm.impressions > 0) {
-        return cpm.impressions
+function parseDateSafe(d: string): Date | null {
+    if (!d || d.trim() === '') return null
+    const clean = d.trim().replace(/"/g, '')
+    const parts = clean.split('/')
+    if (parts.length === 3) {
+        const [day, month, year] = parts
+        const date = new Date(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T12:00:00`)
+        if (!isNaN(date.getTime())) return date
     }
+    return null
+}
 
-    // 2. Sum from nested channels
-    if (cpm.total_data_purchase_type_channels && typeof cpm.total_data_purchase_type_channels === 'object') {
-        let sum = 0
-        for (const ch of Object.values(cpm.total_data_purchase_type_channels)) {
-            if (ch && typeof ch.impressions === 'number') {
-                sum += ch.impressions
-            }
-        }
-        return sum
-    }
-
-    return 0
+function parseMediaType(raw: string): string {
+    const upper = (raw || '').toUpperCase()
+    if (upper.includes('RÁDIO') || upper.includes('RADIO')) return 'RADIO'
+    if (upper.includes('PAINEL')) return 'PAINEL'
+    return 'PORTAL'
 }
 
 // ---------------------------------------------------------------------------
-// Main Export
+// Actions — Leitura (DB-First)
 // ---------------------------------------------------------------------------
-export async function getAggregatedAdOpsMetrics() {
+
+/** Get all AdOps dashboards from the database */
+export async function getAdOpsDashboards(): Promise<AdOpsDashboard[]> {
     try {
-        const campaigns = await prisma.campaign.findMany({
+        const dashboards = await prisma.campaign.findMany({
             where: {
-                isArchived: false,
-                externalAuthUrl: { not: "" }
+                segmentation: 'AD_OPS_HUB',
+                isArchived: false
+            },
+            orderBy: {
+                createdAt: 'desc'
             }
         })
 
-        if (campaigns.length === 0) {
-            return {
-                total: 0,
-                onTrackCount: 0,
-                healthScore: 100,
-                atRiskCount: 0,
-                campaigns: []
+        return dashboards.map(d => ({
+            id: d.id,
+            client: d.client,
+            campaignName: d.campaignName,
+            pi: d.pi,
+            agency: d.agency,
+            mediaType: d.mediaType || 'PORTAL',
+            adOpsStatus: d.adOpsStatus || 'ATIVA',
+            flightStart: d.flightStart,
+            flightEnd: d.flightEnd,
+            manualDashboardUrl: d.manualDashboardUrl,
+            createdAt: d.createdAt,
+            links: (d.compositionBox as Record<string, unknown>)?.links as DashboardLink[] || []
+        }))
+    } catch (error) {
+        console.error('Failed to get AdOps dashboards:', error)
+        return []
+    }
+}
+
+/** Aggregated metrics for the page component */
+export async function getAggregatedAdOpsMetrics() {
+    const dashboards = await getAdOpsDashboards()
+    return {
+        total: dashboards.length,
+        campaigns: dashboards
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Actions — CRUD
+// ---------------------------------------------------------------------------
+
+/** Bulk Save Dashboards (from Spreadsheet) */
+export async function bulkSaveAdOpsDashboards(dashboards: Partial<AdOpsDashboard>[]) {
+    try {
+        let count = 0
+        for (const dash of dashboards) {
+            const existing = await prisma.campaign.findFirst({
+                where: { pi: dash.pi, segmentation: 'AD_OPS_HUB' }
+            })
+            if (existing) {
+                await saveAdOpsDashboard({ ...dash, id: existing.id })
+            } else {
+                await saveAdOpsDashboard(dash)
             }
+            count++
+        }
+        revalidatePath('/adops')
+        return { success: true, count }
+    } catch (error) {
+        console.error('Failed to bulk save AdOps dashboards:', error)
+        return { success: false, error: 'Erro ao importar dashboards' }
+    }
+}
+
+/** Create or Update a dashboard in the hub */
+export async function saveAdOpsDashboard(data: Partial<AdOpsDashboard>) {
+    try {
+        if (!data.pi || !data.client || !data.campaignName) {
+            return { success: false, error: 'Dados obrigatórios faltando (PI, Cliente, Campanha)' }
         }
 
-        // Group by PI
-        const groupedMap = new Map<string, typeof campaigns>()
-        campaigns.forEach(c => {
-            const group = groupedMap.get(c.pi) || []
-            group.push(c)
-            groupedMap.set(c.pi, group)
-        })
+        const payload = {
+            client: data.client,
+            campaignName: data.campaignName,
+            pi: data.pi,
+            agency: data.agency || 'Interno',
+            flightStart: data.flightStart,
+            flightEnd: data.flightEnd,
+            mediaType: data.mediaType || 'PORTAL',
+            adOpsStatus: data.adOpsStatus || 'ATIVA',
+            manualDashboardUrl: data.links?.[0]?.url || data.manualDashboardUrl,
+            compositionBox: { links: data.links || [] } as any,
+            updatedAt: new Date()
+        }
 
-        const formattedCampaigns = await Promise.all(
-            Array.from(groupedMap.entries()).map(async ([pi, group]) => {
-                const monitoringCampaign = group.find(c => c.isMonitoringActive) || group[0]
-                const main = group[0]
-                const manualDashboardUrl = (group as any[]).find(c => c.manualDashboardUrl)?.manualDashboardUrl || null
-
-                // Fetch real metrics
-                const result: LiveMetricsResult = await getLiveMetrics(monitoringCampaign.id)
-                const apiAvailable = result.success && !!result.data
-
-                // BI Agent History (fallback source — may not exist if migration is pending)
-                let metricHistory: { date: Date; delivered: number }[] = []
-                try {
-                    if ((prisma as any).dailyMetric) {
-                        metricHistory = await (prisma as any).dailyMetric.findMany({
-                            where: { campaignId: pi },
-                            orderBy: { date: 'desc' },
-                            take: 7
-                        })
-                    }
-                } catch {
-                    // Model not yet migrated — silently skip
-                }
-
-                // -------------------------------------------------------
-                // Step 1: Extract totals from API purchases
-                // -------------------------------------------------------
-                let totalDelivered = 0
-                let totalGoal = 0
-                let avgViewability = 0
-                let metricsCount = 0
-                const formats: FormatEntry[] = []
-
-                if (apiAvailable && result.data) {
-                    const sites = result.data.sites || []
-
-                    for (const site of sites) {
-                        if (!site.purchases) continue
-                        const purchasesList = Array.isArray(site.purchases) ? site.purchases : [site.purchases]
-
-                        for (const purchase of purchasesList) {
-                            if (!purchase.cpm) continue
-
-                            const q = purchase.cpm.quantity || 0
-                            const td = purchase.cpm.total_data
-                            const d = td?.impressions ?? td?.valids ?? 0
-                            const v = (td?.viewability ?? 0) * 100
-
-                            totalGoal += q
-                            if (td) {
-                                totalDelivered += d
-                                avgViewability += v
-                                metricsCount++
-                            }
-
-                            formats.push({
-                                name: site.site_name,
-                                goal: q,
-                                delivered: d,
-                                viewability: v,
-                                pacing: safeDivide(d, q) * 100
-                            })
-                        }
-                    }
-
-                    if (metricsCount > 0) {
-                        avgViewability = safeDivide(avgViewability, metricsCount)
-                    }
-                } else {
-                    if (result.error) {
-                        await nexusLogStore.addLog(
-                            `PI ${pi}: API indisponível — ${result.error}`,
-                            'API_ERROR', undefined, monitoringCampaign.id
-                        )
-                    }
-                }
-
-                if (totalGoal === 0) {
-                    totalGoal = group.length * 1_000_000 
-                }
-
-                // -------------------------------------------------------
-                // Step 2: Time calculations
-                // -------------------------------------------------------
-                const MS_PER_DAY = 86400000
-                const allStarts = group.filter(c => c.flightStart).map(c => new Date(c.flightStart!).getTime())
-                const allEnds = group.filter(c => c.flightEnd).map(c => new Date(c.flightEnd!).getTime())
-
-                const start = allStarts.length ? Math.min(...allStarts) : Date.now() - (7 * MS_PER_DAY)
-                const end = allEnds.length ? Math.max(...allEnds) : Date.now() + (30 * MS_PER_DAY)
-
-                const s = startOfDay(new Date(start))
-                const e = startOfDay(new Date(end))
-                const n = startOfDay(new Date())
-
-                const elapsedDays = Math.max(1, differenceInCalendarDays(n, s) + 1)
-                const totalDays = Math.max(1, differenceInCalendarDays(e, s) + 1)
-                const daysLeft = Math.max(1, totalDays - elapsedDays)
-
-                const safeGoal = Math.max(1, Number(totalGoal))
-                const safeDelivered = Math.max(0, Number(totalDelivered))
-
-                // -------------------------------------------------------
-                // Step 3: KPI Calculations
-                // -------------------------------------------------------
-                const timeProgress = Math.min(100, safeDivide(elapsedDays, totalDays) * 100)
-                const deliveryProgress = safeDivide(safeDelivered, safeGoal) * 100
-                const pacing = safeDivide(safeDelivered / safeGoal, elapsedDays / totalDays, 0)
-                const pacingPercent = pacing * 100
-
-                const currentDaily = safeDivide(safeDelivered, elapsedDays)
-                const remaining = Math.max(0, safeGoal - safeDelivered)
-                const requiredDaily = safeDivide(remaining, daysLeft)
-
-                const projectedFinalValue = currentDaily * totalDays
-                const projectionPercent = safeDivide(projectedFinalValue, safeGoal) * 100
-
-                // -------------------------------------------------------
-                // Step 4: Status Classification
-                // -------------------------------------------------------
-                let status: 'on-track' | 'warning' | 'critical' | 'over' = 'on-track'
-
-                // We calculate pressure early for diagnostics
-                const isDelayedButHealthy = pacingPercent >= 95 && projectionPercent < 95
-
-                // BI Score
-                let score = 100
-                // viewability check early
-                if (avgViewability < 60) score -= (60 - avgViewability) * 0.5
-
-                // -------------------------------------------------------
-                // Step 5: Daily impressions Map
-                // -------------------------------------------------------
-                const dailyMap = new Map<string, number>()
-                let deliveredTodayFromAPI = 0
-                const todayStr = getTodayBrazil()
-
-                if (apiAvailable && result.data) {
-                    for (const site of result.data.sites || []) {
-                        const dailyData = parseDailyData(site.data_by_date_purchase)
-                        for (const entry of dailyData) {
-                            const impressions = extractDayImpressions(entry.cpm)
-                            const dateKey = entry.datetime || ''
-                            if (dateKey && impressions > 0) {
-                                dailyMap.set(dateKey, (dailyMap.get(dateKey) || 0) + impressions)
-                            }
-                        }
-                    }
-                    deliveredTodayFromAPI = dailyMap.get(todayStr) || 0
-                }
-
-                const realHistoryArr = Array.from(dailyMap.entries())
-                    .map(([date, value]) => {
-                        const [d, m, y] = date.split('/').map(Number)
-                        return { date: new Date(y, m - 1, d).toISOString(), value }
-                    })
-                    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-
-                // -------------------------------------------------------
-                // Step 6: Diagnostics & Recommendations (Unified Pressure)
-                // -------------------------------------------------------
-                const last3Days = realHistoryArr.slice(-3)
-                const recentDailyAvg = last3Days.length > 0
-                    ? last3Days.reduce((sum: number, h: { value: number }) => sum + h.value, 0) / last3Days.length
-                    : currentDaily
-                
-                const recalcPressure = safeDivide(requiredDaily, Math.max(1, recentDailyAvg), 1)
-
-                // Re-evaluate status based on recalcPressure if needed, but original status uses long-term
-                if (projectionPercent < 85 || recalcPressure > 1.3) {
-                    status = 'critical'
-                } else if (projectionPercent < 95 || recalcPressure > 1.15) {
-                    status = 'warning'
-                } else if (pacingPercent >= 105) {
-                    status = 'over'
-                }
-
-                if (status === 'critical') score = 40
-                else if (status === 'warning') score = 75
-                else if (status === 'on-track' && isDelayedButHealthy) score = 85
-                score = Math.max(0, Math.min(100, Math.round(score)))
-
-                const diagnostics: string[] = []
-                const smartAlert = isDelayedButHealthy ? '⚠️ Risco Oculto: Pacing OK mas projeção baixa' : null
-                if (smartAlert) diagnostics.push(smartAlert)
-                if (recalcPressure > 1.2) diagnostics.push(`Pressão de entrega ALTA (${recalcPressure.toFixed(2)}x)`)
-                if (avgViewability < 60) diagnostics.push(`Viewability baixa (${avgViewability.toFixed(0)}%)`)
-                if (!apiAvailable) diagnostics.push('⚠️ API 00px indisponível — dados podem estar desatualizados')
-
-                const recommendations: string[] = []
-                if (recalcPressure > 1.1) recommendations.push(`Necessário acelerar entrega em ${((recalcPressure - 1) * 100).toFixed(0)}%`)
-                if (avgViewability < 55) recommendations.push("Otimizar inventário / whitelist")
-                if (daysLeft < 3 && projectionPercent < 98) recommendations.push("Aceleração máxima imediata")
-
-                // Trend & History
-                const yesterdayVal = realHistoryArr.length >= 2 ? realHistoryArr[realHistoryArr.length - 2].value : 0
-                const realTrend: 'up' | 'down' | 'neutral' = realHistoryArr.length >= 1
-                    ? (deliveredTodayFromAPI > yesterdayVal ? 'up' : deliveredTodayFromAPI < yesterdayVal ? 'down' : 'neutral')
-                    : 'neutral'
-
-                const finalHistory = realHistoryArr.length > 0
-                    ? realHistoryArr.slice(-7).map(h => ({ date: h.date, value: h.value }))
-                    : metricHistory.map((h: { date: Date; delivered: number }) => ({ date: h.date.toISOString(), value: h.delivered }))
-
-                const finalDeliveredToday = apiAvailable ? deliveredTodayFromAPI : Math.max(0, currentDaily)
-
-                // Dev-only debug log
-                if (isDev) {
-                    console.log(`[BI] PI ${pi}: delivered=${safeDelivered} goal=${safeGoal} proj=${projectionPercent.toFixed(1)}% status=${status}`)
-                }
-
-                // -------------------------------------------------------
-                // Step 7: Return campaign object
-                // -------------------------------------------------------
-                return {
-                    id: pi,
-                    name: main.campaignName || pi,
-                    advertiser: main.client,
-                    startDate: new Date(start).toISOString(),
-                    endDate: new Date(end).toISOString(),
-                    goalImpressions: safeGoal,
-                    deliveredImpressions: safeDelivered,
-                    pacing,
-                    pacingPercent,
-                    viewability: avgViewability,
-                    status,
-                    formats,
-                    pi,
-                    manualDashboardUrl,
-                    apiAvailable,
-                    fetchedAt: result.fetchedAt || null,
-                    projection: {
-                        completion: projectedFinalValue,
-                        completionPercent: projectionPercent,
-                        total: projectedFinalValue,
-                        dailyRate: currentDaily
-                    },
-                    timeProgress,
-                    deliveryProgress,
-                    requiredDaily: Math.max(0, requiredDaily),
-                    currentDaily: recentDailyAvg,
-                    pressure: recalcPressure,
-                    isDelayedButHealthy,
-                    diagnostics,
-                    smartAlert,
-                    score,
-                    bi: {
-                        trend: realTrend,
-                        deliveredToday: finalDeliveredToday,
-                        recommendations,
-                        history: finalHistory
-                    }
+        if (data.id) {
+            await prisma.campaign.update({
+                where: { id: data.id },
+                data: payload
+            })
+        } else {
+            await prisma.campaign.create({
+                data: {
+                    ...payload,
+                    segmentation: 'AD_OPS_HUB',
+                    format: 'Link',
+                    url: data.links?.[0]?.url || data.manualDashboardUrl || 'https://',
+                    status: 'ACTIVE'
                 }
             })
-        )
+        }
+        revalidatePath('/adops')
+        return { success: true }
+    } catch (error) {
+        console.error('Failed to save AdOps dashboard:', error)
+        return { success: false, error: 'Erro ao salvar dashboard' }
+    }
+}
 
-        // Calculate globals for NexusBrain
-        let globalGoal = 0
-        let globalDelivered = 0
-        let globalToday = 0
-        let globalProjected = 0
-        let totalViewability = 0
-        let hasMetrics = 0
+/** Delete a dashboard from the hub */
+export async function deleteAdOpsDashboard(id: string) {
+    try {
+        await prisma.campaign.delete({
+            where: { id }
+        })
+        revalidatePath('/adops')
+        return { success: true }
+    } catch (error) {
+        console.error('Failed to delete AdOps dashboard:', error)
+        return { success: false, error: 'Erro ao deletar dashboard' }
+    }
+}
 
-        formattedCampaigns.forEach(c => {
-            globalGoal += c.goalImpressions
-            globalDelivered += c.deliveredImpressions
-            globalToday += c.bi.deliveredToday
-            globalProjected += c.projection.total
-            if (c.apiAvailable) {
-                totalViewability += c.viewability
-                hasMetrics++
-            }
+// ---------------------------------------------------------------------------
+// Sync Incremental — busca apenas 1 aba por vez e compara com o banco
+// ---------------------------------------------------------------------------
+
+export interface SyncResult {
+    success: boolean
+    inserted: number
+    updated: number
+    unchanged: number
+    errors: number
+    tabName: string
+    error?: string
+}
+
+/** Sincronização incremental: busca UMA aba da planilha e atualiza apenas o que mudou */
+export async function syncIncrementalFromSheet(period: string): Promise<SyncResult> {
+    const gid = TAB_MAP[period]
+    if (!gid) {
+        return { success: false, inserted: 0, updated: 0, unchanged: 0, errors: 0, tabName: period, error: `Período "${period}" não encontrado no mapa de abas.` }
+    }
+
+    try {
+        console.log(`[SYNC] Buscando dados do Pro Hub...`)
+
+        const response = await fetch(`${BASE_URL}`, {
+            cache: 'no-store',
+            signal: AbortSignal.timeout(15000)
         })
 
-        const onTrackCount = formattedCampaigns.filter(c => c.status === 'on-track' || c.status === 'over').length
-        const total = formattedCampaigns.length
-        const healthScore = total > 0 ? Math.round(safeDivide(onTrackCount, total) * 100) : 100
-        const atRiskCount = formattedCampaigns.filter(c => c.status === 'critical' || c.status === 'warning').length
-
-        return {
-            total,
-            onTrackCount,
-            healthScore,
-            atRiskCount,
-            globalGoal,
-            globalDelivered,
-            globalToday,
-            globalProjected,
-            avgViewability: safeDivide(totalViewability, hasMetrics),
-            campaigns: formattedCampaigns
+        if (!response.ok) {
+            return { success: false, inserted: 0, updated: 0, unchanged: 0, errors: 0, tabName: period, error: `HTTP ${response.status} ao buscar planilha` }
         }
+
+        const csvText = await response.text()
+        const lines = csvText.trim().split(/\r?\n/)
+
+        let inserted = 0
+        let updated = 0
+        let unchanged = 0
+        let errors = 0
+
+        for (let i = 1; i < lines.length; i++) {
+            const cols = parseCSVLine(lines[i])
+            const pi = cols[0]?.trim()
+            const client = cols[2]?.trim()
+            if (!pi || !client) continue
+
+            const incomingData = {
+                pi,
+                mediaType: parseMediaType(cols[1] || ''),
+                client: cols[2]?.trim(),
+                agency: cols[3]?.trim() || 'Interno',
+                campaignName: cols[4]?.trim() || `Campanha ${pi}`,
+                flightStart: parseDateSafe(cols[7] || ''), // Adaptar se a nova planilha tiver colunas diferentes
+                flightEnd: parseDateSafe(cols[8] || ''),
+                adOpsStatus: cols[10]?.trim().toUpperCase() || 'ATIVA',
+            }
+
+            try {
+                const existing = await prisma.campaign.findFirst({
+                    where: { pi, segmentation: 'AD_OPS_HUB' }
+                })
+
+                if (existing) {
+                    // Verifica se algo realmente mudou
+                    const hasChanges =
+                        existing.client !== incomingData.client ||
+                        existing.campaignName !== incomingData.campaignName ||
+                        existing.agency !== incomingData.agency ||
+                        existing.mediaType !== incomingData.mediaType ||
+                        existing.adOpsStatus !== incomingData.adOpsStatus ||
+                        existing.flightStart?.toISOString() !== incomingData.flightStart?.toISOString() ||
+                        existing.flightEnd?.toISOString() !== incomingData.flightEnd?.toISOString()
+
+                    if (hasChanges) {
+                        await prisma.campaign.update({
+                            where: { id: existing.id },
+                            data: {
+                                ...incomingData,
+                                updatedAt: new Date()
+                            }
+                        })
+                        updated++
+                    } else {
+                        unchanged++
+                    }
+                } else {
+                    // Registro novo — inserir
+                    await prisma.campaign.create({
+                        data: {
+                            ...incomingData,
+                            segmentation: 'AD_OPS_HUB',
+                            format: 'Link',
+                            url: 'https://',
+                            status: 'ACTIVE',
+                        }
+                    })
+                    inserted++
+                }
+            } catch (err) {
+                console.error(`[SYNC] Erro ao processar PI ${pi}:`, (err as Error).message)
+                errors++
+            }
+        }
+
+        revalidatePath('/adops')
+
+        console.log(`[SYNC] Aba ${period}: +${inserted} novos, ~${updated} atualizados, =${unchanged} sem mudança, x${errors} erros`)
+
+        return { success: true, inserted, updated, unchanged, errors, tabName: period }
     } catch (error) {
-        console.error('Failed to get aggregated metrics:', error)
-        throw error
+        console.error('[SYNC] Erro na sincronização:', error)
+        return { success: false, inserted: 0, updated: 0, unchanged: 0, errors: 0, tabName: period, error: (error as Error).message }
     }
 }

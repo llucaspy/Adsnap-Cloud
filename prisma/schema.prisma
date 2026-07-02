@@ -56,11 +56,39 @@ model Campaign {
   adOpsStatus          String          @default("ATIVA")
   captures             Capture[]
   emailDispatches      EmailDispatch[]
+  workerJobs           WorkerJob[]
 
   @@index([status, isArchived, updatedAt])
   @@index([isScheduled, isArchived, status, updatedAt])
   @@index([segmentation, captureCadence, status, updatedAt])
   @@index([processingRunId])
+}
+
+model WorkerJob {
+  id          String    @id @default(cuid())
+  type        String    @default("CAPTURE")
+  status      String    @default("QUEUED")
+  priority    Int       @default(0)
+  campaignId  String?
+  campaign    Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  runId       String?
+  payload     Json?
+  scheduledFor DateTime @default(now())
+  claimedAt   DateTime?
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  lockedUntil DateTime?
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(2)
+  timeoutMs   Int?
+  lastError   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([type, status, scheduledFor, priority, createdAt])
+  @@index([status, lockedUntil])
+  @@index([campaignId, status, createdAt])
+  @@index([runId])
 }
 
 model Capture {

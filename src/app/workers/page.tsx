@@ -1,5 +1,6 @@
 import prisma from '@/lib/prisma'
 import { WorkerLogsPanel } from '@/components/WorkerLogsPanel'
+import { isWorkerJobStorageMissing, WORKER_JOB_TYPE_CAPTURE } from '@/lib/workerJobs'
 
 export const dynamic = 'force-dynamic'
 
@@ -118,11 +119,94 @@ export default async function WorkersPage() {
     ])
 
     const batchSize = readBatchSize()
-    const waitingItems = countStatus(campaignStatusCounts, 'QUEUED') + countStatus(campaignStatusCounts, 'AUTOCONFIG')
-    const runningItems = countStatus(campaignStatusCounts, 'PROCESSING')
-    const errorItems = countStatus(campaignStatusCounts, 'FAILED') + countStatus(campaignStatusCounts, 'QUARANTINE')
+    let workerJobQueue: typeof queue = []
+    let workerJobStatusCounts: { status: string; _count: { _all: number } }[] = []
+    let workerJobRunGroups: { runId: string | null; _count: { _all: number } }[] = []
+
+    try {
+        const [jobQueue, jobStatusCounts, jobRunGroups] = await Promise.all([
+            prisma.workerJob.findMany({
+                where: {
+                    type: WORKER_JOB_TYPE_CAPTURE,
+                    status: { in: ['QUEUED', 'PROCESSING', 'FAILED'] },
+                    campaign: { is: { isArchived: false } },
+                },
+                orderBy: [{ status: 'asc' }, { priority: 'desc' }, { scheduledFor: 'asc' }],
+                take: 80,
+                include: {
+                    campaign: {
+                        select: {
+                            id: true,
+                            pi: true,
+                            client: true,
+                            campaignName: true,
+                            format: true,
+                            device: true,
+                            status: true,
+                            updatedAt: true,
+                            lastCaptureAt: true,
+                            processingStartedAt: true,
+                            processingHeartbeatAt: true,
+                            processingRunId: true,
+                            processingAttempts: true,
+                            lastWorkerError: true,
+                            lockedUntil: true,
+                            captures: {
+                                where: { status: 'SUCCESS' },
+                                orderBy: { createdAt: 'desc' },
+                                take: 1,
+                                select: { createdAt: true, screenshotPath: true, status: true },
+                            },
+                        },
+                    },
+                },
+            }),
+            prisma.workerJob.groupBy({
+                by: ['status'],
+                where: {
+                    type: WORKER_JOB_TYPE_CAPTURE,
+                    status: { in: ['QUEUED', 'PROCESSING', 'FAILED'] },
+                },
+                _count: { _all: true },
+            }),
+            prisma.workerJob.groupBy({
+                by: ['runId'],
+                where: {
+                    type: WORKER_JOB_TYPE_CAPTURE,
+                    status: 'PROCESSING',
+                    runId: { not: null },
+                },
+                _count: { _all: true },
+            }),
+        ])
+
+        workerJobQueue = jobQueue
+            .filter(job => job.campaign)
+            .map(job => ({
+                ...job.campaign!,
+                status: job.status,
+                updatedAt: job.updatedAt,
+                processingStartedAt: job.startedAt,
+                processingHeartbeatAt: job.claimedAt,
+                processingRunId: job.runId,
+                processingAttempts: job.attempts,
+                lastWorkerError: job.lastError || job.campaign!.lastWorkerError,
+                lockedUntil: job.lockedUntil,
+            }))
+        workerJobStatusCounts = jobStatusCounts
+        workerJobRunGroups = jobRunGroups
+    } catch (error) {
+        if (!isWorkerJobStorageMissing(error)) throw error
+    }
+
+    const hasWorkerJobMetrics = workerJobStatusCounts.length > 0 || workerJobQueue.length > 0
+    const statusSource = hasWorkerJobMetrics ? workerJobStatusCounts : campaignStatusCounts
+    const waitingItems = countStatus(statusSource, 'QUEUED') + (hasWorkerJobMetrics ? 0 : countStatus(campaignStatusCounts, 'AUTOCONFIG'))
+    const runningItems = countStatus(statusSource, 'PROCESSING')
+    const errorItems = countStatus(statusSource, 'FAILED') + (hasWorkerJobMetrics ? 0 : countStatus(campaignStatusCounts, 'QUARANTINE'))
     const waitingBatches = batchesFor(waitingItems, batchSize)
-    const runningBatches = processingRunGroups.length > 0 ? processingRunGroups.length : batchesFor(runningItems, batchSize)
+    const runningGroups = hasWorkerJobMetrics ? workerJobRunGroups : processingRunGroups
+    const runningBatches = runningGroups.length > 0 ? runningGroups.length : batchesFor(runningItems, batchSize)
     const errorBatches = batchesFor(errorItems, batchSize)
     const batchMetrics = {
         batchSize,
@@ -154,7 +238,7 @@ export default async function WorkersPage() {
         <WorkerLogsPanel
             generatedAt={new Date().toISOString()}
             batchMetrics={batchMetrics}
-            queue={queue.map(item => ({
+            queue={(hasWorkerJobMetrics ? workerJobQueue : queue).map(item => ({
                 ...item,
                 updatedAt: serializeDate(item.updatedAt)!,
                 lastCaptureAt: serializeDate(item.lastCaptureAt),
@@ -165,7 +249,7 @@ export default async function WorkersPage() {
                 latestCaptureUrl: item.captures[0]?.screenshotPath || null,
                 captures: undefined,
             }))}
-            campaignStatusCounts={campaignStatusCounts.map(item => ({
+            campaignStatusCounts={statusSource.map(item => ({
                 status: item.status,
                 count: item._count._all,
             }))}

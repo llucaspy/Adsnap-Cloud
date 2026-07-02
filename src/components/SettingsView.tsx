@@ -1,8 +1,53 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { Settings as SettingsIcon, Save, RotateCcw, Zap, Globe, Gauge, ShieldAlert, Cpu, Layers, Send, MessageCircle } from 'lucide-react'
+import { Settings as SettingsIcon, Save, RotateCcw, Globe, Gauge, Cpu, Layers, Send, MessageCircle, Trash2, Plus } from 'lucide-react'
 import { getSettings, updateSettings, testTelegramNotification } from '@/app/actions'
+
+/* ─── tokens ─────────────────────────────────────── */
+const C = {
+    bg: '#faf9f7',
+    surface: '#f3f0ea',
+    card: '#ede9e1',
+    border: '#e8e5df',
+    text: '#1c1917',
+    muted: '#a89f8c',
+    dim: '#d4cfc7',
+}
+
+/* ─── shared helpers ──────────────────────────────── */
+const inputClass = {
+    width: '100%',
+    background: '#faf9f7',
+    border: `0.5px solid ${C.border}`,
+    borderRadius: 6,
+    padding: '10px 14px',
+    color: C.text,
+    fontSize: 13,
+    fontFamily: 'var(--font-body)',
+    outline: 'none',
+    transition: 'border-color 0.2s',
+}
+
+const panelStyle = {
+    background: '#faf9f7',
+    border: `0.5px solid ${C.border}`,
+    borderRadius: 8,
+    padding: 28,
+    marginBottom: 0,
+}
+
+const labelStyle = {
+    fontSize: 10,
+    fontWeight: 700,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.12em',
+    color: C.muted,
+    display: 'block',
+    marginBottom: 6,
+}
+
+const hintStyle = { fontSize: 11, color: C.dim, marginTop: 4, fontStyle: 'italic' as const }
 
 export function SettingsView() {
     const [settings, setSettings] = useState<any>(null)
@@ -11,12 +56,7 @@ export function SettingsView() {
     const [message, setMessage] = useState('')
 
     useEffect(() => {
-        async function fetchSettings() {
-            const data = await getSettings()
-            setSettings(data)
-            setLoading(false)
-        }
-        fetchSettings()
+        getSettings().then(data => { setSettings(data); setLoading(false) })
     }, [])
 
     const handleSave = async (e: React.FormEvent) => {
@@ -27,219 +67,168 @@ export function SettingsView() {
             await updateSettings(settings)
             setMessage('Configurações salvas com sucesso!')
             setTimeout(() => setMessage(''), 3000)
-        } catch (error) {
+        } catch {
             setMessage('Erro ao salvar configurações.')
         } finally {
             setSaving(false)
         }
     }
 
-    if (loading) return <div className="p-8 text-center animate-pulse text-white/50">Sincronizando com o Nexus...</div>
+    if (loading) return (
+        <div style={{ padding: 40, textAlign: 'center', color: C.muted, fontSize: 13 }}>
+            Carregando configurações…
+        </div>
+    )
 
     return (
-        <div className="max-w-4xl mx-auto space-y-8 animate-slide-up pb-20">
+        <div style={{ maxWidth: 800, margin: '0 auto', paddingBottom: 80 }}>
             {/* Header */}
-            <div className="flex items-center justify-between mb-8">
+            <div style={{ marginBottom: 32, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                 <div>
-                    <h1 className="text-4xl font-black text-white flex items-center gap-3">
-                        <SettingsIcon className="w-8 h-8 text-white/60" />
-                        Configurações
-                    </h1>
-                    <p className="text-white/40 mt-1">Controle os parâmetros profundos do motor Nexus.</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                        <SettingsIcon size={20} style={{ color: C.muted }} />
+                        <h1 style={{ fontSize: 28, fontWeight: 800, color: C.text, letterSpacing: '-0.5px', fontFamily: 'var(--font-display)' }}>
+                            Configurações
+                        </h1>
+                    </div>
+                    <p style={{ fontSize: 13, color: C.muted }}>Parâmetros do motor Nexus e integrações externas.</p>
                 </div>
                 {message && (
-                    <div className="px-4 py-2 bg-white/8 border border-white/20 text-white text-sm font-bold rounded-xl">
+                    <div style={{ padding: '8px 14px', background: '#ede9e1', border: `0.5px solid ${C.border}`, color: C.text, fontSize: 12, fontWeight: 600, borderRadius: 6 }}>
                         {message}
                     </div>
                 )}
             </div>
 
-            <form onSubmit={handleSave} className="space-y-6">
-                {/* Nexus Core Group */}
-                <div className="glass-panel p-8 space-y-6">
-                    <div className="flex items-center gap-3 mb-2">
-                        <Cpu className="w-5 h-5 text-white/50" />
-                        <h2 className="text-xl font-bold text-white">Nexus Core</h2>
+            <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {/* Nexus Core */}
+                <section style={panelStyle}>
+                    <SectionTitle icon={Cpu} label="Nexus Core" />
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 20, marginTop: 20 }}>
+                        <Field label="Máximo de Retentativas" hint="Tentativas de recaptura em caso de falha.">
+                            <input style={inputClass} type="number" value={settings.nexusMaxRetries}
+                                onChange={e => setSettings({ ...settings, nexusMaxRetries: parseInt(e.target.value) })} />
+                        </Field>
+                        <Field label="Timeout de Navegação (ms)" hint="Tempo limite para carregar o site alvo.">
+                            <input style={inputClass} type="number" value={settings.nexusTimeout}
+                                onChange={e => setSettings({ ...settings, nexusTimeout: parseInt(e.target.value) })} />
+                        </Field>
+                        <Field label="Delay de Estabilização (ms)" hint="Aguardar layout antes do print.">
+                            <input style={inputClass} type="number" value={settings.nexusDelay}
+                                onChange={e => setSettings({ ...settings, nexusDelay: parseInt(e.target.value) })} />
+                        </Field>
+                        <Field label="Polling de Atividade (ms)">
+                            <input style={inputClass} type="number" value={settings.feedPollingRate}
+                                onChange={e => setSettings({ ...settings, feedPollingRate: parseInt(e.target.value) })} />
+                        </Field>
                     </div>
+                </section>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <div className="space-y-2">
-                            <label className="text-xs font-black uppercase tracking-widest text-white/40">Máximo de Retentativas</label>
+                {/* Storage Monitoring */}
+                <section style={panelStyle}>
+                    <SectionTitle icon={Gauge} label="Monitoramento de Armazenamento" />
+                    <div style={{ marginTop: 20 }}>
+                        <Field label={`Frequência de Verificação — ${settings.storageCheckFrequency || 24}h`}
+                            hint="Intervalo para verificar uso do Supabase e disparar alertas. 24h = Diário | 168h = Semanal">
                             <input
-                                type="number"
-                                value={settings.nexusMaxRetries}
-                                onChange={e => setSettings({ ...settings, nexusMaxRetries: parseInt(e.target.value) })}
-                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-white/30 transition-all"
+                                type="range" min="1" max="168" step="1"
+                                value={settings.storageCheckFrequency || 24}
+                                onChange={e => setSettings({ ...settings, storageCheckFrequency: parseInt(e.target.value) })}
+                                style={{ width: '100%', accentColor: C.text, cursor: 'pointer' }}
                             />
-                            <p className="text-[10px] text-white/20 italic">Quantas vezes o Nexus tentará recapturar um banner falho.</p>
-                        </div>
-
-                        <div className="space-y-2">
-                            <label className="text-xs font-black uppercase tracking-widest text-white/40">Timeout de Navegação (ms)</label>
-                            <input
-                                type="number"
-                                value={settings.nexusTimeout}
-                                onChange={e => setSettings({ ...settings, nexusTimeout: parseInt(e.target.value) })}
-                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-white/30 transition-all"
-                            />
-                            <p className="text-[10px] text-white/20 italic">Tempo limite para carregar o site alvo.</p>
-                        </div>
-
-                        <div className="space-y-2">
-                            <label className="text-xs font-black uppercase tracking-widest text-white/40">Delay de Estabilização (ms)</label>
-                            <input
-                                type="number"
-                                value={settings.nexusDelay}
-                                onChange={e => setSettings({ ...settings, nexusDelay: parseInt(e.target.value) })}
-                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-white/30 transition-all"
-                            />
-                            <p className="text-[10px] text-white/20 italic">Aguardar estabilização do layout antes de disparar o print.</p>
-                        </div>
-
-                        <div className="space-y-2">
-                            <label className="text-xs font-black uppercase tracking-widest text-white/40">Polling de Atividade (ms)</label>
-                            <input
-                                type="number"
-                                value={settings.feedPollingRate}
-                                onChange={e => setSettings({ ...settings, feedPollingRate: parseInt(e.target.value) })}
-                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-white/30 transition-all"
-                            />
-                        </div>
+                        </Field>
                     </div>
-                </div>
+                </section>
 
-                {/* Storage Monitoring Group */}
-                <div className="glass-panel p-8 space-y-6">
-                    <div className="flex items-center gap-3 mb-2">
-                        <Gauge className="w-5 h-5 text-white/50" />
-                        <h2 className="text-xl font-bold text-white">Monitoramento de Armazenamento</h2>
+                {/* Integrações */}
+                <section style={panelStyle}>
+                    <SectionTitle icon={Globe} label="Integrações" />
+                    <div style={{ marginTop: 20 }}>
+                        <Field label="Webhook Alerta (Discord/Slack)">
+                            <input style={inputClass} type="text" placeholder="https://hooks.slack.com/services/..."
+                                value={settings.webhookUrl || ''}
+                                onChange={e => setSettings({ ...settings, webhookUrl: e.target.value })} />
+                        </Field>
                     </div>
+                </section>
 
-                    <div className="space-y-4">
-                        <div className="space-y-2">
-                            <label className="text-xs font-black uppercase tracking-widest text-white/40">Frequência de Verificação (Horas)</label>
-                            <div className="flex items-center gap-4">
-                                <input
-                                    type="range"
-                                    min="1"
-                                    max="168"
-                                    step="1"
-                                    value={settings.storageCheckFrequency || 24}
-                                    onChange={e => setSettings({ ...settings, storageCheckFrequency: parseInt(e.target.value) })}
-                                    className="flex-1 h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer"
-                                />
-                                <span className="text-sm font-bold text-white/70 min-w-[3rem] text-right">
-                                    {settings.storageCheckFrequency || 24}h
-                                </span>
-                            </div>
-                            <p className="text-[10px] text-white/20 italic">
-                                Define o intervalo em que o Nexus verificará o uso do Supabase e disparará alertas por e-mail.
-                                <br />
-                                24h = Diário | 168h = Semanal
-                            </p>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Automation & UI Group */}
-                <div className="glass-panel p-8">
-                    <div className="flex items-center gap-3 mb-6">
-                        <Globe className="w-5 h-5 text-white/50" />
-                        <h2 className="text-xl font-bold text-white">Integrações</h2>
-                    </div>
-
-                    <div className="space-y-4">
-                        <label className="text-xs font-black uppercase tracking-widest text-white/40">Webhook Alerta (Discord/Slack)</label>
-                        <input
-                            type="text"
-                            placeholder="https://hooks.slack.com/services/..."
-                            value={settings.webhookUrl || ''}
-                            onChange={e => setSettings({ ...settings, webhookUrl: e.target.value })}
-                            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-xs focus:outline-none focus:border-white/30 transition-all"
-                        />
-                    </div>
-                </div>
-
-                {/* Telegram Bot Group */}
-                <div className="glass-panel p-8 space-y-6">
-                    <div className="flex items-center gap-3 mb-2">
-                        <MessageCircle className="w-5 h-5 text-white/50" />
-                        <h2 className="text-xl font-bold text-white">Telegram Bot</h2>
-                        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 border border-green-500/30">Gratuito</span>
-                    </div>
-                    <p className="text-sm text-white/50">
+                {/* Telegram */}
+                <section style={panelStyle}>
+                    <SectionTitle icon={MessageCircle} label="Telegram Bot" badge="Gratuito" />
+                    <p style={{ fontSize: 13, color: C.muted, marginTop: 4, marginBottom: 20 }}>
                         Receba alertas no Telegram quando houver erros de armazenamento, quarentena ou falhas críticas.
                     </p>
-
-                    <div className="space-y-4">
-                        <div className="space-y-2">
-                            <label className="text-xs font-black uppercase tracking-widest text-white/40">Chat ID do Telegram</label>
-                            <input
-                                type="text"
-                                placeholder="Ex: 123456789"
-                                value={settings.telegramChatId || ''}
-                                onChange={e => setSettings({ ...settings, telegramChatId: e.target.value })}
-                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-white/30 transition-all font-mono"
-                            />
-                            <p className="text-[10px] text-white/20 italic">
-                                Para obter seu Chat ID: envie uma mensagem para o bot e acesse<br />
-                                <code className="bg-black/30 px-1 rounded text-white/40">https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>
-                            </p>
-                        </div>
-
+                    <Field label="Chat ID do Telegram"
+                        hint={<>Para obter: envie uma mensagem ao bot e acesse <code style={{ background: C.card, padding: '1px 4px', borderRadius: 3, fontSize: 10 }}>https://api.telegram.org/bot{'{TOKEN}'}/getUpdates</code></>}>
+                        <input style={{ ...inputClass, fontFamily: 'monospace' }} type="text" placeholder="Ex: 123456789"
+                            value={settings.telegramChatId || ''}
+                            onChange={e => setSettings({ ...settings, telegramChatId: e.target.value })} />
+                    </Field>
+                    <div style={{ marginTop: 12 }}>
                         <TelegramTestButton chatId={settings.telegramChatId} />
                     </div>
-                </div>
+                </section>
 
-                {/* Banner Format Manager */}
-                <div className="glass-panel p-8 space-y-6">
-                    <div className="flex items-center gap-3 mb-2">
-                        <Layers className="w-5 h-5 text-white/50" />
-                        <h2 className="text-xl font-bold text-white">Formatos & Seletores</h2>
-                    </div>
-                    <p className="text-sm text-white/50">
-                        Defina os formatos de banner e seus seletores CSS correspondentes. O Nexus usará o seletor exato para capturar o anúncio.
+                {/* Banner Formats */}
+                <section style={panelStyle}>
+                    <SectionTitle icon={Layers} label="Formatos & Seletores" />
+                    <p style={{ fontSize: 13, color: C.muted, marginTop: 4, marginBottom: 20 }}>
+                        Defina os formatos de banner e seus seletores CSS. O Nexus usa o seletor exato para capturar o anúncio.
                     </p>
-
                     <BannerFormatManager
-                        formats={(() => {
-                            try { return JSON.parse(settings.bannerFormats || '[]') }
-                            catch { return [] }
-                        })()}
-                        onChange={(newFormats) => setSettings({ ...settings, bannerFormats: JSON.stringify(newFormats) })}
+                        formats={(() => { try { return JSON.parse(settings.bannerFormats || '[]') } catch { return [] } })()}
+                        onChange={newFormats => setSettings({ ...settings, bannerFormats: JSON.stringify(newFormats) })}
                     />
-                </div>
-                <div className="pt-4 flex justify-end">
-                    <button
-                        type="submit"
-                        disabled={saving}
-                        className="bg-white hover:bg-gray-100 text-black font-bold py-3 px-8 rounded-xl transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:scale-100 flex items-center gap-2"
-                    >
-                        {saving ? (
-                            <>
-                                <RotateCcw className="w-5 h-5 animate-spin" />
-                                Salvando...
-                            </>
-                        ) : (
-                            <>
-                                <Save className="w-5 h-5" />
-                                Salvar Alterações
-                            </>
-                        )}
+                </section>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 8 }}>
+                    <button type="submit" disabled={saving} className="btn-primary"
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 28px', opacity: saving ? 0.6 : 1 }}>
+                        {saving ? <><RotateCcw size={16} className="animate-spin" /> Salvando…</> : <><Save size={16} /> Salvar Alterações</>}
                     </button>
                 </div>
-            </form >
-        </div >
+            </form>
+        </div>
+    )
+}
+
+function SectionTitle({ icon: Icon, label, badge }: { icon: any, label: string, badge?: string }) {
+    return (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Icon size={16} style={{ color: C.muted }} />
+            <h2 style={{ fontSize: 15, fontWeight: 600, color: C.text }}>{label}</h2>
+            {badge && (
+                <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', background: '#d1fae5', color: '#065f46', borderRadius: 999, border: '0.5px solid #6ee7b7' }}>
+                    {badge}
+                </span>
+            )}
+        </div>
+    )
+}
+
+function Field({ label, hint, children }: { label: string, hint?: any, children: React.ReactNode }) {
+    return (
+        <div>
+            <label style={labelStyle}>{label}</label>
+            {children}
+            {hint && <p style={hintStyle}>{hint}</p>}
+        </div>
     )
 }
 
 function Toggle({ enabled, onChange }: { enabled: boolean, onChange: (v: boolean) => void }) {
     return (
-        <button
-            onClick={(e) => { e.preventDefault(); onChange(!enabled); }}
-            className={`w-12 h-6 rounded-full p-1 transition-colors relative ${enabled ? 'bg-white/70' : 'bg-white/10'}`}
-        >
-            <div className={`w-4 h-4 rounded-full bg-white transition-all transform ${enabled ? 'translate-x-6' : 'translate-x-0'}`} />
+        <button type="button" onClick={() => onChange(!enabled)}
+            style={{
+                width: 44, height: 24, borderRadius: 12, padding: 3, cursor: 'pointer', border: 'none',
+                background: enabled ? C.text : C.border,
+                transition: 'background 0.2s', position: 'relative',
+            }}>
+            <div style={{
+                width: 18, height: 18, borderRadius: '50%', background: '#faf9f7',
+                transition: 'transform 0.2s',
+                transform: `translateX(${enabled ? 20 : 0}px)`,
+            }} />
         </button>
     )
 }
@@ -254,137 +243,75 @@ function TelegramTestButton({ chatId }: { chatId?: string }) {
         try {
             const res = await testTelegramNotification()
             setResult(res.success ? 'success' : 'error')
-        } catch {
-            setResult('error')
-        } finally {
+        } catch { setResult('error') } finally {
             setTesting(false)
             setTimeout(() => setResult(null), 4000)
         }
     }
 
     return (
-        <div className="flex items-center gap-3">
-            <button
-                type="button"
-                onClick={handleTest}
-                disabled={testing || !chatId}
-                className="flex items-center gap-2 px-4 py-2.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 border border-blue-500/30 rounded-xl text-sm font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-                {testing ? (
-                    <><RotateCcw className="w-4 h-4 animate-spin" /> Enviando...</>
-                ) : (
-                    <><Send className="w-4 h-4" /> Testar Notificação</>
-                )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button type="button" onClick={handleTest} disabled={testing || !chatId}
+                style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '8px 14px', background: '#eff6ff', color: '#2563eb',
+                    border: '0.5px solid #bfdbfe', borderRadius: 6,
+                    fontSize: 12, fontWeight: 600, cursor: chatId ? 'pointer' : 'not-allowed',
+                    opacity: !chatId ? 0.5 : 1,
+                }}>
+                {testing ? <><RotateCcw size={14} className="animate-spin" /> Enviando…</> : <><Send size={14} /> Testar Notificação</>}
             </button>
-            {result === 'success' && (
-                <span className="text-xs text-green-400 font-bold animate-pulse">✓ Mensagem enviada!</span>
-            )}
-            {result === 'error' && (
-                <span className="text-xs text-red-400 font-bold">✗ Falha no envio. Verifique Token e Chat ID.</span>
-            )}
-            {!chatId && (
-                <span className="text-xs text-white/30">Insira o Chat ID primeiro</span>
-            )}
+            {result === 'success' && <span style={{ fontSize: 12, color: '#22c55e', fontWeight: 600 }}>✓ Mensagem enviada!</span>}
+            {result === 'error' && <span style={{ fontSize: 12, color: '#ef4444', fontWeight: 600 }}>✗ Falha. Verifique Token e Chat ID.</span>}
+            {!chatId && <span style={{ fontSize: 11, color: C.dim }}>Insira o Chat ID primeiro</span>}
         </div>
     )
 }
 
-import { Trash2, Plus } from 'lucide-react'
-
-interface BannerFormat {
-    id: string
-    label: string
-    width: number
-    height: number
-    selector: string
-}
+interface BannerFormat { id: string; label: string; width: number; height: number; selector: string }
 
 function BannerFormatManager({ formats, onChange }: { formats: BannerFormat[], onChange: (f: BannerFormat[]) => void }) {
     const [newFormat, setNewFormat] = useState<Partial<BannerFormat>>({ label: '', width: 300, height: 250, selector: '' })
 
     const addFormat = () => {
         if (!newFormat.label || !newFormat.selector) return
-        const format: BannerFormat = {
-            id: crypto.randomUUID(),
-            label: newFormat.label,
-            width: Number(newFormat.width),
-            height: Number(newFormat.height),
-            selector: newFormat.selector
-        }
-        onChange([...formats, format])
+        onChange([...formats, { id: crypto.randomUUID(), label: newFormat.label!, width: Number(newFormat.width), height: Number(newFormat.height), selector: newFormat.selector! }])
         setNewFormat({ label: '', width: 300, height: 250, selector: '' })
     }
 
-    const removeFormat = (id: string) => {
-        onChange(formats.filter(f => f.id !== id))
-    }
-
     return (
-        <div className="space-y-4">
-            {/* List */}
-            <div className="space-y-2">
-                {formats.map(format => (
-                    <div key={format.id} className="flex items-center gap-3 bg-white/5 p-3 rounded-xl border border-white/10">
-                        <div className="flex-1">
-                            <p className="font-bold text-white text-sm">{format.label}</p>
-                            <p className="text-xs text-white/50">{format.width}x{format.height} • <code className="bg-black/30 px-1 rounded text-white/60">{format.selector}</code></p>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={() => removeFormat(format.id)}
-                            className="p-2 hover:bg-red-500/20 text-white/30 hover:text-red-400 rounded-lg transition-colors"
-                        >
-                            <Trash2 size={16} />
-                        </button>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {formats.map(f => (
+                <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#f3f0ea', padding: '10px 14px', borderRadius: 6, border: `0.5px solid ${C.border}` }}>
+                    <div style={{ flex: 1 }}>
+                        <p style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{f.label}</p>
+                        <p style={{ fontSize: 11, color: C.muted }}>{f.width}×{f.height} • <code style={{ background: C.card, padding: '1px 4px', borderRadius: 3 }}>{f.selector}</code></p>
+                    </div>
+                    <button type="button" onClick={() => onChange(formats.filter(x => x.id !== f.id))}
+                        style={{ padding: 6, background: 'none', border: 'none', cursor: 'pointer', color: C.dim, borderRadius: 4 }}
+                        onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
+                        onMouseLeave={e => (e.currentTarget.style.color = C.dim)}>
+                        <Trash2 size={14} />
+                    </button>
+                </div>
+            ))}
+            <div style={{ display: 'grid', gridTemplateColumns: '3fr 1fr 1fr 4fr auto', gap: 8, background: C.card, padding: 14, borderRadius: 6, border: `0.5px solid ${C.border}` }}>
+                {[
+                    { key: 'label', placeholder: 'Billboard', label: 'Nome', type: 'text' },
+                    { key: 'width', placeholder: '300', label: 'Largura', type: 'number' },
+                    { key: 'height', placeholder: '250', label: 'Altura', type: 'number' },
+                    { key: 'selector', placeholder: "#id ou //div[@id='...']", label: 'Seletor', type: 'text' },
+                ].map(({ key, placeholder, label, type }) => (
+                    <div key={key}>
+                        <label style={labelStyle}>{label}</label>
+                        <input type={type} placeholder={placeholder} value={(newFormat as any)[key]}
+                            onChange={e => setNewFormat({ ...newFormat, [key]: e.target.value })}
+                            style={{ ...inputClass, fontFamily: key === 'selector' ? 'monospace' : 'inherit', fontSize: 12 }} />
                     </div>
                 ))}
-            </div>
-
-            {/* Add New */}
-            <div className="grid grid-cols-12 gap-2 bg-black/20 p-4 rounded-xl border border-white/5">
-                <div className="col-span-3">
-                    <label className="text-[10px] uppercase font-bold text-white/30">Nome</label>
-                    <input
-                        className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-sm text-white"
-                        placeholder="Ex: Billboard"
-                        value={newFormat.label}
-                        onChange={e => setNewFormat({ ...newFormat, label: e.target.value })}
-                    />
-                </div>
-                <div className="col-span-2">
-                    <label className="text-[10px] uppercase font-bold text-white/30">Largura</label>
-                    <input
-                        type="number"
-                        className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-sm text-white"
-                        value={newFormat.width}
-                        onChange={e => setNewFormat({ ...newFormat, width: Number(e.target.value) })}
-                    />
-                </div>
-                <div className="col-span-2">
-                    <label className="text-[10px] uppercase font-bold text-white/30">Altura</label>
-                    <input
-                        type="number"
-                        className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-sm text-white"
-                        value={newFormat.height}
-                        onChange={e => setNewFormat({ ...newFormat, height: Number(e.target.value) })}
-                    />
-                </div>
-                <div className="col-span-4">
-                    <label className="text-[10px] uppercase font-bold text-white/30">Seletor (CSS ou XPath)</label>
-                    <input
-                        className="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-sm text-white font-mono"
-                        placeholder="#id ou //div[@id='...']"
-                        value={newFormat.selector}
-                        onChange={e => setNewFormat({ ...newFormat, selector: e.target.value })}
-                    />
-                </div>
-                <div className="col-span-1 flex items-end">
-                    <button
-                        type="button"
-                        onClick={addFormat}
-                        disabled={!newFormat.label || !newFormat.selector}
-                        className="w-full h-[30px] bg-white hover:bg-gray-100 text-black rounded-lg flex items-center justify-center disabled:opacity-50 transition-colors"
-                    >
+                <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                    <button type="button" onClick={addFormat} disabled={!newFormat.label || !newFormat.selector}
+                        style={{ width: 36, height: 36, borderRadius: 6, background: C.text, color: '#faf9f7', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <Plus size={16} />
                     </button>
                 </div>

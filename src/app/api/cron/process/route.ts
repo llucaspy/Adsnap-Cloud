@@ -3,6 +3,7 @@ import prisma from '@/lib/prisma'
 import { nexusLogStore } from '@/lib/nexusLogStore'
 import { triggerNexusWorker } from '@/app/actions'
 import { shouldQueueScheduledCampaign } from '@/lib/campaignSchedule'
+import { enqueueCaptureJobs } from '@/lib/workerJobs'
 
 export const dynamic = 'force-dynamic'
 
@@ -65,7 +66,7 @@ export async function GET() {
             where: {
                 isScheduled: true,
                 isArchived: false,
-                status: { notIn: ['EXPIRED', 'FINISHED', 'PROCESSING', 'QUEUED'] },
+                status: { notIn: ['EXPIRED', 'FINISHED', 'PROCESSING', 'QUEUED', 'FAILED', 'QUARANTINE'] },
             }
         })
 
@@ -74,14 +75,18 @@ export async function GET() {
 
         console.log(`[Cron] Enqueuing ${campaignsToQueue.length} campaigns.`)
 
-        // Step 4: Mark as QUEUED
+        // Step 4: Queue capture jobs
         if (campaignsToQueue.length > 0) {
-            await prisma.campaign.updateMany({
-                where: { id: { in: campaignsToQueue.map(campaign => campaign.id) } },
-                data: { status: 'QUEUED' }
+            const queueResult = await enqueueCaptureJobs(campaignsToQueue.map(campaign => campaign.id), {
+                source: 'cron-schedule',
+                priority: 5,
             })
 
-            nexusLogStore.addLog(`Agendador: ${campaignsToQueue.length} campanha(s) enfileirada(s) para ${currentTime}`, 'SYSTEM')
+            nexusLogStore.addLog(
+                `Agendador: ${campaignsToQueue.length} campanha(s) enfileirada(s) para ${currentTime}`,
+                'SYSTEM',
+                JSON.stringify(queueResult)
+            )
 
             // Step 5: Trigger GitHub Worker
             await triggerNexusWorker()

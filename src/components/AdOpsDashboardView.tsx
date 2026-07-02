@@ -1,875 +1,436 @@
 'use client'
 
-import React, { useState, useEffect, useSyncExternalStore } from 'react'
-import { 
-    Activity, 
-    Calendar, 
-    Target, 
-    Eye, 
-    TrendingUp, 
-    ChevronDown,
-    AlertCircle,
-    AlertTriangle,
-    CheckCircle2,
-    Clock,
-    RefreshCw,
-    X,
-    Bell,
-    Zap,
-    Layout,
-    HelpCircle
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import {
+    Activity, Plus, Trash2, ExternalLink, X, Loader2, Search, Pencil,
+    RefreshCw, Globe, Mic, Monitor, Upload, ArrowRight,
+    CheckCircle2, FileText, Zap, Clock, CalendarDays, AlertCircle
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { format } from 'date-fns'
-import { ptBR } from 'date-fns/locale'
-import { useRouter } from 'next/navigation'
+import { format, differenceInDays, isPast } from 'date-fns'
+import {
+    saveAdOpsDashboard, deleteAdOpsDashboard, getAdOpsDashboards,
+    bulkSaveAdOpsDashboards, syncIncrementalFromSheet,
+    type AdOpsDashboard as DashboardType, type DashboardLink
+} from '@/app/adops/actions'
 
-// --- Constants ---
-const REFRESH_INTERVAL = 120000 // 2 minutes
-const ALERT_SOUND_URL = 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3'
-
-type ToastType = 'critical' | 'warning' | 'info'
-
-interface Toast {
-    id: string
-    title: string
-    message: string
-    type: ToastType
+/* ─── Palette ───────────────────────────────────────── */
+const C = {
+    bg: '#faf9f7', surface: '#f3f0ea', card: '#ede9e1',
+    border: '#e8e5df', text: '#1c1917', muted: '#a89f8c', dim: '#d4cfc7',
 }
 
-const ToastContext = React.createContext<{
-    addToast: (title: string, message: string, type: ToastType) => void
-} | null>(null)
-
-function useToast() {
-    const context = React.useContext(ToastContext)
-    if (!context) throw new Error('useToast must be used within ToastProvider')
-    return context
+const inputSt = {
+    width: '100%', padding: '10px 14px', background: '#faf9f7',
+    border: `0.5px solid ${C.border}`, borderRadius: 6, fontSize: 13,
+    color: C.text, fontFamily: 'var(--font-body)', outline: 'none',
 }
 
-function ToastProvider({ children }: { children: React.ReactNode }) {
-    const [toasts, setToasts] = useState<Toast[]>([])
-
-    const addToast = (title: string, message: string, type: ToastType) => {
-        const id = Math.random().toString(36).substring(2, 9)
-        setToasts(prev => [...prev, { id, title, message, type }])
-        
-        // Play sound
-        const audio = new Audio(ALERT_SOUND_URL)
-        audio.volume = 0.4
-        audio.play().catch(e => console.log('Audio play blocked:', e))
-
-        setTimeout(() => {
-            setToasts(prev => prev.filter(t => t.id !== id))
-        }, 5000)
-    }
-
-    return (
-        <ToastContext.Provider value={{ addToast }}>
-            {children}
-            <div className="fixed top-6 right-6 z-50 flex flex-col gap-3 w-80 pointer-events-none">
-                <AnimatePresence mode="popLayout">
-                    {toasts.map(toast => (
-                        <motion.div
-                            key={toast.id}
-                            layout
-                            initial={{ opacity: 0, x: 50, scale: 0.9 }}
-                            animate={{ opacity: 1, x: 0, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.8, transition: { duration: 0.2 } }}
-                            className={`pointer-events-auto p-4 rounded-2xl border backdrop-blur-xl shadow-2xl flex gap-4 ${
-                                toast.type === 'critical' ? 'bg-rose-50/90 border-rose-200' : 
-                                toast.type === 'warning' ? 'bg-orange-50/90 border-orange-200' : 
-                                'bg-white/90 border-zinc-200'
-                            }`}
-                        >
-                            <div className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${
-                                toast.type === 'critical' ? 'bg-rose-500 text-white' : 
-                                toast.type === 'warning' ? 'bg-orange-500 text-white' : 
-                                'bg-zinc-900 text-white'
-                            }`}>
-                                {toast.type === 'critical' ? <AlertCircle size={20} /> : <Bell size={20} />}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <div className="text-xs font-black uppercase tracking-widest text-zinc-900 leading-none mb-1">{toast.title}</div>
-                                <div className="text-xs text-zinc-500 font-medium leading-relaxed">{toast.message}</div>
-                            </div>
-                            <button 
-                                onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
-                                className="shrink-0 text-zinc-400 hover:text-zinc-600 transition-colors"
-                            >
-                                <X size={16} />
-                            </button>
-                        </motion.div>
-                    ))}
-                </AnimatePresence>
-            </div>
-        </ToastContext.Provider>
-    )
-}
-// -----------------------------
-
-interface Format {
-    name: string
-    goal: number
-    delivered: number
-    viewability: number
-    pacing: number
+/* ─── Helpers ───────────────────────────────────────── */
+function getDays(end: Date | null): number | null {
+    if (!end) return null
+    return differenceInDays(new Date(end), new Date())
 }
 
-interface Campaign {
-    id: string
-    name: string
-    advertiser: string
-    campaignName?: string
-    startDate: string
-    endDate: string
-    goalImpressions: number
-    deliveredImpressions: number
-    pacing: number // Real-time pacing (0-2)
-    pacingPercent: number
-    viewability: number
-    status: 'on-track' | 'warning' | 'critical' | 'over'
-    formats: Format[]
-    projection: {
-        completion: number
-        completionPercent: number
-        total: number
-        dailyRate: number
-    }
-    requiredDaily: number
-    currentDaily: number
-    pressure: number
-    timeProgress: number
-    deliveryProgress: number
-    isDelayedButHealthy: boolean
-    diagnostics: string[]
-    pi: string
-    manualDashboardUrl: string | null
-    smartAlert: string | null
-    score: number
-    apiAvailable?: boolean
-    fetchedAt?: string | null
-    bi: {
-        trend: 'up' | 'down' | 'neutral'
-        deliveredToday: number
-        recommendations: string[]
-        history: { date: string, value: number }[]
+function getStatusBadge(status: string | undefined, days: number | null, end: Date | null) {
+    if (status === 'CONCLUIDA') return { label: 'Concluída', color: C.muted, bg: C.card }
+    if (status === 'PAUSADA') return { label: 'Pausada', color: '#b45309', bg: '#fef3c7' }
+    if (status === 'PROGRAMADA') return { label: 'Programada', color: '#2563eb', bg: '#eff6ff' }
+    if (days === null) return { label: 'Ativa', color: '#16a34a', bg: '#f0fdf4' }
+    if (end && isPast(new Date(end)) && days! < 0) return { label: 'Encerrada', color: C.muted, bg: C.surface }
+    if (days === 0) return { label: 'Encerra hoje!', color: '#ef4444', bg: '#fef2f2' }
+    if (days! <= 3) return { label: `${days}d restantes`, color: '#ef4444', bg: '#fef2f2' }
+    return { label: 'Ativa', color: '#16a34a', bg: '#f0fdf4' }
+}
+
+function getMediaIcon(media: string | undefined) {
+    switch (media) {
+        case 'RADIO': return <Mic size={14} />
+        case 'PAINEL': return <Monitor size={14} />
+        default: return <Globe size={14} />
     }
 }
 
-interface AdOpsStats {
-    total: number
-    onTrackCount: number
-    healthScore: number
-    atRiskCount: number
-    campaigns: Campaign[]
-}
+/* ─── Import Modal ───────────────────────────────────── */
+function ImportSpreadsheetModal({ isOpen, onClose, onRefresh }: { isOpen: boolean; onClose: () => void; onRefresh: () => void }) {
+    const [csvData, setCsvData] = useState('')
+    const [loading, setLoading] = useState(false)
+    const [error, setError] = useState<string | null>(null)
 
-// Helper functions (adapted from reference)
-function formatNumber(n: number): string {
-    return Math.round(n).toLocaleString('pt-BR')
-}
-
-function getTimeElapsed(start: string, end: string): number {
-    const s = new Date(start).getTime()
-    const e = new Date(end).getTime()
-    const now = Date.now()
-    if (now >= e) return 100
-    if (now <= s) return 0
-    return ((now - s) / (e - s)) * 100
-}
-
-function getDaysRemaining(end: string): number {
-    const diff = new Date(end).getTime() - Date.now()
-    return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)))
-}
-
-export default function AdOpsDashboardView({ stats, campaigns }: { stats: AdOpsStats, campaigns: Campaign[] }) {
-    const router = useRouter()
-    const [isRefreshing, setIsRefreshing] = useState(false)
-
-    // Auto-refresh every 2 minutes
-    useEffect(() => {
-        const interval = setInterval(() => {
-            router.refresh()
-        }, REFRESH_INTERVAL)
-        return () => clearInterval(interval)
-    }, [router])
-
-    const handleManualRefresh = () => {
-        setIsRefreshing(true)
-        router.refresh()
-        setTimeout(() => setIsRefreshing(false), 2000)
-    }
-
-    return (
-        <ToastProvider>
-            <DashboardContent 
-                stats={stats} 
-                campaigns={campaigns} 
-                onRefresh={handleManualRefresh}
-                isRefreshing={isRefreshing}
-            />
-        </ToastProvider>
-    )
-}
-
-function DashboardContent({ stats, campaigns, onRefresh, isRefreshing }: { stats: AdOpsStats, campaigns: Campaign[], onRefresh: () => void, isRefreshing: boolean }) {
-    const [activeTab, setActiveTab] = useState<'tudo' | 'critical' | 'warning' | 'on-track' | 'over'>('tudo')
-
-    const filteredCampaigns = activeTab === 'tudo'
-        ? campaigns
-        : campaigns.filter(c => c.status === activeTab)
-
-    return (
-        <div className="space-y-8 animate-slide-up pb-20">
-            {/* Header Area */}
-            <header className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-                <div>
-                    <div className="flex items-center gap-2.5 mb-2">
-                        <div className="h-5 w-5 rounded-lg bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
-                            <Activity className="h-3 w-3 text-emerald-400" />
-                        </div>
-                        <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white/40">Painel de Performance AdOps</span>
-                    </div>
-                    <div className="flex items-center gap-4">
-                        <h1 className="text-3xl font-black text-white tracking-tighter">Visão Geral de Entrega</h1>
-                        <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 group/live cursor-default">
-                           <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                           <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">Vivo (2m)</span>
-                        </div>
-                    </div>
-                    <p className="text-xs text-white/40 mt-1 font-medium">
-                        {stats.atRiskCount} campanhas requerem atenção imediata.
-                    </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <button 
-                    onClick={onRefresh}
-                    disabled={isRefreshing}
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white/60 hover:bg-white/10 hover:text-white transition-all disabled:opacity-50"
-                  >
-                    <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
-                    {isRefreshing ? 'Atualizando...' : 'Atualizar Agora'}
-                  </button>
-                  <div className="flex items-center gap-3 bg-zinc-900/50 border border-white/5 px-4 py-2 rounded-xl backdrop-blur-md">
-                    <span className="text-[10px] font-bold text-white/30 uppercase tracking-widest">Status Global:</span>
-                    <div className="flex items-center gap-1.5">
-                      <div className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse" />
-                      <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Saudável</span>
-                    </div>
-                  </div>
-                </div>
-            </header>
-
-            {/* Health Score Grid */}
-            <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <HealthCard 
-                    label="Saúde da Operação" 
-                    value={`${stats.healthScore}%`} 
-                    sub={`${stats.onTrackCount}/${stats.total} no prazo`} 
-                    icon={TrendingUp}
-                    index={0}
-                />
-                <HealthCard 
-                    label="Em Risco" 
-                    value={stats.atRiskCount} 
-                    sub="campanhas críticas" 
-                    icon={AlertCircle}
-                    highlight={stats.atRiskCount > 0}
-                    index={1}
-                />
-                <HealthCard 
-                    label="Entrega Total (Real)" 
-                    value={formatNumber(stats.campaigns.reduce((s: number, c: Campaign) => s + c.deliveredImpressions, 0))} 
-                    sub={`meta: ${formatNumber(stats.campaigns.reduce((s: number, c: Campaign) => s + c.goalImpressions, 0))}`} 
-                    icon={Target}
-                    index={2}
-                />
-                <HealthCard 
-                    label="Média Viewability" 
-                    value={`${(stats.campaigns.reduce((s: number, c: Campaign) => s + c.viewability, 0) / (stats.total || 1)).toFixed(1)}%`} 
-                    sub="métrica consolidada" 
-                    icon={Eye}
-                    index={3}
-                />
-            </section>
-
-            {/* Filters Area */}
-            <div className="flex gap-3 flex-wrap items-center">
-                <FilterButton label="Tudo" active={activeTab === 'tudo'} count={stats.total} onClick={() => setActiveTab('tudo')} />
-                <FilterButton label="Crítico" active={activeTab === 'critical'} count={stats.campaigns.filter((c: Campaign) => c.status === 'critical').length} onClick={() => setActiveTab('critical')} color="text-rose-500" />
-                <FilterButton label="Under" active={activeTab === 'warning'} count={stats.campaigns.filter((c: Campaign) => c.status === 'warning').length} onClick={() => setActiveTab('warning')} color="text-orange-500" />
-                <FilterButton label="No Prazo" active={activeTab === 'on-track'} count={stats.campaigns.filter((c: Campaign) => c.status === 'on-track').length} onClick={() => setActiveTab('on-track')} color="text-emerald-500" />
-                <FilterButton label="Over" active={activeTab === 'over'} count={stats.campaigns.filter((c: Campaign) => c.status === 'over').length} onClick={() => setActiveTab('over')} color="text-blue-500" />
-            </div>
-
-            {/* Campaign Cards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                <AnimatePresence mode="popLayout">
-                    {filteredCampaigns.map((campaign, i) => (
-                        <CampaignRefCard key={campaign.id} campaign={campaign} index={i} />
-                    ))}
-                    {filteredCampaigns.length === 0 && (
-                        <motion.div 
-                            initial={{ opacity: 0 }} 
-                            animate={{ opacity: 1 }} 
-                            className="col-span-full py-20 flex flex-col items-center justify-center bg-zinc-900/30 border border-dashed border-white/5 rounded-3xl"
-                        >
-                            <CheckCircle2 size={40} className="text-white/10 mb-4" />
-                            <p className="text-[11px] font-black text-white/20 uppercase tracking-[0.4em]">Nenhuma campanha neste status</p>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-            </div>
-        </div>
-    )
-}
-
-function HealthCard({ label, value, sub, icon: Icon, highlight, index }: { label: string, value: string | number, sub: string, icon: React.ElementType, highlight?: boolean, index: number }) {
-
-    return (
-        <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.1 }}
-            className={`bg-white border rounded-2xl p-6 relative overflow-hidden group shadow-sm transition-all duration-500 hover:shadow-md border-zinc-200`}
-        >
-            <div className="absolute -right-4 -top-4 opacity-[0.05] group-hover:opacity-[0.1] transition-opacity text-black">
-                <Icon size={120} />
-            </div>
-            <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-3">{label}</p>
-            <p className={`text-4xl font-black tracking-tighter ${highlight ? 'text-rose-600' : 'text-zinc-900'}`}>
-                {value}
-            </p>
-            <p className="text-[11px] font-medium text-zinc-500 mt-1 uppercase tracking-wider">{sub}</p>
-        </motion.div>
-    )
-}
-
-function FilterButton({ label, active, count, onClick, color }: { label: string, active: boolean, count: number, onClick: () => void, color?: string }) {
-    return (
-        <button
-            onClick={onClick}
-            className={`px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-3 border ${
-                active 
-                    ? 'bg-white text-black border-white shadow-[0_0_20px_rgba(255,255,255,0.15)]' 
-                    : 'bg-zinc-900/50 text-white/40 border-white/5 hover:border-white/20 hover:text-white backdrop-blur-md'
-            }`}
-        >
-            <span className={active ? '' : color}>{label}</span>
-            <span className={`px-1.5 py-0.5 rounded-md text-[9px] ${active ? 'bg-black/10' : 'bg-white/5'}`}>{count}</span>
-        </button>
-    )
-}
-
-const STATUS_STYLES: Record<string, { text: string, bg: string, border: string, label: string, ring: string, shadow: string, glow: string }> = {
-    'critical': { text: 'text-rose-600', bg: 'bg-rose-50', border: 'border-rose-100', label: 'CRÍTICO', ring: 'ring-rose-500/20', shadow: 'hover:shadow-rose-500/10', glow: 'bg-rose-500' },
-    'warning': { text: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-100', label: 'UNDER', ring: 'ring-orange-500/20', shadow: 'hover:shadow-orange-500/10', glow: 'bg-orange-500' },
-    'on-track': { text: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100', label: 'NO PRAZO', ring: 'ring-emerald-500/20', shadow: 'hover:shadow-emerald-500/10', glow: 'bg-emerald-500' },
-    'over': { text: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100', label: 'OVER', ring: 'ring-blue-500/20', shadow: 'hover:shadow-blue-500/10', glow: 'bg-blue-500' }
-}
-
-// Circular SVG progress ring for projection
-function ProjectionRing({ percent, size = 56, stroke = 4, status }: { percent: number, size?: number, stroke?: number, status: string }) {
-    const radius = (size - stroke) / 2
-    const circumference = 2 * Math.PI * radius
-    const offset = circumference - (Math.min(percent, 100) / 100) * circumference
-    const color = status === 'critical' ? '#e11d48' : status === 'warning' ? '#f97316' : status === 'over' ? '#3b82f6' : '#10b981'
-    return (
-        <div className="relative" style={{ width: size, height: size }}>
-            <svg width={size} height={size} className="-rotate-90">
-                <circle cx={size/2} cy={size/2} r={radius} fill="none" stroke="currentColor" strokeWidth={stroke} className="text-zinc-100" />
-                <circle cx={size/2} cy={size/2} r={radius} fill="none" stroke={color} strokeWidth={stroke} strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round" className="transition-all duration-1000" />
-            </svg>
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-[11px] font-black text-zinc-900 tabular-nums leading-none">{percent.toFixed(0)}%</span>
-            </div>
-        </div>
-    )
-}
-
-function CampaignRefCard({ campaign, index }: { campaign: Campaign, index: number }) {
-    const [expanded, setExpanded] = useState(false)
-    const mounted = useSyncExternalStore(() => () => {}, () => true, () => false)
-    const { addToast } = useToast()
-    const lastStatus = React.useRef(campaign.status)
-    
-    // Monitor status changes for alerts
-    useEffect(() => {
-        if (!mounted) return
-
-        if (lastStatus.current !== campaign.status) {
-            if (campaign.status === 'critical') {
-                addToast('Alerta Crítico!', `A campanha ${campaign.name} está em estado crítico de entrega.`, 'critical')
-            } else if (campaign.status === 'warning') {
-                addToast('Atenção!', `A campanha ${campaign.name} está abaixo do pacing esperado.`, 'warning')
-            } else if (campaign.status === 'over') {
-                addToast('Overdelivery!', `A campanha ${campaign.name} ultrapassou a meta.`, 'info')
-            }
-            lastStatus.current = campaign.status
-        }
-    }, [campaign.status, campaign.name, addToast, mounted])
-
-    const timeElapsed = mounted ? getTimeElapsed(campaign.startDate, campaign.endDate) : 0
-    const margin = campaign.deliveredImpressions - campaign.goalImpressions
-    const isFakeHealthy = campaign.status === 'on-track' && (campaign.projection?.completionPercent || 0) < 95
-
-    const { text, bg, border, label, ring, shadow, glow } = STATUS_STYLES[campaign.status]
-
-    const [mousePos, setMousePos] = useState({ x: 50, y: 50 })
-    const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-        const rect = e.currentTarget.getBoundingClientRect()
-        setMousePos({
-            x: ((e.clientX - rect.left) / rect.width) * 100,
-            y: ((e.clientY - rect.top) / rect.height) * 100
-        })
-    }
-    
-    const [showPacingHelp, setShowPacingHelp] = useState(false)
-
-    // Use any for variants to avoid complex TargetAndTransition / TargetResolver type conflicts in React 19 + Framer Motion
-    const containerVariants: any = {
-        hidden: { opacity: 0, y: 30, scale: 0.98 },
-        visible: (i: number) => ({ 
-            opacity: 1, 
-            y: 0, 
-            scale: 1,
-            transition: { 
-                delay: Math.min(i * 0.05, 0.5),
-                duration: 0.8,
-                ease: "circOut",
-                staggerChildren: 0.1,
-                delayChildren: Math.min(i * 0.05, 0.5) + 0.2
-            }
-        })
-    }
-
-    const itemVariants: any = {
-        hidden: { opacity: 0, y: 15, scale: 0.95 },
-        visible: { 
-            opacity: 1, 
-            y: 0, 
-            scale: 1,
-            transition: { 
-                duration: 0.5, 
-                ease: "circOut"
-            } 
-        }
-    }
-
-    const formatLastUpdate = (iso: string | null | undefined) => {
-        if (!iso) return 'Desconhecido'
+    const handleImport = async () => {
+        if (!csvData.trim()) return
+        setLoading(true); setError(null)
         try {
-            return format(new Date(iso), "HH:mm 'de' dd/MM", { locale: ptBR })
-        } catch {
-            return 'Erro no formato'
+            const lines = csvData.trim().split('\n')
+            const isTSV = csvData.includes('\t')
+            const separator = isTSV ? '\t' : ','
+            const dashboards: Partial<DashboardType>[] = lines.slice(1).map(line => {
+                const cols = line.split(separator)
+                const parseDate = (d: string) => {
+                    if (!d || d.trim() === '') return null
+                    const p = d.trim().split('/')
+                    if (p.length === 3) return new Date(`${p[2]}-${p[1]}-${p[0]}T12:00:00`)
+                    return null
+                }
+                return {
+                    pi: cols[0]?.trim(), mediaType: cols[1]?.trim().toUpperCase().includes('RÁDIO') ? 'RADIO' : cols[1]?.trim().toUpperCase().includes('PAINEL') ? 'PAINEL' : 'PORTAL',
+                    client: cols[2]?.trim(), agency: cols[3]?.trim(), campaignName: cols[4]?.trim(),
+                    flightStart: parseDate(cols[7]?.trim()), flightEnd: parseDate(cols[8]?.trim()),
+                    adOpsStatus: cols[10]?.trim().toUpperCase() || 'ATIVA', links: []
+                }
+            }).filter(d => d.pi && d.client)
+            const res = await bulkSaveAdOpsDashboards(dashboards)
+            if (res.success) { onRefresh(); onClose() } else { setError(res.error || 'Erro na importação') }
+        } catch { setError('Erro ao processar dados. Verifique o formato.') } finally { setLoading(false) }
+    }
+
+    if (!isOpen) return null
+    return (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)' }}>
+            <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
+                style={{ width: '100%', maxWidth: 600, background: '#faf9f7', border: `0.5px solid ${C.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,0.12)' }}>
+                <div style={{ padding: 28 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+                        <div>
+                            <h2 style={{ fontSize: 18, fontWeight: 700, color: C.text }}>Importar Dados</h2>
+                            <p style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>Cole as linhas da planilha abaixo para atualização manual.</p>
+                        </div>
+                        <button onClick={onClose} style={{ padding: 6, background: 'none', border: 'none', cursor: 'pointer', color: C.muted }}><X size={18} /></button>
+                    </div>
+                    <textarea value={csvData} onChange={e => setCsvData(e.target.value)}
+                        placeholder="Cole aqui os dados..."
+                        style={{ ...inputSt, height: 220, resize: 'none', fontFamily: 'monospace', fontSize: 12, lineHeight: 1.6 }} />
+                    {error && <div style={{ marginTop: 8, padding: '8px 12px', background: '#fef2f2', border: '0.5px solid #fca5a5', borderRadius: 5, color: '#ef4444', fontSize: 12 }}>{error}</div>}
+                    <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+                        <button onClick={onClose} className="btn-ghost" style={{ flex: 1, padding: '10px 0', fontSize: 13 }}>Cancelar</button>
+                        <button onClick={handleImport} disabled={loading || !csvData} className="btn-primary" style={{ flex: 1, padding: '10px 0', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                            {loading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} Importar
+                        </button>
+                    </div>
+                </div>
+            </motion.div>
+        </div>
+    )
+}
+
+/* ─── Add / Edit Modal ────────────────────────────────── */
+function AddDashboardModal({ isOpen, onClose, onRefresh, initialData }: { isOpen: boolean; onClose: () => void; onRefresh: () => void; initialData?: DashboardType | null }) {
+    const [loading, setLoading] = useState(false)
+    const [formData, setFormData] = useState({ client: '', campaignName: '', pi: '', mediaType: 'PORTAL', adOpsStatus: 'ATIVA', flightStart: '', flightEnd: '', links: [{ url: '', type: 'PAGO' } as DashboardLink] })
+
+    useEffect(() => {
+        if (!isOpen) return
+        if (initialData) {
+            setFormData({ client: initialData.client || '', campaignName: initialData.campaignName || '', pi: initialData.pi || '', mediaType: initialData.mediaType || 'PORTAL', adOpsStatus: initialData.adOpsStatus || 'ATIVA', flightStart: initialData.flightStart ? new Date(initialData.flightStart).toISOString().split('T')[0] : '', flightEnd: initialData.flightEnd ? new Date(initialData.flightEnd).toISOString().split('T')[0] : '', links: initialData.links?.length ? initialData.links as DashboardLink[] : [{ url: initialData.manualDashboardUrl || '', type: 'PAGO' }] })
+        } else {
+            setFormData({ client: '', campaignName: '', pi: '', mediaType: 'PORTAL', adOpsStatus: 'ATIVA', flightStart: new Date().toISOString().split('T')[0], flightEnd: '', links: [{ url: '', type: 'PAGO' }] })
         }
+    }, [isOpen, initialData])
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault(); setLoading(true)
+        const res = await saveAdOpsDashboard({ id: initialData?.id, ...formData, flightStart: formData.flightStart ? new Date(`${formData.flightStart}T12:00:00`) : null, flightEnd: formData.flightEnd ? new Date(`${formData.flightEnd}T12:00:00`) : null, links: formData.links as DashboardLink[] })
+        setLoading(false); if (res.success) { onRefresh(); onClose() }
+    }
+
+    if (!isOpen) return null
+    const labelSt = { fontSize: 10, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.12em', color: C.muted, display: 'block', marginBottom: 4 }
+    return (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)' }}>
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+                style={{ width: '100%', maxWidth: 480, background: '#faf9f7', border: `0.5px solid ${C.border}`, borderRadius: 12, boxShadow: '0 24px 64px rgba(0,0,0,0.12)', overflow: 'hidden' }}>
+                <div style={{ padding: 28 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
+                        <h2 style={{ fontSize: 18, fontWeight: 700, color: C.text }}>{initialData ? 'Editar' : 'Novo'} Dashboard</h2>
+                        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.muted }}><X size={18} /></button>
+                    </div>
+                    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                            <div><label style={labelSt}>PI</label><input required value={formData.pi} onChange={e => setFormData(p => ({ ...p, pi: e.target.value }))} style={inputSt} /></div>
+                            <div><label style={labelSt}>Meio</label>
+                                <select value={formData.mediaType} onChange={e => setFormData(p => ({ ...p, mediaType: e.target.value }))} style={inputSt}>
+                                    <option value="PORTAL">PORTAL</option><option value="RADIO">RÁDIO</option><option value="PAINEL">PAINEL</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div><label style={labelSt}>Cliente</label><input required value={formData.client} onChange={e => setFormData(p => ({ ...p, client: e.target.value }))} style={inputSt} /></div>
+                        <div><label style={labelSt}>Campanha</label><input required value={formData.campaignName} onChange={e => setFormData(p => ({ ...p, campaignName: e.target.value }))} style={inputSt} /></div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                            <div><label style={labelSt}>Data Início</label><input required type="date" value={formData.flightStart} onChange={e => setFormData(p => ({ ...p, flightStart: e.target.value }))} style={inputSt} /></div>
+                            <div><label style={labelSt}>Data Fim</label><input required type="date" value={formData.flightEnd} onChange={e => setFormData(p => ({ ...p, flightEnd: e.target.value }))} style={inputSt} /></div>
+                        </div>
+                        <div><label style={labelSt}>Link Principal</label>
+                            <input type="url" value={formData.links[0]?.url} onChange={e => { const ls = [...formData.links]; ls[0] = { ...ls[0], url: e.target.value, type: 'PAGO' as const }; setFormData(p => ({ ...p, links: ls })) }} style={inputSt} />
+                        </div>
+                        <div style={{ display: 'flex', gap: 10 }}>
+                            <button type="button" onClick={onClose} className="btn-ghost" style={{ flex: 1, padding: '10px 0', fontSize: 13 }}>Cancelar</button>
+                            <button type="submit" disabled={loading} className="btn-primary" style={{ flex: 1, padding: '10px 0', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                                {loading && <Loader2 size={14} className="animate-spin" />} Salvar
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </motion.div>
+        </div>
+    )
+}
+
+/* ─── Campaign Card ────────────────────────────────────── */
+function CampaignCard({ item, onDelete, onEdit, isCompact = false }: { item: DashboardType; onDelete: (id: string) => void; onEdit: (item: DashboardType) => void; isCompact?: boolean }) {
+    const days = getDays(item.flightEnd)
+    const badge = getStatusBadge(item.adOpsStatus, days, item.flightEnd)
+    const progress = useMemo(() => {
+        if (!item.flightStart || !item.flightEnd) return 0
+        const s = new Date(item.flightStart).getTime(), e = new Date(item.flightEnd).getTime(), n = Date.now()
+        return Math.max(0, Math.min(100, ((n - s) / (e - s)) * 100))
+    }, [item.flightStart, item.flightEnd])
+
+    if (isCompact) {
+        return (
+            <motion.div layout
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: '#faf9f7', border: `0.5px solid ${C.border}`, borderRadius: 8, minWidth: 260, cursor: 'pointer', transition: 'box-shadow 0.2s' }}
+                onClick={() => item.links?.[0]?.url && window.open(item.links[0].url, '_blank')}
+                onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.07)')}
+                onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}
+            >
+                <div style={{ width: 32, height: 32, borderRadius: 6, background: C.surface, border: `0.5px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.muted, flexShrink: 0 }}>
+                    {getMediaIcon(item.mediaType)}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 10, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.client}</p>
+                    <h4 style={{ fontSize: 12, fontWeight: 700, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.campaignName}</h4>
+                </div>
+                <div style={{ padding: '2px 8px', background: badge.bg, borderRadius: 4, fontSize: 9, fontWeight: 700, color: badge.color, flexShrink: 0, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{badge.label}</div>
+            </motion.div>
+        )
     }
 
     return (
-        <motion.div
-            layout
-            custom={index}
-            variants={containerVariants}
-            initial="hidden"
-            animate="visible"
-            onMouseMove={handleMouseMove}
-            style={{ 
-                boxShadow: expanded 
-                    ? `0 30px 60px -15px ${glow.replace('bg-', 'rgba(').replace('500', '500, 0.25')}, 0 0 0 1px ${ring.replace('ring-', 'rgba(').replace('20', '5')}` 
-                    : undefined 
-            }}
-            className={`rounded-4xl bg-white border border-zinc-200 cursor-pointer group transition-all duration-700 shadow-sm hover:shadow-2xl ${shadow} ${expanded ? `col-span-full ring-4 ${ring}` : 'hover:-translate-y-3'} relative overflow-hidden`}
-            onClick={() => setExpanded(!expanded)}
+        <motion.div layout
+            style={{ background: '#faf9f7', border: `0.5px solid ${item.adOpsStatus === 'CONCLUIDA' ? C.dim : C.border}`, borderRadius: 8, padding: 20, transition: 'box-shadow 0.2s', opacity: item.adOpsStatus === 'CONCLUIDA' ? 0.65 : 1 }}
+            onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.06)')}
+            onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}
         >
-            {/* Magnetic Hover Light */}
-            <div 
-                className="absolute inset-0 opacity-0 group-hover:opacity-30 transition-opacity duration-700 pointer-events-none z-0"
-                style={{
-                    background: `radial-gradient(circle at ${mousePos.x}% ${mousePos.y}%, ${glow.replace('bg-', 'rgba(')} 0%, transparent 60%)`
-                }}
-            />
-
-            {/* Subtle Texture/Pattern Overlay */}
-            <div className="absolute inset-0 opacity-[0.02] pointer-events-none mix-blend-overlay z-0 bg-[radial-gradient(#000_1px,transparent_1px)] bg-size-[16px_16px]" />
-
-            <div className={`relative z-10 transition-all duration-700 ${expanded ? 'p-8 space-y-8 bg-linear-to-b from-white/90 to-zinc-50/90 backdrop-blur-xl' : 'p-6 space-y-6'}`}>
-                {/* Decorative background glow */}
-                <div className={`absolute -right-20 -top-20 w-40 h-40 rounded-full blur-[100px] opacity-0 group-hover:opacity-20 transition-opacity duration-1000 ${glow}`} />                {/* Header row */}
-                <div className="flex items-start justify-between gap-6 relative z-10">
-                    <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-3 mb-3">
-                            <div className={`h-3 w-3 rounded-full ${glow} shadow-[0_0_12px_rgba(0,0,0,0.15)] ${campaign.status === 'critical' ? 'animate-pulse' : ''}`} />
-                            <div className="text-2xl font-black text-zinc-900 tracking-tight truncate uppercase leading-none group-hover:text-zinc-950 transition-colors duration-500">{campaign.name}</div>
-                            <div className={`px-3 py-1 rounded-xl text-[9px] font-black tracking-[0.2em] border ${bg} ${text} ${border}`}>
-                                {label}
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                             <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-[0.2em]">
-                                {campaign.advertiser}
-                             </div>
-                             <span className="text-zinc-200">•</span>
-                             <div className={`px-2 py-0.5 rounded-lg text-[9px] font-black border ${campaign.score >= 80 ? 'bg-indigo-50 border-indigo-100 text-indigo-600' : 'bg-rose-50 border-rose-100 text-rose-600'}`}>
-                                 SCORE {campaign.score}
-                             </div>
-                             {campaign.apiAvailable === false && (
-                                <div className="px-2 py-0.5 rounded-lg text-[9px] font-black bg-rose-500 text-white animate-pulse">🔌 OFF</div>
-                             )}
-                             {campaign.fetchedAt && (
-                                <div className="text-[9px] font-medium text-zinc-300 tabular-nums">
-                                    ⏱ {formatLastUpdate(campaign.fetchedAt)}
-                                </div>
-                             )}
-                        </div>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, minWidth: 0 }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 6, background: C.surface, border: `0.5px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.muted, flexShrink: 0 }}>
+                        {getMediaIcon(item.mediaType)}
                     </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                        {campaign.manualDashboardUrl && (
-                            <a href={campaign.manualDashboardUrl as string} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-50 border border-zinc-200 text-zinc-500 text-[9px] font-black uppercase tracking-wider hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition-all">
-                                <Layout size={11} /> Dashboard
-                            </a>
-                        )}
-                        <ProjectionRing percent={campaign.projection.completionPercent} status={campaign.status} />
-                        <div className="w-8 h-8 rounded-full bg-zinc-50 flex items-center justify-center border border-zinc-100 group-hover:bg-zinc-900 group-hover:text-white transition-all duration-500">
-                            <ChevronDown className={`w-4 h-4 transition-transform duration-700 ${expanded ? 'rotate-180' : ''}`} />
+                    <div style={{ minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                            <p style={{ fontSize: 10, color: C.muted, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{item.client}</p>
+                            <span style={{ padding: '1px 6px', background: badge.bg, color: badge.color, fontSize: 9, fontWeight: 700, borderRadius: 3, textTransform: 'uppercase' }}>{badge.label}</span>
                         </div>
+                        <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.campaignName}</h3>
                     </div>
                 </div>
+                <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+                    <button onClick={() => onEdit(item)} style={{ padding: 6, background: 'none', border: 'none', cursor: 'pointer', color: C.muted, borderRadius: 4 }}
+                        onMouseEnter={e => (e.currentTarget.style.color = C.text)} onMouseLeave={e => (e.currentTarget.style.color = C.muted)}>
+                        <Pencil size={13} />
+                    </button>
+                    <button onClick={() => onDelete(item.id)} style={{ padding: 6, background: 'none', border: 'none', cursor: 'pointer', color: C.muted, borderRadius: 4 }}
+                        onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')} onMouseLeave={e => (e.currentTarget.style.color = C.muted)}>
+                        <Trash2 size={13} />
+                    </button>
+                </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 600, color: C.muted, background: C.surface, border: `0.5px solid ${C.border}`, padding: '3px 8px', borderRadius: 4 }}>
+                    <FileText size={10} /> PI {item.pi}
+                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: C.muted }}>
+                    <span>{item.flightStart ? format(new Date(item.flightStart), 'dd/MM/yy') : '--'}</span>
+                    <ArrowRight size={10} style={{ color: C.dim }} />
+                    <span>{item.flightEnd ? format(new Date(item.flightEnd), 'dd/MM/yy') : '--'}</span>
+                </div>
+            </div>
+            <div style={{ height: 4, background: C.surface, borderRadius: 2, overflow: 'hidden', marginBottom: 16 }}>
+                <motion.div initial={{ width: 0 }} animate={{ width: `${progress}%` }}
+                    style={{ height: '100%', background: item.adOpsStatus === 'CONCLUIDA' ? C.dim : C.text, borderRadius: 2 }} />
+            </div>
+            {item.links && item.links.length > 0 ? (
+                <a href={item.links[0].url} target="_blank" rel="noopener noreferrer"
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%', padding: '9px 0', background: C.surface, border: `0.5px solid ${C.border}`, borderRadius: 6, fontSize: 11, fontWeight: 600, color: C.muted, textDecoration: 'none', transition: 'all 0.15s' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = C.text; (e.currentTarget as HTMLElement).style.color = '#faf9f7' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = C.surface; (e.currentTarget as HTMLElement).style.color = C.muted }}>
+                    <ExternalLink size={13} /> Abrir Dashboard
+                </a>
+            ) : (
+                <div style={{ padding: '9px 0', border: `0.5px dashed ${C.border}`, borderRadius: 6, textAlign: 'center', fontSize: 11, color: C.dim }}>Sem Links</div>
+            )}
+        </motion.div>
+    )
+}
 
-                {/* Alerta de Saúde (Fake Healthy) */}
-                {isFakeHealthy && (
-                    <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-700 text-[10px] font-black uppercase tracking-wider flex items-center gap-2">
-                        <AlertTriangle size={14} className="text-amber-500" />
-                        Atenção: Campanha parece saudável mas está com projeção baixa
+/* ─── Main View ─────────────────────────────────────────── */
+export default function AdOpsDashboardView({ stats: initialStats }: { stats: { total: number; campaigns: DashboardType[] } }) {
+    const [dashboards, setDashboards] = useState<DashboardType[]>(initialStats.campaigns || [])
+    const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+    const [isImportModalOpen, setIsImportModalOpen] = useState(false)
+    const [editingDashboard, setEditingDashboard] = useState<DashboardType | null>(null)
+    const [search, setSearch] = useState('')
+    const [activeTab, setActiveTab] = useState<'TUDO' | 'PORTAL' | 'RADIO' | 'PAINEL'>('TUDO')
+    const PERIODS = useMemo(() => ['07/25', '08/25', '09/25', '10/25', '11/25', '12/25', '01/26', '02/26', '03/26'], [])
+    const [activePeriod, setActivePeriod] = useState<string>(() => { const cur = format(new Date(), 'MM/yy'); return PERIODS.includes(cur) ? cur : '07/25' })
+    const [isSyncing, setIsSyncing] = useState(false)
+    const [lastSync, setLastSync] = useState<Date | null>(null)
+
+    const refresh = useCallback(async () => { setDashboards(await getAdOpsDashboards()) }, [])
+    const handleDelete = useCallback(async (id: string) => { if (confirm('Deletar este dashboard?')) { const res = await deleteAdOpsDashboard(id); if (res.success) refresh() } }, [refresh])
+    const handleSync = useCallback(async () => {
+        setIsSyncing(true)
+        const res = await syncIncrementalFromSheet(activePeriod)
+        if (res.success) { await refresh(); setLastSync(new Date()); alert(`Sincronia concluída para ${activePeriod}:\n+${res.inserted} novos\n~${res.updated} atualizados\n=${res.unchanged} sem mudança`) }
+        else { alert('Erro na sincronia: ' + res.error) }
+        setIsSyncing(false)
+    }, [refresh, activePeriod])
+
+    const priorityItems = useMemo(() => dashboards.filter(d => { const days = getDays(d.flightEnd); return days !== null && days >= 0 && days <= 10 && d.adOpsStatus !== 'CONCLUIDA' }).sort((a, b) => (getDays(a.flightEnd) || 0) - (getDays(b.flightEnd) || 0)), [dashboards])
+    const filtered = useMemo(() => dashboards.filter(d => {
+        const matchesSearch = !search || d.client.toLowerCase().includes(search.toLowerCase()) || d.campaignName.toLowerCase().includes(search.toLowerCase()) || d.pi.includes(search)
+        const matchesTab = activeTab === 'TUDO' || d.mediaType === activeTab
+        const matchesPeriod = !d.flightStart || format(new Date(d.flightStart), 'MM/yy') === activePeriod
+        const isFinished = d.adOpsStatus === 'CONCLUIDA' || (d.flightEnd && isPast(new Date(d.flightEnd)) && differenceInDays(new Date(), new Date(d.flightEnd)) > 1)
+        return matchesSearch && matchesTab && matchesPeriod && !isFinished
+    }), [dashboards, search, activeTab, activePeriod])
+
+    const stats = useMemo(() => ({
+        totalInPeriod: filtered.length,
+        total: dashboards.length,
+        ativas: dashboards.filter(d => ['ATIVA', 'PROGRAMADA'].includes(d.adOpsStatus || '')).length,
+        atrasadas: dashboards.filter(d => {
+            const days = getDays(d.flightEnd)
+            return d.adOpsStatus !== 'CONCLUIDA' && days !== null && days < 0
+        }).length,
+        hoje: dashboards.filter(d => {
+            const days = getDays(d.flightEnd)
+            return days === 0
+        }).length,
+        portal: dashboards.filter(d => d.mediaType === 'PORTAL').length,
+        radio: dashboards.filter(d => d.mediaType === 'RADIO').length,
+        painel: dashboards.filter(d => d.mediaType === 'PAINEL').length,
+    }), [dashboards, filtered])
+
+    return (
+        <div style={{ paddingBottom: 80 }}>
+            {/* Header */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'space-between', gap: 20, marginBottom: 32 }}>
+                <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', color: C.muted, marginBottom: 6 }}>
+                        <Activity size={13} /> ADOPS HUB COMMAND
                     </div>
-                )}
-
-                {/* Smart Alert (PROMINENT BI INSIGHT) */}
-                {campaign.smartAlert && (
-                    <motion.div 
-                        initial={{ opacity: 0, y: -10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="p-4 rounded-3xl bg-amber-500/10 border border-amber-500/20 text-amber-700 text-[11px] font-black uppercase tracking-wider flex items-start gap-3 shadow-[0_0_20px_rgba(245,158,11,0.05)]"
-                    >
-                        <AlertCircle size={16} className="shrink-0 mt-0.5 text-amber-500" />
-                        {campaign.smartAlert}
-                    </motion.div>
-                )}
-
-                {/* Intelligent Insights / Diagnostics */}
-                {campaign.diagnostics && campaign.diagnostics.length > 0 && (
-                    <div className="flex flex-wrap gap-2">
-                        {campaign.diagnostics.map((d, i) => (
-                            <div key={i} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-100/50 border border-zinc-200 text-[10px] font-black text-zinc-500 uppercase tracking-wider">
-                                <AlertCircle size={10} className={d.includes('Risco') || d.includes('Atraso') ? 'text-rose-600' : 'text-orange-600'} />
-                                {d}
-                            </div>
-                        ))}
-                    </div>
-                )}
-
-                {/* BI Agent Recommendations */}
-                {campaign.bi?.recommendations && campaign.bi.recommendations.length > 0 && (
-                    <div className="space-y-2 p-4 rounded-2xl bg-indigo-50/50 border border-indigo-100/50 block">
-                        <div className="flex items-center gap-2 text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-1">
-                            <Zap size={10} className="fill-indigo-500" />
-                            Insight do Agente BI
-                        </div>
-                        {campaign.bi.recommendations.map((rec, i) => (
-                            <div key={i} className="text-xs font-bold text-indigo-900 border-l-2 border-indigo-200 pl-3 py-0.5 leading-relaxed">
-                                {rec}
-                            </div>
-                        ))}
-                    </div>
-                )}
-
-                {/* Pacing Info Box */}
-                <AnimatePresence>
-                    {showPacingHelp && (
-                        <motion.div 
-                            initial={{ opacity: 0, height: 0, scale: 0.95 }}
-                            animate={{ opacity: 1, height: 'auto', scale: 1 }}
-                            exit={{ opacity: 0, height: 0, scale: 0.95 }}
-                            className="bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-100 p-4 rounded-3xl mb-4 leading-relaxed relative overflow-hidden shadow-2xl z-20"
-                        >
-                            <div className="font-bold mb-2 flex items-center gap-2 text-zinc-100">
-                                <HelpCircle size={14} className="text-emerald-400" />
-                                Como ler esta métrica?
-                            </div>
-                            <p className="mb-2 text-zinc-400">
-                                Esta barra mostra o <strong>Pacing Ratio</strong>: o quanto você entregou comparado ao que era esperado para o tempo decorrido.
-                            </p>
-                            <div className="grid grid-cols-2 gap-3 mt-3">
-                                <div className="space-y-1">
-                                    <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" /> <span>95-105%: No prazo</span></div>
-                                    <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.4)]" /> <span>80-95%: Atenção</span></div>
-                                </div>
-                                <div className="space-y-1">
-                                    <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.4)]" /> <span>&lt; 80%: Crítico</span></div>
-                                    <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.4)]" /> <span>&gt; 105%: Over</span></div>
-                                </div>
-                            </div>
-                            <p className="mt-3 pt-3 border-t border-zinc-800 text-[10px] text-zinc-500 italic">
-                                A <strong>linha branca</strong> vertical indica o progresso do cronograma hoje.
-                            </p>
-                            <button 
-                                onClick={() => setShowPacingHelp(false)}
-                                className="absolute top-3 right-3 p-1 hover:bg-zinc-800 rounded-full transition-colors text-zinc-500"
-                            >
-                                <X size={14} />
-                            </button>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-
-                {/* Pacing Indicator */}
-                <div className="space-y-4 bg-zinc-50/50 p-6 rounded-3xl border border-zinc-100/50 relative group/pacing overflow-hidden transition-all duration-500 hover:bg-zinc-50 hover:border-zinc-200">
-                    <div className="flex justify-between items-center text-[10px] font-black tracking-[0.2em] uppercase mb-1 relative z-10">
-                        <span className="text-zinc-400 flex items-center gap-1.5">
-                            Progresso vs Tempo
-                            <button 
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    setShowPacingHelp(!showPacingHelp);
-                                }}
-                                className="p-1.5 hover:bg-zinc-200 rounded-full transition-colors"
-                                title="O que é isso?"
-                            >
-                                <HelpCircle size={24} className="text-zinc-500" />
-                            </button>
-                        </span>
-                        <div className="flex items-center gap-2">
-                             <TrendingUp size={14} className={text} />
-                            <span className={`${text} font-black text-xl tabular-nums`}>{campaign.timeProgress.toFixed(1)}%</span>
-                        </div>
-                    </div>
-                    <div className="h-4 w-full bg-zinc-200/50 rounded-full overflow-hidden flex items-center px-1 relative">
-                        <div className="relative w-full h-full">
-                            {/* Target/Pacing Marker */}
-                            <div 
-                                className="absolute top-0 h-full bg-white border-2 border-zinc-900 z-20 w-[6px] rounded-full shadow-lg transition-all duration-1000"
-                                style={{ left: `${timeElapsed}%`, transform: 'translateX(-50%)' }}
-                                title="Data Atual"
-                            />
-                            {/* Glassy track */}
-                            <div 
-                                className={`h-full rounded-full transition-all duration-2500 cubic-bezier(0.16, 1, 0.3, 1) relative z-10 shadow-[inner_0_2px_8px_rgba(0,0,0,0.1)] ${
-                                    campaign.status === 'on-track' ? 'bg-linear-to-r from-emerald-400 via-emerald-500 to-emerald-600' : 
-                                    campaign.status === 'over' ? 'bg-linear-to-r from-blue-400 via-blue-500 to-blue-600' :
-                                    campaign.status === 'critical' ? 'bg-linear-to-r from-rose-400 via-rose-500 to-rose-600' : 
-                                    'bg-linear-to-r from-orange-400 via-orange-500 to-orange-600'
-                                }`}
-                                style={{ width: `${Math.min(campaign.deliveryProgress, 100)}%` }}
-                            >
-                                <div className="absolute inset-0 bg-linear-to-r from-transparent via-white/50 to-transparent animate-progress-glow" />
-                                {/* End shimmer live pulse */}
-                                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white shadow-[0_0_15px_white] animate-[pulse_1.5s_ease-in-out_infinite]" />
-                            </div>
-                        </div>
+                    <h1 style={{ fontSize: 28, fontWeight: 800, color: C.text, letterSpacing: '-0.5px', fontFamily: 'var(--font-display)' }}>Visão de Comando</h1>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
+                        <MiniKpi label="Ativas" value={stats.ativas} color="#16a34a" />
+                        <MiniKpi label="Atrasadas" value={stats.atrasadas} color="#ef4444" />
+                        <MiniKpi label="Encerram Hoje" value={stats.hoje} color="#f59e0b" />
+                        <MiniKpi label="Total" value={stats.total} color={C.text} />
                     </div>
                 </div>
-
-                {/* Key Metrics */}
-                <div className={`grid grid-cols-3 transition-all duration-500 ${expanded ? 'gap-6' : 'gap-3'}`}>
-                    <motion.div variants={itemVariants} className={`rounded-4xl bg-zinc-50/40 border border-zinc-100/50 hover:bg-white hover:border-emerald-500/30 hover:shadow-2xl hover:shadow-emerald-500/10 transition-all duration-500 group/metric relative overflow-hidden ${expanded ? 'p-6 text-left' : 'p-4 text-center'}`}>
-                        <div className="absolute inset-0 opacity-0 group-hover/metric:opacity-10 transition-opacity bg-linear-to-br from-emerald-500 to-transparent" />
-                        <div className="relative z-10">
-                            <div className={`font-black text-zinc-400 uppercase tracking-[0.25em] flex items-center gap-2 ${expanded ? 'text-[10px] mb-4' : 'text-[8px] mb-2 justify-center'}`}>
-                                <div className="h-2 w-2 rounded-full bg-zinc-300 group-hover/metric:bg-emerald-500 group-hover/metric:scale-125 transition-all duration-500" /> 
-                                <span>Entregue</span>
-                            </div>
-                            <div className={`font-black text-zinc-900 tabular-nums leading-none tracking-tighter group-hover/metric:scale-105 transition-transform duration-500 ${expanded ? 'text-4xl origin-left' : 'text-xl'}`}>{formatNumber(campaign.deliveredImpressions)}</div>
-                        </div>
-                    </motion.div>
-                    
-                    <motion.div variants={itemVariants} className={`rounded-4xl bg-zinc-50/40 border border-zinc-100/50 hover:bg-white transition-all duration-500 group/metric relative overflow-hidden ${expanded ? 'p-6 text-left' : 'p-4 text-center'}`}>
-                        <div className="relative z-10">
-                            <div className={`font-black text-zinc-400 uppercase tracking-[0.25em] flex items-center gap-2 ${expanded ? 'text-[10px] mb-4' : 'text-[8px] mb-2 justify-center'}`}>
-                                <div className="h-2 w-2 rounded-full bg-zinc-200" /> 
-                                <span>Meta</span>
-                            </div>
-                            <div className={`font-bold text-zinc-400 tabular-nums leading-none tracking-tighter group-hover/metric:text-zinc-600 transition-colors ${expanded ? 'text-4xl origin-left' : 'text-xl'}`}>{formatNumber(campaign.goalImpressions)}</div>
-                        </div>
-                    </motion.div>
-                    
-                    <motion.div variants={itemVariants} className={`rounded-4xl border transition-all duration-500 group/metric relative overflow-hidden ${margin < 0 ? 'bg-rose-50/30 border-rose-100 hover:bg-rose-50 hover:shadow-2xl hover:shadow-rose-500/10' : 'bg-emerald-50/30 border-emerald-100 hover:bg-emerald-50 hover:shadow-2xl hover:shadow-emerald-500/10'} ${expanded ? 'p-6 text-left' : 'p-4 text-center'}`}>
-                        <div className="absolute inset-0 opacity-0 group-hover/metric:opacity-10 transition-opacity bg-linear-to-br from-current to-transparent" />
-                        {/* Glass Reflection */}
-                        <div className="absolute -inset-full bg-linear-to-br from-white/20 via-transparent to-transparent rotate-45 group-hover/metric:translate-x-full transition-transform duration-1000 ease-in-out pointer-events-none" />
-                        
-                        <div className="relative z-10">
-                            <div className={`font-black text-zinc-400 uppercase tracking-[0.25em] flex items-center gap-2 ${expanded ? 'text-[10px] mb-4' : 'text-[8px] mb-2 justify-center'}`}>
-                                <div className={`h-2 w-2 rounded-full ${margin < 0 ? 'bg-rose-400' : 'bg-emerald-400'} animate-pulse`} /> 
-                                <span>Margem</span>
-                            </div>
-                            <div className={`font-black tabular-nums leading-none tracking-tighter group-hover/metric:scale-105 transition-transform duration-500 ${margin < 0 ? 'text-rose-600' : 'text-emerald-600'} ${expanded ? 'text-4xl origin-left' : 'text-xl'}`}>
-                                {margin >= 0 ? '+' : ''}{formatNumber(margin)}
-                            </div>
-                        </div>
-                    </motion.div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    <div style={{ position: 'relative' }}>
+                        <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: C.muted }} />
+                        <input type="text" placeholder="Buscar PI ou Cliente..." value={search} onChange={e => setSearch(e.target.value)}
+                            style={{ ...inputSt, paddingLeft: 30, height: 38, width: 220, fontSize: 12 }} />
+                    </div>
+                    <button onClick={handleSync} disabled={isSyncing}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 16px', height: 38, background: C.surface, border: `0.5px solid ${C.border}`, borderRadius: 6, fontSize: 12, fontWeight: 600, color: C.muted, cursor: 'pointer' }}>
+                        {isSyncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Sincronizar
+                    </button>
+                    <button onClick={() => { setEditingDashboard(null); setIsAddModalOpen(true) }} className="btn-primary"
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 16px', height: 38, fontSize: 12 }}>
+                        <Plus size={14} /> Novo
+                    </button>
                 </div>
             </div>
 
-            {/* Expandable Info */}
-            <AnimatePresence>
-                {expanded && (
-                    <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        className="overflow-hidden border-t border-zinc-100 bg-zinc-50/50"
-                    >
-                        <div className="p-5 border-t border-zinc-100 bg-zinc-50/30">
-                            {/* Detailed Stats Grid */}
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
-                                <div className="space-y-2">
-                                    <div className="flex items-center gap-2 text-zinc-400 font-bold">
-                                        <Calendar size={14} />
-                                        <span className="text-[10px] uppercase tracking-widest">Período</span>
-                                    </div>
-                                    <div className="text-xs font-semibold text-zinc-600">
-                                        {format(new Date(campaign.startDate), 'dd/MM/yy', { locale: ptBR })} – {format(new Date(campaign.endDate), 'dd/MM/yy', { locale: ptBR })}
-                                    </div>
-                                </div>
-                                <div className="space-y-2">
-                                    <div className="flex items-center gap-2 text-zinc-400 font-bold">
-                                        <Eye size={14} />
-                                        <span className="text-[10px] uppercase tracking-widest">Viewability</span>
-                                    </div>
-                                    <div className={`text-sm font-black ${campaign.viewability >= 70 ? 'text-emerald-600' : 'text-orange-600'}`}>
-                                        {campaign.viewability.toFixed(1)}%
-                                    </div>
-                                </div>
-                                <div className="space-y-2">
-                                    <div className="flex items-center gap-2 text-zinc-400 font-bold">
-                                        <Activity size={14} />
-                                        <span className="text-[10px] uppercase tracking-widest">Pressão</span>
-                                    </div>
-                                    <div className={`text-sm font-black ${campaign.pressure > 1.2 ? 'text-rose-600' : campaign.pressure > 1.15 ? 'text-orange-600' : 'text-emerald-600'}`}>
-                                        {campaign.pressure.toFixed(2)}x
-                                    </div>
-                                </div>
-                                <div className="space-y-2">
-                                    <div className="flex items-center gap-2 text-zinc-400 font-bold">
-                                        <Clock size={14} />
-                                        <span className="text-[10px] uppercase tracking-widest">Tempo</span>
-                                    </div>
-                                    <div className="text-xs font-semibold text-zinc-600">{mounted ? getDaysRemaining(campaign.endDate) : '--'} dias restantes</div>
-                                </div>
-                                {campaign.requiredDaily > 0 && margin >= 0 && (
-                                    <div className="space-y-2">
-                                        <div className="flex items-center gap-2 text-zinc-400 font-bold">
-                                            <Target size={14} />
-                                            <span className="text-[10px] uppercase tracking-widest">Meta/Dia</span>
-                                        </div>
-                                        <div className="text-xs font-bold text-zinc-900 tabular-nums">
-                                            {formatNumber(campaign.requiredDaily)}/dia
-                                        </div>
-                                    </div>
-                                )}
+            {/* Priority row */}
+            {priorityItems.length > 0 && (
+                <div style={{ marginBottom: 24 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', color: '#ef4444', marginBottom: 12 }}>
+                        <AlertCircle size={12} /> Prioridade Máxima — Encerram em breve
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8 }}>
+                        <AnimatePresence>
+                            {priorityItems.map(item => (
+                                <CampaignCard key={item.id} item={item} onDelete={handleDelete} onEdit={i => { setEditingDashboard(i); setIsAddModalOpen(true) }} isCompact />
+                            ))}
+                        </AnimatePresence>
+                    </div>
+                </div>
+            )}
 
-                                {campaign.bi && (
-                                    <div className="space-y-2 col-span-2 pt-2 border-t border-zinc-100">
-                                        <div className="flex justify-between items-center">
-                                            <div className="flex items-center gap-2 text-zinc-400 font-bold">
-                                                <TrendingUp size={14} className={campaign.bi.trend === 'up' ? 'text-emerald-500' : campaign.bi.trend === 'down' ? 'text-rose-500' : 'text-zinc-400'} />
-                                                <span className="text-[10px] uppercase tracking-widest">Entrega Hoje</span>
-                                            </div>
-                                            <div className="text-xs font-black text-zinc-900">
-                                                {formatNumber(campaign.bi.deliveredToday)}
-                                                <span className={`ml-1 text-[9px] ${campaign.bi.trend === 'up' ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                                    {campaign.bi.trend === 'up' ? '▲ Alta' : campaign.bi.trend === 'down' ? '▼ Baixa' : '— Estável'}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
+            {/* Period selector */}
+            <div style={{ marginBottom: 20 }}>
+                <p style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', color: C.muted, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <CalendarDays size={12} /> Período Ativo
+                </p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                    {PERIODS.map(p => (
+                        <button key={p} onClick={() => setActivePeriod(p)}
+                            style={{ padding: '5px 12px', borderRadius: 5, border: `0.5px solid ${activePeriod === p ? C.text : C.border}`, background: activePeriod === p ? C.text : '#faf9f7', color: activePeriod === p ? '#faf9f7' : C.muted, fontSize: 11, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s' }}>
+                            {p}
+                        </button>
+                    ))}
+                </div>
+            </div>
 
-                            {/* Recovery Plan Section */}
-                            <div className="space-y-4">
-                                <div className="flex items-center justify-between px-1">
-                                    <span className="text-[10px] font-black text-zinc-900 uppercase tracking-[0.25em] flex items-center gap-2">
-                                        <Zap size={12} className="text-emerald-500 fill-emerald-500" />
-                                        Plano de Recuperação & Velocidade
-                                    </span>
-                                    <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg uppercase tracking-widest border border-emerald-100">BI Insight</span>
-                                </div>
-                                
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    {/* Ritmo Atual */}
-                                    <div className="p-4 rounded-2xl bg-white border border-zinc-100 shadow-sm hover:shadow-md transition-shadow group/v">
-                                        <div className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-1 group-hover/v:text-zinc-600 transition-colors">Ritmo Real (Média)</div>
-                                        <div className="text-xl font-black text-zinc-900 tabular-nums">{formatNumber(campaign.currentDaily)}</div>
-                                        <div className="text-[9px] text-zinc-400 font-medium mt-1">impres./dia registrados</div>
-                                    </div>
+            {/* Tab filters */}
+            <div style={{ display: 'flex', gap: 4, background: C.surface, padding: 4, borderRadius: 6, border: `0.5px solid ${C.border}`, width: 'fit-content', marginBottom: 24 }}>
+                {(['TUDO', 'PORTAL', 'RADIO', 'PAINEL'] as const).map(t => (
+                    <button key={t} onClick={() => setActiveTab(t)}
+                        style={{ padding: '6px 16px', borderRadius: 4, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, transition: 'all 0.15s', background: activeTab === t ? '#faf9f7' : 'transparent', color: activeTab === t ? C.text : C.muted, boxShadow: activeTab === t ? '0 1px 4px rgba(0,0,0,0.06)' : 'none' }}>
+                        {t}
+                    </button>
+                ))}
+            </div>
 
-                                    {/* Requisito para Meta */}
-                                    <div className="p-4 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-xl relative overflow-hidden group/v">
-                                        <div className="absolute top-0 right-0 p-2 opacity-10">
-                                            <Target size={32} className="text-white" />
-                                        </div>
-                                        <div className="relative z-10">
-                                            <div className="text-[9px] font-black text-emerald-400/60 uppercase tracking-widest mb-1">Requisito Meta Final</div>
-                                            <div className="text-xl font-black text-white tabular-nums">{formatNumber(campaign.requiredDaily)}</div>
-                                            <div className="text-[9px] text-white/40 font-medium mt-1">mínimo diário necessário</div>
-                                        </div>
-                                    </div>
-
-                                    {/* Esforço/Pressão */}
-                                    <div className={`p-4 rounded-2xl border shadow-sm transition-all group/v ${
-                                        campaign.pressure > 1.2 ? 'bg-rose-50 border-rose-100' : 
-                                        campaign.pressure > 1.05 ? 'bg-orange-50 border-orange-100' : 
-                                        'bg-emerald-50 border-emerald-100'
-                                    }`}>
-                                        <div className={`text-[9px] font-black uppercase tracking-widest mb-1 ${
-                                            campaign.pressure > 1.2 ? 'text-rose-400' : 
-                                            campaign.pressure > 1.05 ? 'text-orange-400' : 
-                                            'text-emerald-400'
-                                        }`}>Esforço de Entrega</div>
-                                        <div className={`text-xl font-black tabular-nums ${
-                                            campaign.pressure > 1.2 ? 'text-rose-600' : 
-                                            campaign.pressure > 1.05 ? 'text-orange-600' : 
-                                            'text-emerald-600'
-                                        }`}>
-                                            {campaign.pressure.toFixed(2)}x
-                                        </div>
-                                        <div className={`text-[9px] font-medium mt-1 ${
-                                            campaign.pressure > 1.2 ? 'text-rose-400/80' : 
-                                            campaign.pressure > 1.05 ? 'text-orange-400/80' : 
-                                            'text-emerald-400/80'
-                                        }`}>
-                                            {campaign.pressure > 1.0 ? 'necessário acelerar entrega' : 'ritmo atual é suficiente'}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Smart Recommendation Bar */}
-                                <div className="p-4 rounded-2xl bg-zinc-50 border border-zinc-100 flex items-start gap-3">
-                                    <div className={`p-2 rounded-xl shrink-0 ${
-                                        campaign.pressure > 1.2 ? 'bg-rose-500 text-white' : 
-                                        campaign.pressure > 1.05 ? 'bg-orange-500 text-white' : 
-                                        'bg-emerald-500 text-white'
-                                    }`}>
-                                        <AlertCircle size={16} />
-                                    </div>
-                                    <div>
-                                        <div className="text-[10px] font-black text-zinc-900 uppercase tracking-widest mb-0.5">Diagnóstico de Velocidade</div>
-                                        <p className="text-[11px] text-zinc-500 font-medium leading-relaxed">
-                                            {campaign.pressure > 1.2 
-                                                ? `A campanha está severamente atrasada. É necessário aumentar a entrega diária em ${( (campaign.pressure - 1) * 100 ).toFixed(0)}% imediatamente para evitar sub-entrega.` 
-                                                : campaign.pressure > 1.0 
-                                                ? `A entrega está ligeiramente abaixo do ideal. Um ajuste de ${( (campaign.pressure - 1) * 100 ).toFixed(0)}% na velocidade diária garante o atingimento da meta.`
-                                                : `Campanha com vitalidade excelente. O ritmo atual de ${formatNumber(campaign.currentDaily)}/dia supera o requisito de ${formatNumber(campaign.requiredDaily)}/dia.`}
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
+            {/* Cards grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                <AnimatePresence mode="popLayout">
+                    {filtered.length > 0 ? filtered.map(item => (
+                        <CampaignCard key={item.id} item={item} onDelete={handleDelete} onEdit={i => { setEditingDashboard(i); setIsAddModalOpen(true) }} />
+                    )) : (
+                        <div className="col-span-full" style={{ padding: '80px 20px', textAlign: 'center', border: `0.5px dashed ${C.border}`, borderRadius: 8, color: C.muted }}>
+                            <Zap size={36} style={{ margin: '0 auto 12px', opacity: 0.25 }} />
+                            <p style={{ fontSize: 13, fontWeight: 500 }}>Aguardando novas campanhas para {activePeriod}</p>
                         </div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-        </motion.div>
+                    )}
+                </AnimatePresence>
+            </div>
+
+            {/* Footer stats */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, paddingTop: 32, marginTop: 32, borderTop: `0.5px solid ${C.border}` }}>
+                {[
+                    { label: 'Status Hub', value: isSyncing ? 'Sincronizando...' : 'Conectado', icon: Zap },
+                    { label: 'Em Veiculação', value: filtered.length, icon: Activity },
+                    { label: 'Base de Dados', value: stats.total, icon: CheckCircle2 },
+                    { label: 'Última Sincronia', value: lastSync ? format(lastSync, 'HH:mm:ss') : '—', icon: Clock },
+                ].map((s, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 20px', background: C.surface, border: `0.5px solid ${C.border}`, borderRadius: 8 }}>
+                        <div style={{ width: 32, height: 32, borderRadius: 6, background: '#faf9f7', border: `0.5px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.muted }}>
+                            <s.icon size={15} />
+                        </div>
+                        <div>
+                            <p style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', color: C.dim }}>{s.label}</p>
+                            <p style={{ fontSize: 16, fontWeight: 700, color: C.text }}>{s.value}</p>
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            <AddDashboardModal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} onRefresh={refresh} initialData={editingDashboard} />
+            <ImportSpreadsheetModal isOpen={isImportModalOpen} onClose={() => setIsImportModalOpen(false)} onRefresh={refresh} />
+        </div>
+    )
+}
+
+function MiniKpi({ label, value, color }: { label: string, value: number, color: string }) {
+    return (
+        <div style={{ padding: '12px 16px', background: '#faf9f7', border: `0.5px solid ${C.border}`, borderRadius: 8 }}>
+            <p style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{label}</p>
+            <p style={{ fontSize: 20, fontWeight: 800, color }}>{value}</p>
+        </div>
     )
 }

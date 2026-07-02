@@ -1,7 +1,8 @@
 'use client'
 
 import React, { useState } from 'react'
-import { Activity, TrendingUp, AlertCircle, Image as ImageIcon, Sparkles, ShieldCheck, Box } from 'lucide-react'
+import { Activity, TrendingUp, AlertCircle, Image as ImageIcon, Sparkles, ShieldCheck, Box, ChevronRight, LayoutGrid } from 'lucide-react'
+import Link from 'next/link'
 import { format as formatDate } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import { CaptureImage } from './CaptureImage'
@@ -21,103 +22,111 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
     const [activeTab, setActiveTab] = useState<'overview' | 'quarantine'>('overview')
 
     return (
-        <div className="space-y-12 animate-slide-up">
+        <div className="space-y-10 animate-slide-up">
             {/* Hero Header */}
-            <header className="relative">
-                <div
-                    className="absolute -top-20 -left-20 w-96 h-96 rounded-full blur-3xl opacity-30 pointer-events-none"
-                    style={{ background: 'var(--gradient-primary)' }}
-                />
-
-                <div className="relative space-y-4">
-                    <div className="flex items-center gap-3">
-                        <div
-                            className="px-4 py-2 rounded-full text-xs font-bold tracking-wide uppercase flex items-center gap-2"
-                            style={{
-                                background: 'var(--accent-muted)',
-                                color: 'var(--accent-light)',
-                            }}
-                        >
-                            <Sparkles size={14} />
-                            Nexus Dashboard
-                        </div>
+            <header>
+                <div className="space-y-2">
+                    <div
+                        style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            background: '#ede9e1',
+                            color: '#a89f8c',
+                            fontSize: 10,
+                            fontWeight: 600,
+                            letterSpacing: '0.07em',
+                            padding: '2px 8px',
+                            borderRadius: 4,
+                            marginBottom: 8,
+                        }}
+                    >
+                        <Sparkles size={10} />
+                        Nexus Dashboard
                     </div>
                     <h1
-                        className="text-3xl md:text-5xl font-extrabold tracking-tight"
-                        style={{ fontFamily: 'var(--font-display)' }}
+                        className="text-3xl md:text-4xl font-extrabold tracking-tight"
+                        style={{ fontFamily: 'var(--font-display)', color: '#1c1917' }}
                     >
-                        <span className="text-gradient">Central de</span>
-                        <span style={{ color: 'var(--text-primary)' }}> Controle</span>
+                        Central de Controle
                     </h1>
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <p style={{ fontSize: 14, color: '#a89f8c' }}>
+                            Visão geral das capturas e status de campanhas do dia.
+                        </p>
+                        <Link
+                            href="/adops"
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1c1917] text-white text-xs font-bold hover:bg-black transition-colors"
+                        >
+                            <LayoutGrid size={14} />
+                            ABRIR ADOPS HUB
+                            <ChevronRight size={14} />
+                        </Link>
+                    </div>
                 </div>
             </header>
 
             {/* Tab Navigation */}
-            <div className="flex gap-4 border-b border-white/5 pb-px">
+            <div style={{ display: 'flex', gap: 0, borderBottom: '0.5px solid #e8e5df' }}>
                 <button
                     onClick={() => setActiveTab('overview')}
-                    className={`pb-4 px-2 text-sm font-bold transition-all relative ${activeTab === 'overview' ? 'text-accent' : 'text-white/40 hover:text-white/60'}`}
+                    style={{
+                        padding: '10px 16px',
+                        fontSize: 13,
+                        fontWeight: activeTab === 'overview' ? 600 : 500,
+                        color: activeTab === 'overview' ? '#1c1917' : '#a89f8c',
+                        background: 'none',
+                        border: 'none',
+                        borderBottom: activeTab === 'overview' ? '2px solid #1c1917' : '2px solid transparent',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        marginBottom: -1,
+                    }}
                 >
                     Resumo Geral
-                    {activeTab === 'overview' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-accent shadow-[0_0_10px_var(--accent)]" />}
                 </button>
                 <button
                     onClick={() => setActiveTab('quarantine')}
-                    className={`pb-4 px-2 text-sm font-bold transition-all relative flex items-center gap-2 ${activeTab === 'quarantine' ? 'text-red-400' : 'text-white/40 hover:text-white/60'}`}
+                    style={{
+                        padding: '10px 16px',
+                        fontSize: 13,
+                        fontWeight: activeTab === 'quarantine' ? 600 : 500,
+                        color: activeTab === 'quarantine' ? '#ef4444' : '#a89f8c',
+                        background: 'none',
+                        border: 'none',
+                        borderBottom: activeTab === 'quarantine' ? '2px solid #ef4444' : '2px solid transparent',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        marginBottom: -1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                    }}
                 >
                     Quarentena
                     {stats.quarantined > 0 && (
-                        <span className="px-1.5 py-0.5 bg-red-500 text-white text-[10px] rounded-full animate-pulse">
+                        <span style={{ padding: '1px 6px', background: '#ef4444', color: '#faf9f7', fontSize: 10, borderRadius: 999, fontWeight: 700 }}>
                             {stats.quarantined}
                         </span>
                     )}
-                    {activeTab === 'quarantine' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]" />}
                 </button>
             </div>
 
             {activeTab === 'overview' ? (
                 <>
                     {/* Stats Grid */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-5">
-                        <StatCard
-                            label="PIs Ativos"
-                            value={stats.activePis}
-                            icon={ShieldCheck}
-                            gradient="var(--gradient-primary)"
-                        />
-                        <StatCard
-                            label="Campanhas Ativas"
-                            value={stats.activeCampaigns}
-                            icon={Activity}
-                            gradient="var(--gradient-secondary)"
-                        />
-                        <StatCard
-                            label="Formatos Ativos"
-                            value={stats.totalFormats}
-                            icon={Box}
-                            color="var(--accent-light)"
-                        />
-                        <StatCard
-                            label="Taxa de Sucesso"
-                            value={`${stats.successRate}%`}
-                            icon={TrendingUp}
-                            color="var(--success)"
-                        />
-                        <StatCard
-                            label="Quarentena"
-                            value={stats.quarantined}
-                            icon={AlertCircle}
-                            color={stats.quarantined > 0 ? "var(--destructive)" : "var(--text-muted)"}
-                        />
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+                        <StatCard label="PIs Ativos" value={stats.activePis} icon={ShieldCheck} />
+                        <StatCard label="Campanhas Ativas" value={stats.activeCampaigns} icon={Activity} />
+                        <StatCard label="Formatos Ativos" value={stats.totalFormats} icon={Box} />
+                        <StatCard label="Taxa de Sucesso" value={`${stats.successRate}%`} icon={TrendingUp} highlight />
+                        <StatCard label="Quarentena" value={stats.quarantined} icon={AlertCircle} danger={stats.quarantined > 0} />
                     </div>
 
                     {/* Recent Captures Gallery */}
-                    <section className="space-y-6">
+                    <section className="space-y-5">
                         <div className="flex items-center justify-between">
-                            <h2
-                                className="text-lg font-bold"
-                                style={{ color: 'var(--text-primary)' }}
-                            >
+                            <h2 style={{ fontSize: 14, fontWeight: 600, color: '#1c1917', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
                                 Últimas Capturas
                             </h2>
                         </div>
@@ -126,40 +135,27 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
                             {recentCaptures.map((capture) => (
                                 <div
                                     key={capture.id}
-                                    className="group relative aspect-[3/4] rounded-2xl overflow-hidden transition-all duration-500 hover:-translate-y-2 hover:shadow-lg"
+                                    className="group relative overflow-hidden transition-all duration-300 hover:-translate-y-1"
                                     style={{
-                                        background: 'var(--bg-secondary)',
-                                        border: '1px solid var(--border)'
+                                        background: '#faf9f7',
+                                        border: '0.5px solid #e8e5df',
+                                        borderRadius: 8,
+                                        boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
                                     }}
                                 >
                                     <div
-                                        className="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-10 p-4 flex flex-col justify-end"
+                                        className="absolute inset-0 z-10 p-3 flex flex-col justify-end opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                                        style={{ background: 'linear-gradient(to top, rgba(28,25,23,0.85) 0%, transparent 100%)' }}
                                     >
-                                        <p
-                                            className="text-sm font-bold truncate"
-                                            style={{ color: 'var(--text-primary)' }}
-                                        >
+                                        <p className="text-[11px] font-bold truncate" style={{ color: '#faf9f7' }}>
                                             {capture.campaign?.client || 'Untitled'}
                                         </p>
-                                        <p
-                                            className="text-xs"
-                                            style={{ color: 'var(--text-muted)' }}
-                                        >
+                                        <p className="text-[10px]" style={{ color: 'rgba(250,249,247,0.6)' }}>
                                             {formatDate(new Date(capture.createdAt), "HH:mm '•' dd MMM", { locale: ptBR })}
                                         </p>
                                     </div>
-                                    <div className={`relative ${capture.isAssembly ? 'aspect-video' : 'aspect-[3/4]'} rounded-2xl overflow-hidden transition-all duration-500 transform-gpu group-hover:rotate-y-12 group-hover:scale-105 border border-white/5 group-hover:border-white/30 shadow-2xl bg-bg-tertiary`}>
-                                        {/* Status Chip */}
-                                        <div className="absolute top-4 left-4 z-20 flex flex-col gap-2">
-                                            <div className="px-3 py-1 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 flex items-center gap-2">
-                                                <div className={`w-1.5 h-1.5 rounded-full ${capture.isAssembly ? 'bg-accent' : 'bg-success'} animate-pulse`} />
-                                                <span className="text-[8px] font-black text-white/80 uppercase tracking-widest">
-                                                    {capture.isAssembly ? 'Visual Assembly' : 'Live Capture'}
-                                                </span>
-                                            </div>
-                                        </div>
-
-                                        <div className="absolute inset-0 z-0 bg-bg-tertiary">
+                                    <div className={`relative ${capture.isAssembly ? 'aspect-video' : 'aspect-[3/4]'} overflow-hidden`}>
+                                        <div className="absolute inset-0 bg-[#f3f0ea]">
                                             <CaptureImage
                                                 src={`/api/captures/${capture.id}`}
                                                 alt={capture.isAssembly ? "Montagem" : "Banner"}
@@ -167,30 +163,15 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
                                             />
                                         </div>
                                     </div>
-
-                                    {/* Gradient border on hover */}
-                                    <div
-                                        className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
-                                        style={{
-                                            background: 'var(--gradient-primary)',
-                                            padding: '2px',
-                                            mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
-                                            maskComposite: 'exclude',
-                                            WebkitMaskComposite: 'xor'
-                                        }}
-                                    />
                                 </div>
                             ))}
                             {recentCaptures.length === 0 && (
                                 <div
-                                    className="col-span-full py-20 flex flex-col items-center justify-center rounded-2xl"
-                                    style={{
-                                        border: '2px dashed var(--border)',
-                                        color: 'var(--text-muted)'
-                                    }}
+                                    className="col-span-full py-20 flex flex-col items-center justify-center rounded-lg"
+                                    style={{ border: '0.5px dashed #d4cfc7', color: '#a89f8c' }}
                                 >
-                                    <ImageIcon size={56} className="mb-4 opacity-20" />
-                                    <p className="font-medium">Nenhuma captura realizada hoje.</p>
+                                    <ImageIcon size={40} className="mb-3 opacity-30" />
+                                    <p style={{ fontSize: 13, fontWeight: 500 }}>Nenhuma captura realizada hoje.</p>
                                 </div>
                             )}
                         </div>
@@ -203,47 +184,36 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
     )
 }
 
-function StatCard({ label, value, icon: Icon, gradient, color }: any) {
+function StatCard({ label, value, icon: Icon, highlight, danger }: any) {
     return (
         <div
-            className="p-6 rounded-2xl flex items-center gap-5 transition-all duration-300 hover:-translate-y-1 group relative overflow-hidden"
+            className="p-5 transition-all duration-300 hover:-translate-y-0.5"
             style={{
-                background: 'var(--bg-secondary)',
-                border: '1px solid var(--border)'
+                background: danger ? 'rgba(239,68,68,0.04)' : highlight ? '#1c1917' : '#faf9f7',
+                border: `0.5px solid ${danger ? 'rgba(239,68,68,0.2)' : highlight ? '#1c1917' : '#e8e5df'}`,
+                borderRadius: 8,
+                boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
             }}
         >
-            {/* Hover glow */}
-            <div
-                className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500"
-                style={{ background: gradient ? `${gradient.replace('135deg', '180deg')}` : `radial-gradient(circle at center, ${color}20 0%, transparent 70%)` }}
-            />
-
-            <div
-                className="w-14 h-14 rounded-xl flex items-center justify-center relative z-10"
-                style={{
-                    background: gradient || `${color}20`,
-                    boxShadow: gradient ? 'var(--shadow-glow)' : `0 0 30px ${color}30`
-                }}
-            >
-                <Icon size={26} strokeWidth={1.5} style={{ color: gradient ? 'white' : color }} />
-            </div>
-            <div className="relative z-10">
-                <p
-                    className="text-xs font-medium uppercase tracking-wider mb-1"
-                    style={{ color: 'var(--text-muted)' }}
-                >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                <div style={{
+                    width: 32, height: 32, borderRadius: 6,
+                    background: danger ? 'rgba(239,68,68,0.1)' : highlight ? 'rgba(250,249,247,0.1)' : '#ede9e1',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                    <Icon size={15} style={{ color: danger ? '#ef4444' : highlight ? '#faf9f7' : '#a89f8c' }} />
+                </div>
+                <p style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: danger ? '#ef4444' : highlight ? '#a89f8c' : '#a89f8c' }}>
                     {label}
                 </p>
-                <p
-                    className="text-3xl font-bold tracking-tight"
-                    style={{
-                        color: 'var(--text-primary)',
-                        fontFamily: 'var(--font-display)'
-                    }}
-                >
-                    {value}
-                </p>
             </div>
+            <p style={{
+                fontSize: 28, fontWeight: 700, letterSpacing: '-0.5px',
+                fontFamily: 'var(--font-display)',
+                color: danger ? '#ef4444' : highlight ? '#faf9f7' : '#1c1917',
+            }}>
+                {value}
+            </p>
         </div>
     )
 }

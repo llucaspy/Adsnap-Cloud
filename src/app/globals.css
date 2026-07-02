@@ -1,5 +1,5 @@
-/* Google Fonts */
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap');
+/* Google Fonts — Editorial Sans-serif */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
 
 @import "tailwindcss";
 
@@ -9,26 +9,39 @@
    ============================================ */
 
 :root {
-  /* Dark Backgrounds - ALWAYS DARK */
-  --bg-primary: #0a0a0a;
-  --bg-secondary: #111111;
-  --bg-tertiary: #1a1a1a;
-  --bg-elevated: #222222;
-  --bg-glass: rgba(18, 18, 18, 0.85);
+  /* Light Backgrounds - Notion Warm Cream */
+  --bg-primary: #faf9f7;
+  --bg-secondary: #f3f0ea;
+  --bg-tertiary: #ede9e1;
+  --bg-elevated: #faf9f7;
+  --bg-glass: rgba(250, 249, 247, 0.85);
 
   /* Text */
-  --text-primary: #ffffff;
-  --text-secondary: #a3a3a3;
-  --text-muted: #525252;
+  --text-primary: #1c1917;
+  --text-secondary: #a89f8c;
+  --text-muted: #d4cfc7;
 
-  /* Primary Accent: Pure White */
-  --accent: #ffffff;
-  --accent-light: #e5e5e5;
-  --accent-dark: #a3a3a3;
-  --accent-muted: rgba(255, 255, 255, 0.08);
-  --accent-glow: rgba(255, 255, 255, 0.15);
+  /* Primary Accent — Warm Cream Light Mode */
+  --accent: #1c1917;
+  --accent-hover: #2c2825;
+  --accent-pressed: #403a35;
+  --accent-muted: rgba(28, 25, 23, 0.15);
+  --accent-glow: rgba(28, 25, 23, 0.15);
+  --accent-light: #52525b;
+  --accent-dark: #000000;
 
-  /* Secondary / Tertiary — neutral gray */
+  /* Brand Navy -> Warm Cream Theme (hero bands) */
+  --brand-navy: #faf9f7;
+  --brand-navy-mid: #f3f0ea;
+  --brand-navy-surface: #ede9e1;
+
+  /* Grain Overlay Helper */
+  --bg-grain: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+
+  /* Link Blue — apenas links inline */
+  --link-blue: #3b82f6;
+
+  /* Secondary / Tertiary */
   --secondary: #737373;
   --secondary-muted: rgba(115, 115, 115, 0.12);
   --tertiary: #404040;
@@ -43,11 +56,18 @@
   --destructive-muted: rgba(239, 68, 68, 0.12);
 
   /* Borders */
-  --border: rgba(255, 255, 255, 0.07);
-  --border-accent: rgba(255, 255, 255, 0.25);
+  --border: #e8e5df;
+  --border-accent: #d4cfc7;
+  --border-strong: #d4cfc7;
+
+  /* Glass surfaces */
+  --glass-bg: rgba(255, 255, 255, 0.05);
+  --glass-navbar: rgba(10, 10, 10, 0.80);
+  --glass-blur: 16px;
+  --glass-navbar-blur: 20px;
 
   /* Gradients */
-  --gradient-primary: linear-gradient(135deg, #ffffff 0%, #a3a3a3 100%);
+  --gradient-primary: linear-gradient(135deg, #faf9f7 0%, #a3a3a3 100%);
   --gradient-secondary: linear-gradient(135deg, #737373 0%, #d4d4d4 100%);
   --gradient-glow: linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0%, rgba(200, 200, 200, 0.03) 100%);
 
@@ -58,22 +78,47 @@
   --shadow-glow: 0 0 40px rgba(255, 255, 255, 0.10);
   --shadow-glow-secondary: 0 0 40px rgba(200, 200, 200, 0.06);
 
-  /* Radii */
+  /* Radii — DESIGN.md tokens */
+  --rounded-xs: 4px;
+  --rounded-sm: 4px;
+  --rounded-md: 6px;   /* botões */
+  --rounded-lg: 8px;   /* cards */
+  --rounded-xl: 12px;
+  --rounded-xxl: 20px;
+  --rounded-xxxl: 24px;
+  --rounded-full: 9999px; /* APENAS badges/status */
+
+  /* Aliases de compatibilidade */
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
-  --radius-xl: 24px;
-  --radius-2xl: 32px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
   --radius-full: 9999px;
 
-  /* Typography */
-  --font-display: 'Outfit', sans-serif;
-  --font-body: 'Space Grotesk', sans-serif;
+  /* Typography — Editorial DM Sans / Inter fallback */
+  --font-display: 'DM Sans', -apple-system, system-ui, sans-serif;
+  --font-body: 'DM Sans', -apple-system, system-ui, sans-serif;
 
-  /* Transitions */
-  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-base: 300ms cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-slow: 500ms cubic-bezier(0.4, 0, 0.2, 1);
+  /* Transitions — easing físico (DESIGN.md) */
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-fast: 150ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-base: 300ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-slow: 500ms cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Elevação — sistema de 5 níveis (DESIGN.md) */
+  --shadow-0: none;
+  --shadow-1: rgba(0,0,0,0.20) 0px 2px 8px 0px;
+  --shadow-2: rgba(0,0,0,0.30) 0px 8px 24px 0px;
+  --shadow-3: rgba(0,0,0,0.50) 0px 32px 64px -8px;
+  --shadow-4: rgba(0,0,0,0.40) 0px 24px 64px -8px;
+  /* Aliases legado */
+  --shadow-sm: var(--shadow-1);
+  --shadow-md: var(--shadow-2);
+  --shadow-lg: var(--shadow-3);
+  --shadow-glow: 0 0 40px rgba(124, 58, 237, 0.25);
+  --shadow-glow-secondary: 0 0 40px rgba(124, 58, 237, 0.10);
 }
 
 /* ------------------------------------------
@@ -97,6 +142,7 @@ body {
   font-size: 1rem;
   line-height: 1.6;
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* ------------------------------------------
@@ -111,8 +157,8 @@ body {
    SELECTION
    ------------------------------------------ */
 ::selection {
-  background: rgba(255, 255, 255, 0.15);
-  color: white;
+  background: rgba(28, 25, 23, 0.15);
+  color: #1c1917;
 }
 
 /* ------------------------------------------
@@ -292,13 +338,36 @@ body {
 }
 
 /* ------------------------------------------
-   GLASS EFFECT
+   GLASS EFFECT — DESIGN.md Glassmorphism
    ------------------------------------------ */
 .glass {
-  background: var(--bg-glass);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
   border: 1px solid var(--border);
+  border-radius: var(--rounded-lg);
+}
+
+.glass-navbar {
+  background: var(--glass-navbar);
+  backdrop-filter: blur(var(--glass-navbar-blur)) saturate(200%);
+  -webkit-backdrop-filter: blur(var(--glass-navbar-blur)) saturate(200%);
+  border-bottom: 1px solid var(--border);
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(12px) saturate(160%);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--rounded-lg);
+  box-shadow: var(--shadow-2);
+  transition: transform 0.25s var(--ease-spring), box-shadow 0.25s ease;
+}
+
+.glass-card:hover {
+  transform: translateY(-4px);
+  box-shadow: rgba(0,0,0,0.45) 0px 16px 40px -4px;
 }
 
 .glow-text {
@@ -318,7 +387,136 @@ body {
 }
 
 /* ------------------------------------------
-   GLOW BUTTON
+   HOVER LIFT — DESIGN.md
+   ------------------------------------------ */
+.hover-lift {
+  transition: transform 0.25s var(--ease-spring), box-shadow 0.25s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: rgba(0, 0, 0, 0.35) 0px 12px 32px -4px;
+}
+
+/* ------------------------------------------
+   PAGE ENTER — DESIGN.md Efeito de Entrada
+   ------------------------------------------ */
+@keyframes pageEnter {
+  from {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+.page-enter {
+  animation: pageEnter 0.7s var(--ease-spring) both;
+}
+
+/* ------------------------------------------
+   REVEAL — Intersection Observer Classes
+   ------------------------------------------ */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition:
+    opacity 0.6s var(--ease-spring),
+    transform 0.6s var(--ease-spring);
+}
+
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.reveal-scale {
+  opacity: 0;
+  transform: scale(0.96);
+  transition:
+    opacity 0.6s var(--ease-spring),
+    transform 0.6s var(--ease-spring);
+}
+
+.reveal-scale.visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Stagger delays — 80ms base */
+.stagger-1 { transition-delay: 0ms; }
+.stagger-2 { transition-delay: 80ms; }
+.stagger-3 { transition-delay: 160ms; }
+.stagger-4 { transition-delay: 240ms; }
+.stagger-5 { transition-delay: 320ms; }
+
+/* ------------------------------------------
+   BOTÕES — DESIGN.md Warm Cream
+   ------------------------------------------ */
+.btn-primary {
+  background: #1c1917;
+  color: #faf9f7;
+  border-radius: 6px;
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: var(--font-body);
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.2s ease, transform 0.2s var(--ease-spring);
+  text-decoration: none;
+}
+
+.btn-primary:hover {
+  background: #2c2825;
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background: transparent;
+  color: #a89f8c;
+  border-radius: 6px;
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: var(--font-body);
+  border: 0.5px solid #d4cfc7;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: border-color 0.2s, background 0.2s, transform 0.2s var(--ease-spring);
+  text-decoration: none;
+}
+
+.btn-secondary:hover {
+  background: #f3f0ea;
+  border-color: #d4cfc7;
+  transform: translateY(-1px);
+}
+
+.grain-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 50;
+  opacity: 0.02;
+  background-image: var(--bg-grain);
+  mix-blend-mode: overlay;
+}
+
+/* ------------------------------------------
+   GLOW BUTTON (legado — mantido)
    ------------------------------------------ */
 .btn-glow {
   background: var(--gradient-primary);
@@ -328,7 +526,7 @@ body {
 }
 
 .btn-glow:hover {
-  box-shadow: var(--shadow-glow), 0 0 80px rgba(255, 255, 255, 0.20);
+  box-shadow: var(--shadow-glow), 0 0 80px rgba(124, 58, 237, 0.20);
   transform: translateY(-2px);
 }
 

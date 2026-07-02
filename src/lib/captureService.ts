@@ -13,6 +13,7 @@ export interface CaptureResult {
     error?: string
     quarantined?: boolean
     aborted?: boolean
+    nonRetryable?: boolean
 }
 
 export interface CaptureOptions {
@@ -145,11 +146,12 @@ export async function processCampaign(campaignId: string, options: CaptureOption
         let retryCount = 0;
         const MAX_RETRIES = settings.nexusMaxRetries;
         let lastError = '';
+        let stoppedForNonRetryable = false;
 
         while (retryCount < MAX_RETRIES) {
             throwIfCaptureAborted(options.signal)
             if (retryCount > 0) {
-                await nexusLogStore.addLog(`Nexus: Tentativa ${retryCount + 1}/${MAX_RETRIES}...`, 'ERROR', undefined, campaignId);
+                await nexusLogStore.addLog(`Nexus: Tentativa ${retryCount + 1}/${MAX_RETRIES}...`, 'INFO', undefined, campaignId);
                 await abortableDelay(settings.nexusDelay, options.signal);
             }
 
@@ -184,15 +186,29 @@ export async function processCampaign(campaignId: string, options: CaptureOption
             lastError = result.error || 'Erro desconhecido';
             retryCount++;
 
-            await nexusLogStore.addLog(`Nexus: Falha na tentativa ${retryCount}. Erro: ${lastError}`, 'ERROR', undefined, campaignId);
+            if (result.nonRetryable) {
+                stoppedForNonRetryable = true;
+                await nexusLogStore.addLog(`Nexus: Falha nao recuperavel. Sem novas tentativas. Erro: ${lastError}`, 'ERROR', undefined, campaignId);
+                break;
+            }
+
+            await nexusLogStore.addLog(`Nexus: Falha na tentativa ${retryCount}. Erro: ${lastError}`, 'INFO', undefined, campaignId);
         }
 
         console.log(`[Nexus] Quarentena aplicada para ${campaignId}. Motivo: ${lastError}`);
+        if (stoppedForNonRetryable) {
+            await nexusLogStore.addLog('Nexus: Quarentena aplicada. Falha nao recuperavel. Tentativas interrompidas.', 'ERROR', `Ultimo erro: ${lastError}`, campaignId);
+        } else {
         await nexusLogStore.addLog(`Nexus: Quarentena aplicada. Todas as tentativas falharam.`, 'ERROR', `Último erro: ${lastError}`, campaignId);
 
+        }
+
         // Visual alert + Telegram
-        alertStore.addAlert('error', 'Campanha em Quarentena', `Todas as ${MAX_RETRIES} tentativas falharam. Erro: ${lastError}`, campaignId);
-        sendTelegramAlert('Campanha em Quarentena', `Todas as ${MAX_RETRIES} tentativas falharam para a campanha.`, `Erro: ${lastError}`, campaignId).catch(() => {});
+        const attemptMessage = stoppedForNonRetryable
+            ? `Falha nao recuperavel apos ${retryCount} tentativa(s).`
+            : `Todas as ${MAX_RETRIES} tentativas falharam.`;
+        alertStore.addAlert('error', 'Campanha em Quarentena', `${attemptMessage} Erro: ${lastError}`, campaignId);
+        sendTelegramAlert('Campanha em Quarentena', `${attemptMessage} Campanha enviada para quarentena.`, `Erro: ${lastError}`, campaignId).catch(() => {});
 
         // Save failure to database as a record even in quarantine
         await prisma.capture.create({
@@ -216,12 +232,12 @@ export async function processCampaign(campaignId: string, options: CaptureOption
             }
         });
 
-        return { success: false, error: lastError, quarantined: true };
+        return { success: false, error: lastError, quarantined: true, nonRetryable: stoppedForNonRetryable };
     } catch (e) {
         if (isCaptureAborted(e, options.signal)) {
             const errorMsg = getAbortMessage(options.signal)
             console.warn('[Nexus Capture Aborted]', errorMsg)
-            await nexusLogStore.addLog('Nexus: Captura abortada pelo worker', 'ERROR', errorMsg, campaignId)
+            await nexusLogStore.addLog('Nexus: Captura abortada pelo worker', 'INFO', errorMsg, campaignId)
             return { success: false, error: errorMsg, aborted: true }
         }
 
@@ -372,6 +388,42 @@ function describeMeasuredBoxes(boxes: MeasuredAdBox[]) {
         .join(', ') || 'sem boxes visiveis';
 }
 
+async function waitForExpectedDimensionInSlot(
+    locator: Locator,
+    targetW: number,
+    targetH: number,
+    maxWaitMs: number,
+    signal?: AbortSignal,
+) {
+    const startedAt = Date.now();
+    let measuredBoxes: MeasuredAdBox[] = [];
+
+    while (true) {
+        throwIfCaptureAborted(signal);
+        measuredBoxes = await locator.evaluate(measureAdBoxesInPage);
+        const matchingBox = measuredBoxes.find(candidate => matchesExpectedDimension(candidate, targetW, targetH));
+
+        if (matchingBox) {
+            return {
+                matchingBox,
+                measuredBoxes,
+                waitedMs: Date.now() - startedAt,
+            };
+        }
+
+        const elapsedMs = Date.now() - startedAt;
+        if (elapsedMs >= maxWaitMs) {
+            return {
+                matchingBox: null,
+                measuredBoxes,
+                waitedMs: elapsedMs,
+            };
+        }
+
+        await abortableDelay(Math.min(250, maxWaitMs - elapsedMs), signal);
+    }
+}
+
 async function injectCreativeAsset(locator: Locator, assetUrl: string, width: number, height: number) {
     await locator.evaluate((element, creative) => {
         const image = document.createElement('img');
@@ -423,18 +475,30 @@ async function captureScreenshotAfterConfiguredDelay(
     captureDelaySeconds: number,
     signal?: AbortSignal,
     animations: 'allow' | 'disabled' = 'allow',
+    alreadyWaitedMs = 0,
 ) {
     throwIfCaptureAborted(signal)
-    const delaySeconds = normalizeCaptureDelaySeconds(captureDelaySeconds)
+    const configuredDelayMs = normalizeCaptureDelaySeconds(captureDelaySeconds) * 1000
+    const remainingDelayMs = Math.max(0, configuredDelayMs - Math.max(0, Math.floor(alreadyWaitedMs)))
 
     await page.waitForLoadState('domcontentloaded', { timeout: FAST_SCROLL_SETTLE_MS }).catch(() => null)
-    await nexusLogStore.addLog(
-        `Nexus: Aguardando ${delaySeconds}s antes do print`,
-        'SYSTEM',
-        'Captura por tempo configurado; selecao automatica de frame desativada',
-        campaignId,
-    )
-    await abortableDelay(delaySeconds * 1000, signal)
+    if (remainingDelayMs > 0) {
+        const remainingSeconds = Number((remainingDelayMs / 1000).toFixed(1))
+        await nexusLogStore.addLog(
+            `Nexus: Aguardando ${remainingSeconds}s antes do print`,
+            'SYSTEM',
+            'Captura por tempo configurado; selecao automatica de frame desativada',
+            campaignId,
+        )
+        await abortableDelay(remainingDelayMs, signal)
+    } else {
+        await nexusLogStore.addLog(
+            'Nexus: Delay configurado ja cumprido antes do print',
+            'SYSTEM',
+            'Tempo consumido durante a validacao do slot multi-size',
+            campaignId,
+        )
+    }
     throwIfCaptureAborted(signal)
     return page.screenshot({ type: 'png', animations, timeout: FAST_SCREENSHOT_TIMEOUT_MS })
 }
@@ -634,6 +698,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         // ====================================================
         // STRATEGY 1: EXPLICIT SELECTOR
         // ====================================================
+        let selectorMismatchError: string | null = null;
         if (bannerConfig && bannerConfig.selector) {
             const selectorCandidates = [bannerConfig.selector];
             if (targetW === 300 && targetH === 250 && bannerConfig.selector.includes('home-quadrado-0')) {
@@ -674,9 +739,34 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                         }
                     }
     
-                    const measuredBoxes = await locator.evaluate(measureAdBoxesInPage);
-    
-                    const matchingBox = measuredBoxes.find(candidate => matchesExpectedDimension(candidate, targetW, targetH));
+                    let measuredBoxes = await locator.evaluate(measureAdBoxesInPage);
+                    let matchingBox: MeasuredAdBox | null = measuredBoxes.find(candidate => matchesExpectedDimension(candidate, targetW, targetH)) || null;
+                    let selectorDimensionWaitMs = 0;
+
+                    if (!matchingBox) {
+                        const initialMeasured = describeMeasuredBoxes(measuredBoxes);
+                        const maxSlotWaitMs = normalizeCaptureDelaySeconds(campaign.captureDelaySeconds) * 1000;
+
+                        console.log(`[Nexus] Slot multi-size ainda nao exibiu ${targetW}x${targetH}. Medido: ${initialMeasured}`);
+                        await nexusLogStore.addLog(
+                            'Nexus: Slot multi-size aguardando formato esperado',
+                            'INFO',
+                            `Esperado ${targetW}x${targetH}; medido agora: ${initialMeasured}; espera maxima: ${maxSlotWaitMs / 1000}s`,
+                            campaignId,
+                        );
+
+                        const waitedMeasurement = await waitForExpectedDimensionInSlot(
+                            locator,
+                            targetW,
+                            targetH,
+                            maxSlotWaitMs,
+                            options.signal,
+                        );
+
+                        matchingBox = waitedMeasurement.matchingBox;
+                        measuredBoxes = waitedMeasurement.measuredBoxes;
+                        selectorDimensionWaitMs = waitedMeasurement.waitedMs;
+                    }
     
                     if (matchingBox) {
                         console.log(`[Nexus] Seletor validado! ${matchingBox.source} (${Math.round(matchingBox.width)}x${Math.round(matchingBox.height)})`);
@@ -694,16 +784,17 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                         }
 
                         const screenshotBuffer = standaloneCreativeAssetUrl
-                            ? await captureScreenshotAfterConfiguredDelay(page, campaignId, campaign.captureDelaySeconds, options.signal, 'disabled')
-                            : await captureScreenshotAfterConfiguredDelay(page, campaignId, campaign.captureDelaySeconds, options.signal);
+                            ? await captureScreenshotAfterConfiguredDelay(page, campaignId, campaign.captureDelaySeconds, options.signal, 'disabled', selectorDimensionWaitMs)
+                            : await captureScreenshotAfterConfiguredDelay(page, campaignId, campaign.captureDelaySeconds, options.signal, 'allow', selectorDimensionWaitMs);
                         const finalImage = await prepareFinalCaptureImage(screenshotBuffer, campaign.url, isMobile, browser, options.signal);
                         await browser.close();
                         return await saveCapture(campaign, finalImage, campaignId, options);
                     } else {
                         const measured = describeMeasuredBoxes(measuredBoxes);
-                        console.log(`[Nexus] Seletor localizado com dimensao errada. Esperado ${targetW}x${targetH}; medido: ${measured}`);
-                        await nexusLogStore.addLog('Nexus: Seletor localizado com dimensao errada', 'INFO', `Esperado ${targetW}x${targetH}; medido: ${measured}`, campaignId);
-                        throw new Error(`Dimensao do seletor nao corresponde ao formato (${measured})`);
+                        console.log(`[Nexus] Slot multi-size nao exibiu o formato esperado. Esperado ${targetW}x${targetH}; medido: ${measured}`);
+                        await nexusLogStore.addLog('Nexus: Slot multi-size nao exibiu formato esperado', 'INFO', `Esperado ${targetW}x${targetH}; medido apos espera: ${measured}`, campaignId);
+                        selectorMismatchError = `Slot multi-size sem criativo ${targetW}x${targetH} apos espera (${measured})`;
+                        throw new Error(selectorMismatchError);
                     }
                 } catch (selError) {
                     const msg = selError instanceof Error ? selError.message : String(selError);
@@ -725,7 +816,10 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         if (!candidates || candidates.length === 0) {
             console.log('[Nexus] Nenhum banner encontrado via script')
             await browser.close();
-            await nexusLogStore.addLog('Nexus: Nenhum candidato a banner encontrado na página', 'ERROR', undefined, campaignId);
+            await nexusLogStore.addLog('Nexus: Nenhum candidato a banner encontrado na pagina', 'INFO', undefined, campaignId);
+            if (selectorMismatchError) {
+                return { success: false, error: selectorMismatchError, nonRetryable: true };
+            }
             return { success: false, error: 'Banner não localizado na página' };
         }
 
@@ -785,7 +879,10 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         if (!bestCandidate) {
             console.log('[Nexus] Falha: Nenhum conteúdo visual detectado.');
             await browser.close();
-            await nexusLogStore.addLog('Nexus: Falha - Banners localizados mas parecem vazios ou invisíveis', 'ERROR', undefined, campaignId);
+            await nexusLogStore.addLog('Nexus: Falha - Banners localizados mas parecem vazios ou invisiveis', 'INFO', undefined, campaignId);
+            if (selectorMismatchError) {
+                return { success: false, error: selectorMismatchError, nonRetryable: true };
+            }
             return { success: false, error: 'Banners encontrados mas parecem vazios ou invisíveis' };
         }
 
@@ -810,13 +907,13 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         if (browser) await browser.close();
         if (isCaptureAborted(err, options.signal)) {
             const msg = getAbortMessage(options.signal)
-            await nexusLogStore.addLog('Nexus: Captura interrompida por timeout', 'ERROR', msg, campaignId);
+            await nexusLogStore.addLog('Nexus: Captura interrompida por timeout', 'INFO', msg, campaignId);
             return { success: false, error: msg, aborted: true };
         }
         const msg = err instanceof Error ? err.message : String(err);
         const stack = err instanceof Error ? err.stack : undefined;
         console.error('[Capture Error]', err);
-        await nexusLogStore.addLog(`Nexus: Erro fatal durante a captura`, 'ERROR', `${msg}\n\nStack: ${stack}`, campaignId);
+        await nexusLogStore.addLog(`Nexus: Falha da tentativa de captura`, 'INFO', `${msg}\n\nStack: ${stack}`, campaignId);
         return { success: false, error: msg };
     } finally {
         options.signal?.removeEventListener('abort', closeBrowserOnAbort)
