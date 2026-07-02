@@ -72,6 +72,7 @@ const FAST_SCROLL_SETTLE_MS = readPositiveMsEnv('NEXUS_FAST_SCROLL_SETTLE_MS', 3
 const FAST_SCREENSHOT_TIMEOUT_MS = readPositiveMsEnv('NEXUS_FAST_SCREENSHOT_TIMEOUT_MS', 2_500, 10_000)
 const FAST_FRAME_SETTLE_MS = readPositiveMsEnv('NEXUS_FAST_FRAME_SETTLE_MS', 100, 1_000)
 const FAST_FRAME_TIMEOUT_MS = readPositiveMsEnv('NEXUS_FAST_FRAME_TIMEOUT_MS', 3_000, 10_000)
+const MULTI_SIZE_SLOT_TIMEOUT_MS = readPositiveMsEnv('NEXUS_MULTI_SIZE_SLOT_TIMEOUT_MS', 8_000, 15_000)
 
 type ChromiumBrowser = Awaited<ReturnType<typeof chromium.launch>>
 
@@ -745,7 +746,8 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
 
                     if (!matchingBox) {
                         const initialMeasured = describeMeasuredBoxes(measuredBoxes);
-                        const maxSlotWaitMs = normalizeCaptureDelaySeconds(campaign.captureDelaySeconds) * 1000;
+                        const configuredDelayMs = normalizeCaptureDelaySeconds(campaign.captureDelaySeconds) * 1000;
+                        const maxSlotWaitMs = Math.max(MULTI_SIZE_SLOT_TIMEOUT_MS, configuredDelayMs);
 
                         console.log(`[Nexus] Slot multi-size ainda nao exibiu ${targetW}x${targetH}. Medido: ${initialMeasured}`);
                         await nexusLogStore.addLog(
@@ -818,7 +820,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
             await browser.close();
             await nexusLogStore.addLog('Nexus: Nenhum candidato a banner encontrado na pagina', 'INFO', undefined, campaignId);
             if (selectorMismatchError) {
-                return { success: false, error: selectorMismatchError, nonRetryable: true };
+                return { success: false, error: selectorMismatchError };
             }
             return { success: false, error: 'Banner não localizado na página' };
         }
@@ -881,7 +883,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
             await browser.close();
             await nexusLogStore.addLog('Nexus: Falha - Banners localizados mas parecem vazios ou invisiveis', 'INFO', undefined, campaignId);
             if (selectorMismatchError) {
-                return { success: false, error: selectorMismatchError, nonRetryable: true };
+                return { success: false, error: selectorMismatchError };
             }
             return { success: false, error: 'Banners encontrados mas parecem vazios ou invisíveis' };
         }
