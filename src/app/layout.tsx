@@ -1,20 +1,26 @@
 import type { Metadata } from "next";
-import { JetBrains_Mono, DM_Sans } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/Sidebar";
 import { NexusChat } from "@/components/NexusChat";
 import { ScrollEffects } from "@/components/ScrollEffects";
 import { AlertToast } from "@/components/AlertToast";
 
-const jetbrainsMono = JetBrains_Mono({
+const interBody = Inter({
+  subsets: ["latin"],
+  variable: "--font-body",
+  display: "swap"
+});
+
+const interDisplay = Inter({
   subsets: ["latin"],
   variable: "--font-display",
   display: "swap"
 });
 
-const dmSans = DM_Sans({
+const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
-  variable: "--font-body",
+  variable: "--font-mono",
   display: "swap"
 });
 
@@ -33,7 +39,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-BR" className="dark">
-      <body className={`${jetbrainsMono.variable} ${dmSans.variable} font-sans flex min-h-screen`} style={{ fontFamily: 'var(--font-body)' }}>
+      <body className={`${interBody.variable} ${interDisplay.variable} ${jetbrainsMono.variable} font-sans flex min-h-screen`} style={{ fontFamily: 'var(--font-body)' }}>
         <ScrollEffects />
         <Sidebar />
         <main className="flex-1 overflow-auto" style={{ background: 'var(--bg-primary)' }}>

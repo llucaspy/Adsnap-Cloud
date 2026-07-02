@@ -1,5 +1,5 @@
 /* Google Fonts — Editorial Sans-serif */
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 @import "tailwindcss";
 
@@ -10,30 +10,30 @@
 
 :root {
   /* Dark Backgrounds - ALWAYS DARK */
-  --bg-primary: #0a0a0a;
-  --bg-secondary: #111111;
+  --bg-primary: #0f0f0f;
+  --bg-secondary: #141414;
   --bg-tertiary: #1a1a1a;
-  --bg-elevated: #222222;
+  --bg-elevated: #1a1a1a;
   --bg-glass: rgba(18, 18, 18, 0.85);
 
   /* Text */
   --text-primary: #ffffff;
-  --text-secondary: #a3a3a3;
-  --text-muted: #525252;
+  --text-secondary: #e5e5e5;
+  --text-muted: #737373;
 
-  /* Primary Accent: Pure White */
-  --accent: #ffffff;
-  --accent-hover: #e5e5e5;
-  --accent-pressed: #a3a3a3;
-  --accent-muted: rgba(255, 255, 255, 0.08);
-  --accent-glow: rgba(255, 255, 255, 0.15);
-  --accent-light: #e5e5e5;
-  --accent-dark: #a3a3a3;
+  /* Primary Accent */
+  --accent: #7c3aed;
+  --accent-hover: #6d28d9;
+  --accent-pressed: #5b21b6;
+  --accent-muted: #7c3aed1a;
+  --accent-glow: rgba(124, 58, 237, 0.25);
+  --accent-light: #a78bfa;
+  --accent-dark: #6d28d9;
 
   /* Brand surfaces */
-  --brand-navy: #0a0a0a;
-  --brand-navy-mid: #111111;
-  --brand-navy-surface: #1a1a1a;
+  --brand-navy: #0f0e17;
+  --brand-navy-mid: #1a1a2e;
+  --brand-navy-surface: #16213e;
 
   /* Grain Overlay Helper */
   --bg-grain: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
@@ -56,8 +56,8 @@
   --destructive-muted: rgba(239, 68, 68, 0.12);
 
   /* Borders */
-  --border: rgba(255, 255, 255, 0.07);
-  --border-accent: rgba(255, 255, 255, 0.25);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-accent: rgba(255, 255, 255, 0.16);
   --border-strong: rgba(255, 255, 255, 0.16);
 
   /* Glass surfaces */
@@ -97,8 +97,8 @@
   --radius-full: 9999px;
 
   /* Typography — Editorial DM Sans / Inter fallback */
-  --font-display: 'DM Sans', -apple-system, system-ui, sans-serif;
-  --font-body: 'DM Sans', -apple-system, system-ui, sans-serif;
+  --font-display: 'Inter', -apple-system, system-ui, sans-serif;
+  --font-body: 'Inter', -apple-system, system-ui, sans-serif;
 
   /* Transitions — easing físico (DESIGN.md) */
   --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
@@ -455,13 +455,13 @@ body {
 .stagger-5 { transition-delay: 320ms; }
 
 /* ------------------------------------------
-   BOTÕES — DESIGN.md Warm Cream
+   BOTÕES — DESIGN.md Dark System
    ------------------------------------------ */
 .btn-primary {
-  background: #1c1917;
-  color: #faf9f7;
-  border-radius: 6px;
-  padding: 10px 24px;
+  background: #7c3aed;
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 10px 20px;
   font-size: 14px;
   font-weight: 500;
   font-family: var(--font-body);
@@ -475,19 +475,19 @@ body {
 }
 
 .btn-primary:hover {
-  background: #2c2825;
+  background: #6d28d9;
   transform: translateY(-1px);
 }
 
 .btn-secondary {
   background: transparent;
-  color: #a89f8c;
-  border-radius: 6px;
-  padding: 10px 24px;
+  color: #e5e5e5;
+  border-radius: 8px;
+  padding: 10px 20px;
   font-size: 14px;
   font-weight: 500;
   font-family: var(--font-body);
-  border: 0.5px solid #d4cfc7;
+  border: 1px solid rgba(255,255,255,0.16);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -497,8 +497,8 @@ body {
 }
 
 .btn-secondary:hover {
-  background: #f3f0ea;
-  border-color: #d4cfc7;
+  background: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.32);
   transform: translateY(-1px);
 }
 

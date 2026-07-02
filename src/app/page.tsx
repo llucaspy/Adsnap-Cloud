@@ -71,8 +71,8 @@ export default async function PresentationHome() {
       }}>
         <div style={{
           display: 'inline-flex',
-          background: '#ede9e1',
-          color: '#a89f8c',
+          background: 'rgba(255,255,255,0.04)',
+          color: '#a3a3a3',
           fontSize: '10px',
           fontWeight: 600,
           letterSpacing: '0.07em',
@@ -89,7 +89,7 @@ export default async function PresentationHome() {
           fontWeight: 800,
           lineHeight: 1.1,
           letterSpacing: '-1px',
-          color: '#1c1917',
+          color: '#ffffff',
           fontFamily: 'var(--font-display)',
           marginBottom: '24px',
           maxWidth: '600px',
@@ -102,7 +102,7 @@ export default async function PresentationHome() {
           fontSize: '15px',
           fontWeight: 400,
           lineHeight: 1.6,
-          color: '#a89f8c',
+          color: '#a3a3a3',
           maxWidth: '460px',
           marginBottom: '48px',
         }}>
@@ -122,39 +122,39 @@ export default async function PresentationHome() {
         {/* Realistic Mockup — Light shadow no glow */}
         <div className="reveal" style={{
           marginTop: '64px',
-          background: '#faf9f7',
-          borderRadius: '8px',
-          border: '0.5px solid #e8e5df',
-          boxShadow: '0 12px 32px rgba(0,0,0,0.05)',
+          background: 'rgba(255,255,255,0.04)',
+          borderRadius: '12px',
+          border: '1px solid rgba(255,255,255,0.08)',
+          boxShadow: 'rgba(0,0,0,0.50) 0px 32px 64px -8px',
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
         }}>
           {/* Browser Bar */}
           <div style={{
-            background: '#faf9f7',
+            background: '#141414',
             padding: '12px 24px',
             display: 'flex',
             alignItems: 'center',
             gap: '12px',
-            borderBottom: '0.5px solid #e8e5df',
+            borderBottom: '0.5px solid rgba(255,255,255,0.08)',
           }}>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#d4cfc7' }} />
-              <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#d4cfc7' }} />
-              <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#d4cfc7' }} />
+              <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#525252' }} />
+              <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#525252' }} />
+              <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#525252' }} />
             </div>
             <div style={{
-              flex: 1, margin: '0 16px', height: '28px', background: '#faf9f7',
-              borderRadius: '6px', border: '0.5px solid #e8e5df',
+              flex: 1, margin: '0 16px', height: '28px', background: '#141414',
+              borderRadius: '6px', border: '0.5px solid rgba(255,255,255,0.08)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '12px', color: '#a89f8c',
+              fontSize: '12px', color: '#a3a3a3',
             }}>
               nexus.adsnap.cloud
             </div>
           </div>
           {/* Dashboard Content */}
-          <div style={{ background: '#faf9f7', padding: '40px 32px' }}>
+          <div style={{ background: '#141414', padding: '40px 32px' }}>
             <NeuralActivityFeed />
           </div>
         </div>
@@ -168,7 +168,7 @@ export default async function PresentationHome() {
           margin: '0 auto',
         }}>
           <div style={{ marginBottom: '48px' }}>
-            <p style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#a89f8c', marginBottom: '12px' }}>
+            <p style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#a3a3a3', marginBottom: '12px' }}>
               Fluxo em Tempo Real
             </p>
             <h2 style={{
@@ -176,7 +176,7 @@ export default async function PresentationHome() {
               fontWeight: 600,
               lineHeight: 1.2,
               letterSpacing: '-0.5px',
-              color: '#1c1917',
+              color: '#ffffff',
               maxWidth: '480px',
             }}>
               Dados que respiram com seu negócio.
@@ -249,14 +249,14 @@ export default async function PresentationHome() {
           borderTop: '1px solid rgba(255,255,255,0.04)',
         }}>
           <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '64px 32px 0' }}>
-            <p style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#a89f8c', marginBottom: '12px' }}>
+            <p style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#a3a3a3', marginBottom: '12px' }}>
               Visual Evidence Stream
             </p>
             <h2 style={{
               fontSize: 'clamp(24px, 3vw, 36px)',
               fontWeight: 600,
               letterSpacing: '-0.5px',
-              color: '#1c1917',
+              color: '#ffffff',
               marginBottom: '48px',
             }}>
               Capturas recentes verificadas
@@ -278,30 +278,30 @@ function FeatureCardLarge({ icon: Icon, label, title, desc, accent }: any) {
       padding: '40px',
       height: '100%',
       minHeight: '280px',
-      background: '#faf9f7',
-      border: '0.5px solid #e8e5df',
-      borderRadius: '8px',
-      boxShadow: '0 4px 16px rgba(0,0,0,0.02)',
+      background: 'rgba(255,255,255,0.04)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '12px',
+      boxShadow: 'rgba(0,0,0,0.30) 0px 8px 24px 0px',
       position: 'relative',
       overflow: 'hidden',
     }}>
       <div style={{
         width: '44px', height: '44px',
-        background: '#f3f0ea',
-        border: '0.5px solid #e8e5df',
+        background: accent || 'rgba(124,58,237,0.12)',
+        border: '1px solid rgba(124,58,237,0.22)',
         borderRadius: '8px',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         marginBottom: '28px',
       }}>
-        <Icon size={20} style={{ color: '#1c1917' }} />
+        <Icon size={20} style={{ color: '#a78bfa' }} />
       </div>
-      <p style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#a89f8c', marginBottom: '10px' }}>
+      <p style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#a3a3a3', marginBottom: '10px' }}>
         {label}
       </p>
-      <h3 style={{ fontSize: '22px', fontWeight: 600, lineHeight: 1.3, color: '#1c1917', marginBottom: '14px' }}>
+      <h3 style={{ fontSize: '22px', fontWeight: 600, lineHeight: 1.3, color: '#ffffff', marginBottom: '14px' }}>
         {title}
       </h3>
-      <p style={{ fontSize: '14px', lineHeight: 1.65, color: '#a89f8c', maxWidth: '440px' }}>
+      <p style={{ fontSize: '14px', lineHeight: 1.65, color: '#a3a3a3', maxWidth: '440px' }}>
         {desc}
       </p>
     </div>
@@ -314,28 +314,28 @@ function FeatureCardMedium({ icon: Icon, label, title, desc }: any) {
       padding: '32px',
       height: '100%',
       minHeight: '200px',
-      background: '#faf9f7',
-      border: '0.5px solid #e8e5df',
-      borderRadius: '8px',
-      boxShadow: '0 4px 16px rgba(0,0,0,0.02)',
+      background: 'rgba(255,255,255,0.04)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      borderRadius: '12px',
+      boxShadow: 'rgba(0,0,0,0.30) 0px 8px 24px 0px',
     }}>
       <div style={{
         width: '36px', height: '36px',
-        background: '#f3f0ea',
-        border: '0.5px solid #e8e5df',
+        background: 'rgba(124,58,237,0.12)',
+        border: '1px solid rgba(124,58,237,0.22)',
         borderRadius: '8px',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         marginBottom: '20px',
       }}>
-        <Icon size={16} style={{ color: '#a89f8c' }} />
+        <Icon size={16} style={{ color: '#a78bfa' }} />
       </div>
-      <p style={{ fontSize: '10px', fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#a89f8c', marginBottom: '8px' }}>
+      <p style={{ fontSize: '10px', fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#a3a3a3', marginBottom: '8px' }}>
         {label}
       </p>
-      <h3 style={{ fontSize: '17px', fontWeight: 600, lineHeight: 1.3, color: '#1c1917', marginBottom: '10px' }}>
+      <h3 style={{ fontSize: '17px', fontWeight: 600, lineHeight: 1.3, color: '#ffffff', marginBottom: '10px' }}>
         {title}
       </h3>
-      <p style={{ fontSize: '13px', lineHeight: 1.6, color: '#a89f8c' }}>
+      <p style={{ fontSize: '13px', lineHeight: 1.6, color: '#a3a3a3' }}>
         {desc}
       </p>
     </div>
@@ -348,16 +348,16 @@ function FeatureCardStat({ icon: Icon, stat, label, desc, value }: any) {
       padding: '32px',
       height: '100%',
       minHeight: '200px',
-      background: '#faf9f7',
-      border: '0.5px solid #e8e5df',
-      borderRadius: '8px',
+      background: 'rgba(124,58,237,0.10)',
+      border: '1px solid rgba(124,58,237,0.26)',
+      borderRadius: '12px',
       position: 'relative',
       overflow: 'hidden',
     }}>
       <div style={{
         position: 'absolute', bottom: '-20px', right: '-20px',
         fontSize: '96px', fontWeight: 700,
-        color: '#ede9e1',
+        color: 'rgba(124,58,237,0.16)',
         lineHeight: 1, letterSpacing: '-4px',
         pointerEvents: 'none', userSelect: 'none',
       }}>
@@ -365,19 +365,19 @@ function FeatureCardStat({ icon: Icon, stat, label, desc, value }: any) {
       </div>
       <div style={{
         width: '36px', height: '36px',
-        background: '#f3f0ea',
-        border: '0.5px solid #e8e5df',
+        background: 'rgba(124,58,237,0.14)',
+        border: '1px solid rgba(124,58,237,0.24)',
         borderRadius: '8px',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         marginBottom: '20px',
       }}>
-        <Icon size={16} style={{ color: '#1c1917' }} />
+        <Icon size={16} style={{ color: '#a78bfa' }} />
       </div>
-      <div style={{ fontSize: '42px', fontWeight: 700, letterSpacing: '-1px', color: '#1c1917', lineHeight: 1, marginBottom: '8px' }}>
+      <div style={{ fontSize: '42px', fontWeight: 700, letterSpacing: '-1px', color: '#ffffff', lineHeight: 1, marginBottom: '8px' }}>
         {stat}
       </div>
-      <p style={{ fontSize: '14px', fontWeight: 500, color: '#1c1917', marginBottom: '4px' }}>{label}</p>
-      <p style={{ fontSize: '12px', color: '#a89f8c' }}>
+      <p style={{ fontSize: '14px', fontWeight: 500, color: '#ffffff', marginBottom: '4px' }}>{label}</p>
+      <p style={{ fontSize: '12px', color: '#a3a3a3' }}>
         {value > 0 ? `${value} ${desc}` : `Nenhuma captura ${desc.replace('capturas executadas com erro zero ', '')}`}
       </p>
     </div>

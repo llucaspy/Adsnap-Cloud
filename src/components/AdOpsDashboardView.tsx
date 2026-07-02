@@ -16,13 +16,14 @@ import {
 
 /* ─── Palette ───────────────────────────────────────── */
 const C = {
-    bg: '#faf9f7', surface: '#f3f0ea', card: '#ede9e1',
-    border: '#e8e5df', text: '#1c1917', muted: '#a89f8c', dim: '#d4cfc7',
+    bg: '#0f0f0f', surface: '#141414', card: 'rgba(255,255,255,0.04)',
+    border: 'rgba(255,255,255,0.08)', text: '#ffffff', muted: '#a3a3a3', dim: '#737373',
+    primary: '#7c3aed', primaryMuted: 'rgba(124,58,237,0.12)',
 }
 
 const inputSt = {
-    width: '100%', padding: '10px 14px', background: '#faf9f7',
-    border: `0.5px solid ${C.border}`, borderRadius: 6, fontSize: 13,
+    width: '100%', padding: '10px 14px', background: 'rgba(255,255,255,0.04)',
+    border: `1px solid rgba(255,255,255,0.16)`, borderRadius: 8, fontSize: 13,
     color: C.text, fontFamily: 'var(--font-body)', outline: 'none',
 }
 
@@ -34,13 +35,13 @@ function getDays(end: Date | null): number | null {
 
 function getStatusBadge(status: string | undefined, days: number | null, end: Date | null) {
     if (status === 'CONCLUIDA') return { label: 'Concluída', color: C.muted, bg: C.card }
-    if (status === 'PAUSADA') return { label: 'Pausada', color: '#b45309', bg: '#fef3c7' }
-    if (status === 'PROGRAMADA') return { label: 'Programada', color: '#2563eb', bg: '#eff6ff' }
-    if (days === null) return { label: 'Ativa', color: '#16a34a', bg: '#f0fdf4' }
+    if (status === 'PAUSADA') return { label: 'Pausada', color: '#f59e0b', bg: 'rgba(245,158,11,0.10)' }
+    if (status === 'PROGRAMADA') return { label: 'Programada', color: '#3b82f6', bg: 'rgba(59,130,246,0.10)' }
+    if (days === null) return { label: 'Ativa', color: '#22c55e', bg: 'rgba(34,197,94,0.12)' }
     if (end && isPast(new Date(end)) && days! < 0) return { label: 'Encerrada', color: C.muted, bg: C.surface }
-    if (days === 0) return { label: 'Encerra hoje!', color: '#ef4444', bg: '#fef2f2' }
-    if (days! <= 3) return { label: `${days}d restantes`, color: '#ef4444', bg: '#fef2f2' }
-    return { label: 'Ativa', color: '#16a34a', bg: '#f0fdf4' }
+    if (days === 0) return { label: 'Encerra hoje!', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' }
+    if (days! <= 3) return { label: `${days}d restantes`, color: '#ef4444', bg: 'rgba(239,68,68,0.12)' }
+    return { label: 'Ativa', color: '#22c55e', bg: 'rgba(34,197,94,0.12)' }
 }
 
 function getMediaIcon(media: string | undefined) {
@@ -88,7 +89,7 @@ function ImportSpreadsheetModal({ isOpen, onClose, onRefresh }: { isOpen: boolea
     return (
         <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)' }}>
             <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
-                style={{ width: '100%', maxWidth: 600, background: '#faf9f7', border: `0.5px solid ${C.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,0.12)' }}>
+                style={{ width: '100%', maxWidth: 600, background: '#141414', border: `0.5px solid ${C.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,0.12)' }}>
                 <div style={{ padding: 28 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
                         <div>
@@ -100,7 +101,7 @@ function ImportSpreadsheetModal({ isOpen, onClose, onRefresh }: { isOpen: boolea
                     <textarea value={csvData} onChange={e => setCsvData(e.target.value)}
                         placeholder="Cole aqui os dados..."
                         style={{ ...inputSt, height: 220, resize: 'none', fontFamily: 'monospace', fontSize: 12, lineHeight: 1.6 }} />
-                    {error && <div style={{ marginTop: 8, padding: '8px 12px', background: '#fef2f2', border: '0.5px solid #fca5a5', borderRadius: 5, color: '#ef4444', fontSize: 12 }}>{error}</div>}
+                    {error && <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(239,68,68,0.12)', border: '0.5px solid rgba(239,68,68,0.35)', borderRadius: 8, color: '#ef4444', fontSize: 12 }}>{error}</div>}
                     <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
                         <button onClick={onClose} className="btn-ghost" style={{ flex: 1, padding: '10px 0', fontSize: 13 }}>Cancelar</button>
                         <button onClick={handleImport} disabled={loading || !csvData} className="btn-primary" style={{ flex: 1, padding: '10px 0', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
@@ -138,7 +139,7 @@ function AddDashboardModal({ isOpen, onClose, onRefresh, initialData }: { isOpen
     return (
         <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)' }}>
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                style={{ width: '100%', maxWidth: 480, background: '#faf9f7', border: `0.5px solid ${C.border}`, borderRadius: 12, boxShadow: '0 24px 64px rgba(0,0,0,0.12)', overflow: 'hidden' }}>
+                style={{ width: '100%', maxWidth: 480, background: '#141414', border: `0.5px solid ${C.border}`, borderRadius: 12, boxShadow: '0 24px 64px rgba(0,0,0,0.12)', overflow: 'hidden' }}>
                 <div style={{ padding: 28 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
                         <h2 style={{ fontSize: 18, fontWeight: 700, color: C.text }}>{initialData ? 'Editar' : 'Novo'} Dashboard</h2>
@@ -188,7 +189,7 @@ function CampaignCard({ item, onDelete, onEdit, isCompact = false }: { item: Das
     if (isCompact) {
         return (
             <motion.div layout
-                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: '#faf9f7', border: `0.5px solid ${C.border}`, borderRadius: 8, minWidth: 260, cursor: 'pointer', transition: 'box-shadow 0.2s' }}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, minWidth: 260, cursor: 'pointer', transition: 'box-shadow 0.2s, transform 0.2s' }}
                 onClick={() => item.links?.[0]?.url && window.open(item.links[0].url, '_blank')}
                 onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.07)')}
                 onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}
@@ -207,9 +208,9 @@ function CampaignCard({ item, onDelete, onEdit, isCompact = false }: { item: Das
 
     return (
         <motion.div layout
-            style={{ background: '#faf9f7', border: `0.5px solid ${item.adOpsStatus === 'CONCLUIDA' ? C.dim : C.border}`, borderRadius: 8, padding: 20, transition: 'box-shadow 0.2s', opacity: item.adOpsStatus === 'CONCLUIDA' ? 0.65 : 1 }}
-            onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.06)')}
-            onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}
+            style={{ background: C.card, border: `1px solid ${item.adOpsStatus === 'CONCLUIDA' ? 'rgba(255,255,255,0.04)' : C.border}`, borderRadius: 12, padding: 20, transition: 'box-shadow 0.2s, transform 0.2s', opacity: item.adOpsStatus === 'CONCLUIDA' ? 0.65 : 1, boxShadow: 'rgba(0,0,0,0.30) 0px 8px 24px 0px' }}
+            onMouseEnter={e => { e.currentTarget.style.boxShadow = 'rgba(0,0,0,0.45) 0px 16px 40px -4px'; e.currentTarget.style.transform = 'translateY(-3px)' }}
+            onMouseLeave={e => { e.currentTarget.style.boxShadow = 'rgba(0,0,0,0.30) 0px 8px 24px 0px'; e.currentTarget.style.transform = 'translateY(0)' }}
         >
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, minWidth: 0 }}>
@@ -247,12 +248,12 @@ function CampaignCard({ item, onDelete, onEdit, isCompact = false }: { item: Das
             </div>
             <div style={{ height: 4, background: C.surface, borderRadius: 2, overflow: 'hidden', marginBottom: 16 }}>
                 <motion.div initial={{ width: 0 }} animate={{ width: `${progress}%` }}
-                    style={{ height: '100%', background: item.adOpsStatus === 'CONCLUIDA' ? C.dim : C.text, borderRadius: 2 }} />
+                    style={{ height: '100%', background: item.adOpsStatus === 'CONCLUIDA' ? C.dim : C.primary, borderRadius: 2 }} />
             </div>
             {item.links && item.links.length > 0 ? (
                 <a href={item.links[0].url} target="_blank" rel="noopener noreferrer"
                     style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, width: '100%', padding: '9px 0', background: C.surface, border: `0.5px solid ${C.border}`, borderRadius: 6, fontSize: 11, fontWeight: 600, color: C.muted, textDecoration: 'none', transition: 'all 0.15s' }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = C.text; (e.currentTarget as HTMLElement).style.color = '#faf9f7' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = C.primary; (e.currentTarget as HTMLElement).style.color = '#ffffff' }}
                     onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = C.surface; (e.currentTarget as HTMLElement).style.color = C.muted }}>
                     <ExternalLink size={13} /> Abrir Dashboard
                 </a>
@@ -322,7 +323,7 @@ export default function AdOpsDashboardView({ stats: initialStats }: { stats: { t
                     </div>
                     <h1 style={{ fontSize: 28, fontWeight: 800, color: C.text, letterSpacing: '-0.5px', fontFamily: 'var(--font-display)' }}>Visão de Comando</h1>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
-                        <MiniKpi label="Ativas" value={stats.ativas} color="#16a34a" />
+                        <MiniKpi label="Ativas" value={stats.ativas} color="#22c55e" />
                         <MiniKpi label="Atrasadas" value={stats.atrasadas} color="#ef4444" />
                         <MiniKpi label="Encerram Hoje" value={stats.hoje} color="#f59e0b" />
                         <MiniKpi label="Total" value={stats.total} color={C.text} />
@@ -369,7 +370,7 @@ export default function AdOpsDashboardView({ stats: initialStats }: { stats: { t
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                     {PERIODS.map(p => (
                         <button key={p} onClick={() => setActivePeriod(p)}
-                            style={{ padding: '5px 12px', borderRadius: 5, border: `0.5px solid ${activePeriod === p ? C.text : C.border}`, background: activePeriod === p ? C.text : '#faf9f7', color: activePeriod === p ? '#faf9f7' : C.muted, fontSize: 11, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s' }}>
+                            style={{ padding: '6px 12px', borderRadius: 8, border: `1px solid ${activePeriod === p ? C.primary : C.border}`, background: activePeriod === p ? C.primary : 'rgba(255,255,255,0.04)', color: activePeriod === p ? '#ffffff' : C.muted, fontSize: 11, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s' }}>
                             {p}
                         </button>
                     ))}
@@ -377,10 +378,10 @@ export default function AdOpsDashboardView({ stats: initialStats }: { stats: { t
             </div>
 
             {/* Tab filters */}
-            <div style={{ display: 'flex', gap: 4, background: C.surface, padding: 4, borderRadius: 6, border: `0.5px solid ${C.border}`, width: 'fit-content', marginBottom: 24 }}>
+            <div style={{ display: 'flex', gap: 4, background: C.surface, padding: 4, borderRadius: 12, border: `1px solid ${C.border}`, width: 'fit-content', marginBottom: 24 }}>
                 {(['TUDO', 'PORTAL', 'RADIO', 'PAINEL'] as const).map(t => (
                     <button key={t} onClick={() => setActiveTab(t)}
-                        style={{ padding: '6px 16px', borderRadius: 4, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, transition: 'all 0.15s', background: activeTab === t ? '#faf9f7' : 'transparent', color: activeTab === t ? C.text : C.muted, boxShadow: activeTab === t ? '0 1px 4px rgba(0,0,0,0.06)' : 'none' }}>
+                        style={{ padding: '7px 16px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, transition: 'all 0.15s', background: activeTab === t ? C.primaryMuted : 'transparent', color: activeTab === t ? '#ffffff' : C.muted, boxShadow: activeTab === t ? '0 0 0 1px rgba(124,58,237,0.28)' : 'none' }}>
                         {t}
                     </button>
                 ))}
@@ -408,8 +409,8 @@ export default function AdOpsDashboardView({ stats: initialStats }: { stats: { t
                     { label: 'Base de Dados', value: stats.total, icon: CheckCircle2 },
                     { label: 'Última Sincronia', value: lastSync ? format(lastSync, 'HH:mm:ss') : '—', icon: Clock },
                 ].map((s, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 20px', background: C.surface, border: `0.5px solid ${C.border}`, borderRadius: 8 }}>
-                        <div style={{ width: 32, height: 32, borderRadius: 6, background: '#faf9f7', border: `0.5px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.muted }}>
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '16px 20px', background: C.card, border: `1px solid ${C.border}`, borderRadius: 12 }}>
+                        <div style={{ width: 32, height: 32, borderRadius: 6, background: '#141414', border: `0.5px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.muted }}>
                             <s.icon size={15} />
                         </div>
                         <div>
@@ -428,7 +429,7 @@ export default function AdOpsDashboardView({ stats: initialStats }: { stats: { t
 
 function MiniKpi({ label, value, color }: { label: string, value: number, color: string }) {
     return (
-        <div style={{ padding: '12px 16px', background: '#faf9f7', border: `0.5px solid ${C.border}`, borderRadius: 8 }}>
+        <div style={{ padding: '12px 16px', background: C.card, border: `1px solid ${C.border}`, borderRadius: 12 }}>
             <p style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{label}</p>
             <p style={{ fontSize: 20, fontWeight: 800, color }}>{value}</p>
         </div>

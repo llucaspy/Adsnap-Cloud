@@ -6,21 +6,22 @@ import { getSettings, updateSettings, testTelegramNotification } from '@/app/act
 
 /* ─── tokens ─────────────────────────────────────── */
 const C = {
-    bg: '#faf9f7',
-    surface: '#f3f0ea',
-    card: '#ede9e1',
-    border: '#e8e5df',
-    text: '#1c1917',
-    muted: '#a89f8c',
-    dim: '#d4cfc7',
+    bg: '#0f0f0f',
+    surface: '#141414',
+    card: 'rgba(255,255,255,0.04)',
+    border: 'rgba(255,255,255,0.08)',
+    text: '#ffffff',
+    muted: '#a3a3a3',
+    dim: '#737373',
+    primary: '#7c3aed',
 }
 
 /* ─── shared helpers ──────────────────────────────── */
 const inputClass = {
     width: '100%',
-    background: '#faf9f7',
-    border: `0.5px solid ${C.border}`,
-    borderRadius: 6,
+    background: 'rgba(255,255,255,0.04)',
+    border: '1px solid rgba(255,255,255,0.16)',
+    borderRadius: 8,
     padding: '10px 14px',
     color: C.text,
     fontSize: 13,
@@ -30,9 +31,9 @@ const inputClass = {
 }
 
 const panelStyle = {
-    background: '#faf9f7',
-    border: `0.5px solid ${C.border}`,
-    borderRadius: 8,
+    background: C.card,
+    border: `1px solid ${C.border}`,
+    borderRadius: 12,
     padding: 28,
     marginBottom: 0,
 }
@@ -94,7 +95,7 @@ export function SettingsView() {
                     <p style={{ fontSize: 13, color: C.muted }}>Parâmetros do motor Nexus e integrações externas.</p>
                 </div>
                 {message && (
-                    <div style={{ padding: '8px 14px', background: '#ede9e1', border: `0.5px solid ${C.border}`, color: C.text, fontSize: 12, fontWeight: 600, borderRadius: 6 }}>
+                    <div style={{ padding: '8px 14px', background: 'rgba(255,255,255,0.04)', border: `0.5px solid ${C.border}`, color: C.text, fontSize: 12, fontWeight: 600, borderRadius: 6 }}>
                         {message}
                     </div>
                 )}
@@ -225,7 +226,7 @@ function Toggle({ enabled, onChange }: { enabled: boolean, onChange: (v: boolean
                 transition: 'background 0.2s', position: 'relative',
             }}>
             <div style={{
-                width: 18, height: 18, borderRadius: '50%', background: '#faf9f7',
+                width: 18, height: 18, borderRadius: '50%', background: '#141414',
                 transition: 'transform 0.2s',
                 transform: `translateX(${enabled ? 20 : 0}px)`,
             }} />
@@ -282,7 +283,7 @@ function BannerFormatManager({ formats, onChange }: { formats: BannerFormat[], o
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {formats.map(f => (
-                <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#f3f0ea', padding: '10px 14px', borderRadius: 6, border: `0.5px solid ${C.border}` }}>
+                <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#1a1a1a', padding: '10px 14px', borderRadius: 6, border: `0.5px solid ${C.border}` }}>
                     <div style={{ flex: 1 }}>
                         <p style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{f.label}</p>
                         <p style={{ fontSize: 11, color: C.muted }}>{f.width}×{f.height} • <code style={{ background: C.card, padding: '1px 4px', borderRadius: 3 }}>{f.selector}</code></p>
@@ -311,7 +312,7 @@ function BannerFormatManager({ formats, onChange }: { formats: BannerFormat[], o
                 ))}
                 <div style={{ display: 'flex', alignItems: 'flex-end' }}>
                     <button type="button" onClick={addFormat} disabled={!newFormat.label || !newFormat.selector}
-                        style={{ width: 36, height: 36, borderRadius: 6, background: C.text, color: '#faf9f7', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        style={{ width: 36, height: 36, borderRadius: 8, background: C.primary, color: '#ffffff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <Plus size={16} />
                     </button>
                 </div>

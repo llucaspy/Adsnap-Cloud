@@ -31,8 +31,8 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: 6,
-                            background: '#ede9e1',
-                            color: '#a89f8c',
+                            background: 'rgba(255,255,255,0.04)',
+                            color: '#a3a3a3',
                             fontSize: 10,
                             fontWeight: 600,
                             letterSpacing: '0.07em',
@@ -46,17 +46,18 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
                     </div>
                     <h1
                         className="text-3xl md:text-4xl font-extrabold tracking-tight"
-                        style={{ fontFamily: 'var(--font-display)', color: '#1c1917' }}
+                        style={{ fontFamily: 'var(--font-display)', color: '#ffffff' }}
                     >
                         Central de Controle
                     </h1>
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                        <p style={{ fontSize: 14, color: '#a89f8c' }}>
+                        <p style={{ fontSize: 14, color: '#a3a3a3' }}>
                             Visão geral das capturas e status de campanhas do dia.
                         </p>
                         <Link
                             href="/adops"
-                            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#1c1917] text-white text-xs font-bold hover:bg-black transition-colors"
+                            className="btn-primary"
+                            style={{ fontSize: 12, fontWeight: 700, padding: '10px 14px' }}
                         >
                             <LayoutGrid size={14} />
                             ABRIR ADOPS HUB
@@ -67,17 +68,17 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
             </header>
 
             {/* Tab Navigation */}
-            <div style={{ display: 'flex', gap: 0, borderBottom: '0.5px solid #e8e5df' }}>
+            <div style={{ display: 'flex', gap: 0, borderBottom: '0.5px solid rgba(255,255,255,0.08)' }}>
                 <button
                     onClick={() => setActiveTab('overview')}
                     style={{
                         padding: '10px 16px',
                         fontSize: 13,
                         fontWeight: activeTab === 'overview' ? 600 : 500,
-                        color: activeTab === 'overview' ? '#1c1917' : '#a89f8c',
+                        color: activeTab === 'overview' ? '#ffffff' : '#a3a3a3',
                         background: 'none',
                         border: 'none',
-                        borderBottom: activeTab === 'overview' ? '2px solid #1c1917' : '2px solid transparent',
+                        borderBottom: activeTab === 'overview' ? '2px solid #7c3aed' : '2px solid transparent',
                         cursor: 'pointer',
                         transition: 'all 0.2s',
                         marginBottom: -1,
@@ -91,7 +92,7 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
                         padding: '10px 16px',
                         fontSize: 13,
                         fontWeight: activeTab === 'quarantine' ? 600 : 500,
-                        color: activeTab === 'quarantine' ? '#ef4444' : '#a89f8c',
+                        color: activeTab === 'quarantine' ? '#ef4444' : '#a3a3a3',
                         background: 'none',
                         border: 'none',
                         borderBottom: activeTab === 'quarantine' ? '2px solid #ef4444' : '2px solid transparent',
@@ -105,7 +106,7 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
                 >
                     Quarentena
                     {stats.quarantined > 0 && (
-                        <span style={{ padding: '1px 6px', background: '#ef4444', color: '#faf9f7', fontSize: 10, borderRadius: 999, fontWeight: 700 }}>
+                        <span style={{ padding: '1px 6px', background: '#ef4444', color: '#ffffff', fontSize: 10, borderRadius: 999, fontWeight: 700 }}>
                             {stats.quarantined}
                         </span>
                     )}
@@ -126,7 +127,7 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
                     {/* Recent Captures Gallery */}
                     <section className="space-y-5">
                         <div className="flex items-center justify-between">
-                            <h2 style={{ fontSize: 14, fontWeight: 600, color: '#1c1917', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                            <h2 style={{ fontSize: 14, fontWeight: 600, color: '#ffffff', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
                                 Últimas Capturas
                             </h2>
                         </div>
@@ -137,25 +138,25 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
                                     key={capture.id}
                                     className="group relative overflow-hidden transition-all duration-300 hover:-translate-y-1"
                                     style={{
-                                        background: '#faf9f7',
-                                        border: '0.5px solid #e8e5df',
+                                        background: '#141414',
+                                        border: '0.5px solid rgba(255,255,255,0.08)',
                                         borderRadius: 8,
                                         boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
                                     }}
                                 >
                                     <div
                                         className="absolute inset-0 z-10 p-3 flex flex-col justify-end opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                                        style={{ background: 'linear-gradient(to top, rgba(28,25,23,0.85) 0%, transparent 100%)' }}
+                                        style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.88) 0%, transparent 100%)' }}
                                     >
-                                        <p className="text-[11px] font-bold truncate" style={{ color: '#faf9f7' }}>
+                                        <p className="text-[11px] font-bold truncate" style={{ color: '#ffffff' }}>
                                             {capture.campaign?.client || 'Untitled'}
                                         </p>
-                                        <p className="text-[10px]" style={{ color: 'rgba(250,249,247,0.6)' }}>
+                                        <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.62)' }}>
                                             {formatDate(new Date(capture.createdAt), "HH:mm '•' dd MMM", { locale: ptBR })}
                                         </p>
                                     </div>
                                     <div className={`relative ${capture.isAssembly ? 'aspect-video' : 'aspect-[3/4]'} overflow-hidden`}>
-                                        <div className="absolute inset-0 bg-[#f3f0ea]">
+                                        <div className="absolute inset-0 bg-[#1a1a1a]">
                                             <CaptureImage
                                                 src={`/api/captures/${capture.id}`}
                                                 alt={capture.isAssembly ? "Montagem" : "Banner"}
@@ -168,7 +169,7 @@ export function DashboardView({ stats, recentCaptures }: { stats: DashboardStats
                             {recentCaptures.length === 0 && (
                                 <div
                                     className="col-span-full py-20 flex flex-col items-center justify-center rounded-lg"
-                                    style={{ border: '0.5px dashed #d4cfc7', color: '#a89f8c' }}
+                                    style={{ border: '0.5px dashed #525252', color: '#a3a3a3' }}
                                 >
                                     <ImageIcon size={40} className="mb-3 opacity-30" />
                                     <p style={{ fontSize: 13, fontWeight: 500 }}>Nenhuma captura realizada hoje.</p>
@@ -189,28 +190,28 @@ function StatCard({ label, value, icon: Icon, highlight, danger }: any) {
         <div
             className="p-5 transition-all duration-300 hover:-translate-y-0.5"
             style={{
-                background: danger ? 'rgba(239,68,68,0.04)' : highlight ? '#1c1917' : '#faf9f7',
-                border: `0.5px solid ${danger ? 'rgba(239,68,68,0.2)' : highlight ? '#1c1917' : '#e8e5df'}`,
-                borderRadius: 8,
-                boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
+                background: danger ? 'rgba(239,68,68,0.06)' : highlight ? 'rgba(124,58,237,0.14)' : 'rgba(255,255,255,0.04)',
+                border: `1px solid ${danger ? 'rgba(239,68,68,0.2)' : highlight ? 'rgba(124,58,237,0.35)' : 'rgba(255,255,255,0.08)'}`,
+                borderRadius: 12,
+                boxShadow: 'rgba(0,0,0,0.30) 0px 8px 24px 0px',
             }}
         >
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
                 <div style={{
                     width: 32, height: 32, borderRadius: 6,
-                    background: danger ? 'rgba(239,68,68,0.1)' : highlight ? 'rgba(250,249,247,0.1)' : '#ede9e1',
+                    background: danger ? 'rgba(239,68,68,0.1)' : highlight ? 'rgba(124,58,237,0.20)' : 'rgba(255,255,255,0.04)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
-                    <Icon size={15} style={{ color: danger ? '#ef4444' : highlight ? '#faf9f7' : '#a89f8c' }} />
+                    <Icon size={15} style={{ color: danger ? '#ef4444' : highlight ? '#a78bfa' : '#a3a3a3' }} />
                 </div>
-                <p style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: danger ? '#ef4444' : highlight ? '#a89f8c' : '#a89f8c' }}>
+                <p style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: danger ? '#ef4444' : highlight ? '#a3a3a3' : '#a3a3a3' }}>
                     {label}
                 </p>
             </div>
             <p style={{
                 fontSize: 28, fontWeight: 700, letterSpacing: '-0.5px',
                 fontFamily: 'var(--font-display)',
-                color: danger ? '#ef4444' : highlight ? '#faf9f7' : '#1c1917',
+                color: danger ? '#ef4444' : '#ffffff',
             }}>
                 {value}
             </p>

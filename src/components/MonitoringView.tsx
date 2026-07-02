@@ -17,14 +17,16 @@ import {
 
 /* ─── Palette ─────────────────────────────────────── */
 const C = {
-    bg: '#faf9f7',
-    surface: '#f3f0ea',
-    card: '#ede9e1',
-    border: '#e8e5df',
-    borderDim: '#d4cfc7',
-    text: '#1c1917',
-    muted: '#a89f8c',
-    dim: '#d4cfc7',
+    bg: '#0f0f0f',
+    surface: '#141414',
+    card: 'rgba(255,255,255,0.04)',
+    border: 'rgba(255,255,255,0.08)',
+    borderDim: 'rgba(255,255,255,0.16)',
+    text: '#ffffff',
+    muted: '#a3a3a3',
+    dim: '#737373',
+    primary: '#7c3aed',
+    primaryLight: '#a78bfa',
 }
 
 const M = {
@@ -62,9 +64,9 @@ interface PIGroup {
 function getFlightStatus(flightStart: Date | null, flightEnd: Date | null) {
     if (!flightStart || !flightEnd) return { id: 'NEUTRAL', label: 'Sem período', color: C.muted, bg: C.card, icon: Clock }
     const now = new Date()
-    if (isBefore(now, flightStart)) return { id: 'UPCOMING', label: 'Aguardando', color: '#b45309', bg: '#fef3c7', icon: Timer }
-    if (isAfter(now, flightEnd)) return { id: 'FINISHED', label: 'Encerrada', color: '#ef4444', bg: '#fef2f2', icon: ShieldAlert }
-    return { id: 'ACTIVE', label: 'Em veiculação', color: '#16a34a', bg: '#f0fdf4', icon: CheckCircle2 }
+    if (isBefore(now, flightStart)) return { id: 'UPCOMING', label: 'Aguardando', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', icon: Timer }
+    if (isAfter(now, flightEnd)) return { id: 'FINISHED', label: 'Encerrada', color: '#ef4444', bg: 'rgba(239,68,68,0.12)', icon: ShieldAlert }
+    return { id: 'ACTIVE', label: 'Em veiculação', color: '#22c55e', bg: 'rgba(34,197,94,0.12)', icon: CheckCircle2 }
 }
 
 export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns: Campaign[], formats: any[] }) {
@@ -143,7 +145,7 @@ export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns
             </div>
             <div className="hidden md:block space-y-8 pb-20 animate-fade-in">
             {/* Header */}
-            <header style={{ background: '#faf9f7', border: `0.5px solid ${C.border}`, borderRadius: 8, padding: '28px 32px' }}>
+            <header style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: '28px 32px', boxShadow: 'rgba(0,0,0,0.30) 0px 8px 24px 0px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
                     {/* Title row */}
                     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
@@ -181,7 +183,7 @@ export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns
                                 onChange={e => setSearch(e.target.value)}
                                 style={{
                                     width: '100%', height: 40, paddingLeft: 36, paddingRight: 36, paddingTop: 0, paddingBottom: 0,
-                                    background: '#faf9f7', border: `0.5px solid ${C.border}`, borderRadius: 6,
+                                    background: C.surface, border: `1px solid ${C.borderDim}`, borderRadius: 8,
                                     fontSize: 13, color: C.text, fontFamily: 'var(--font-body)', outline: 'none',
                                 }}
                             />
@@ -192,31 +194,31 @@ export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns
                                 </button>
                             )}
                         </div>
-                        <div style={{ display: 'flex', gap: 4, background: C.surface, padding: '4px', borderRadius: 6, border: `0.5px solid ${C.border}` }}>
+                        <div style={{ display: 'flex', gap: 4, background: C.surface, padding: '4px', borderRadius: 12, border: `1px solid ${C.border}` }}>
                             {[{ key: 'all' as const, icon: Globe, label: 'Todos' }, { key: 'desktop' as const, icon: Monitor, label: 'Desk' }, { key: 'mobile' as const, icon: Smartphone, label: 'Mob' }].map(({ key, icon: Icon, label }) => (
                                 <button key={key} onClick={() => setActiveFilter(key)}
                                     style={{
-                                        display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 4, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 500, transition: 'all 0.15s',
-                                        background: activeFilter === key ? '#faf9f7' : 'transparent',
-                                        color: activeFilter === key ? C.text : C.muted,
-                                        boxShadow: activeFilter === key ? '0 1px 4px rgba(0,0,0,0.06)' : 'none',
+                                        display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, transition: 'all 0.15s',
+                                        background: activeFilter === key ? 'rgba(124,58,237,0.14)' : 'transparent',
+                                        color: activeFilter === key ? '#ffffff' : C.muted,
+                                        boxShadow: activeFilter === key ? '0 0 0 1px rgba(124,58,237,0.28)' : 'none',
                                     }}>
                                     <Icon size={13} />
                                     {label}
                                 </button>
                             ))}
                         </div>
-                        <div style={{ display: 'flex', gap: 4, background: C.surface, padding: '4px', borderRadius: 6, border: `0.5px solid ${C.border}` }}>
+                        <div style={{ display: 'flex', gap: 4, background: C.surface, padding: '4px', borderRadius: 12, border: `1px solid ${C.border}` }}>
                             {[{ key: 'all', label: 'Tudo', dot: '' },
-                            { key: 'ACTIVE', label: 'Ativas', dot: '#16a34a' },
-                            { key: 'UPCOMING', label: 'Espera', dot: '#b45309' },
+                            { key: 'ACTIVE', label: 'Ativas', dot: '#22c55e' },
+                            { key: 'UPCOMING', label: 'Espera', dot: '#f59e0b' },
                             { key: 'FINISHED', label: 'Fim', dot: '#ef4444' }].map(({ key, label, dot }) => (
                                 <button key={key} onClick={() => setStatusFilter(key as any)}
                                     style={{
-                                        display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 4, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 500, transition: 'all 0.15s',
-                                        background: statusFilter === key ? '#faf9f7' : 'transparent',
-                                        color: statusFilter === key ? C.text : C.muted,
-                                        boxShadow: statusFilter === key ? '0 1px 4px rgba(0,0,0,0.06)' : 'none',
+                                        display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, transition: 'all 0.15s',
+                                        background: statusFilter === key ? 'rgba(124,58,237,0.14)' : 'transparent',
+                                        color: statusFilter === key ? '#ffffff' : C.muted,
+                                        boxShadow: statusFilter === key ? '0 0 0 1px rgba(124,58,237,0.28)' : 'none',
                                     }}>
                                     {dot && <span style={{ width: 7, height: 7, borderRadius: '50%', background: dot, display: 'inline-block', flexShrink: 0 }} />}
                                     {label}
@@ -230,7 +232,7 @@ export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns
             {/* Content */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
                 {stats.visible === 0 && (
-                    <div style={{ padding: '80px 20px', textAlign: 'center', border: `0.5px dashed ${C.border}`, borderRadius: 8, color: C.muted }}>
+                    <div style={{ padding: '80px 20px', textAlign: 'center', border: `1px dashed ${C.borderDim}`, borderRadius: 12, color: C.muted, background: C.card }}>
                         <Search size={40} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
                         <h2 style={{ fontSize: 16, fontWeight: 600, color: C.text, marginBottom: 6 }}>Nenhuma campanha encontrada</h2>
                         <p style={{ fontSize: 13, marginBottom: 20 }}>Ajuste os filtros para ampliar a busca.</p>
@@ -240,8 +242,8 @@ export function MonitoringView({ initialCampaigns, formats }: { initialCampaigns
                         </button>
                     </div>
                 )}
-                {groups.ACTIVE.length > 0 && <PISection label="Em Veiculação" count={groups.ACTIVE.length} accentColor="#16a34a" groups={groups.ACTIVE} router={router} isPending={isPending} startTransition={startTransition} formats={formats} />}
-                {groups.UPCOMING.length > 0 && <PISection label="Aguardando Período" count={groups.UPCOMING.length} accentColor="#b45309" groups={groups.UPCOMING} router={router} isPending={isPending} startTransition={startTransition} formats={formats} />}
+                {groups.ACTIVE.length > 0 && <PISection label="Em Veiculação" count={groups.ACTIVE.length} accentColor="#22c55e" groups={groups.ACTIVE} router={router} isPending={isPending} startTransition={startTransition} formats={formats} />}
+                {groups.UPCOMING.length > 0 && <PISection label="Aguardando Período" count={groups.UPCOMING.length} accentColor="#f59e0b" groups={groups.UPCOMING} router={router} isPending={isPending} startTransition={startTransition} formats={formats} />}
                 {groups.NEUTRAL.length > 0 && <PISection label="Fluxo Sem Período" count={groups.NEUTRAL.length} accentColor={C.muted} groups={groups.NEUTRAL} router={router} isPending={isPending} startTransition={startTransition} formats={formats} />}
                 {groups.FINISHED.length > 0 && (
                     <div style={{ opacity: 0.6 }}>
@@ -562,7 +564,7 @@ function CaptureDelayControl({ campaigns, router, tone = 'light' }: { campaigns:
             title: C.text,
             muted: C.muted,
             subtle: C.dim,
-            buttonIdle: '#faf9f7',
+            buttonIdle: C.surface,
             buttonText: C.muted,
             accent: '#7c3aed',
         }
@@ -860,13 +862,13 @@ function MobilePiCard({ group, router, isPending, startTransition, formats, acce
 }
 
 function StatPill({ label, value, accent, active, onClick }: { label: string, value: number, accent?: 'green' | 'red', active?: boolean, onClick?: () => void }) {
-    const accentColor = accent === 'green' ? '#16a34a' : accent === 'red' ? '#ef4444' : C.text
+    const accentColor = accent === 'green' ? '#22c55e' : accent === 'red' ? '#ef4444' : C.primary
     return (
         <div onClick={onClick}
             style={{
                 display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px',
-                background: active ? (accent === 'green' ? '#f0fdf4' : accent === 'red' ? '#fef2f2' : '#faf9f7') : C.surface,
-                border: `0.5px solid ${active ? accentColor : C.border}`, borderRadius: 6,
+                background: active ? (accent === 'green' ? 'rgba(34,197,94,0.12)' : accent === 'red' ? 'rgba(239,68,68,0.12)' : 'rgba(124,58,237,0.14)') : C.surface,
+                border: `1px solid ${active ? accentColor : C.border}`, borderRadius: 8,
                 cursor: onClick ? 'pointer' : 'default', transition: 'all 0.15s',
             }}>
             <span style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: active ? accentColor : C.muted }}>{label}</span>
@@ -895,7 +897,7 @@ function PISection({ label, count, accentColor, groups, router, isPending, start
 
 function PiCard({ group, router, isPending, startTransition, formats }: { group: PIGroup, router: any, isPending: boolean, startTransition: any, formats: any[] }) {
     const [showEditModal, setShowEditModal] = useState(false)
-    const statusInfo = ({ ACTIVE: { label: 'Em Veiculação', color: '#16a34a', bg: '#f0fdf4' }, UPCOMING: { label: 'Aguardando', color: '#b45309', bg: '#fef3c7' }, FINISHED: { label: 'Encerrada', color: '#ef4444', bg: '#fef2f2' }, NEUTRAL: { label: 'Fluxo Manual', color: C.muted, bg: C.card } } as any)[group.statusId] || { label: 'Fluxo Manual', color: C.muted, bg: C.card }
+    const statusInfo = ({ ACTIVE: { label: 'Em Veiculação', color: '#22c55e', bg: 'rgba(34,197,94,0.12)' }, UPCOMING: { label: 'Aguardando', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' }, FINISHED: { label: 'Encerrada', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' }, NEUTRAL: { label: 'Fluxo Manual', color: C.muted, bg: C.card } } as any)[group.statusId] || { label: 'Fluxo Manual', color: C.muted, bg: C.card }
 
     const progressPercent = useMemo(() => {
         if (!group.earliestStart || !group.latestEnd) return 0
@@ -921,12 +923,18 @@ function PiCard({ group, router, isPending, startTransition, formats }: { group:
     return (
         <>
             <div style={{
-                background: '#faf9f7', border: `0.5px solid ${C.border}`, borderRadius: 8,
+                background: C.card, border: `1px solid ${C.border}`, borderRadius: 12,
                 display: 'flex', flexDirection: 'column', minHeight: 300,
-                boxShadow: '0 2px 8px rgba(0,0,0,0.03)', transition: 'box-shadow 0.2s',
+                boxShadow: 'rgba(0,0,0,0.30) 0px 8px 24px 0px', transition: 'box-shadow 0.2s, transform 0.2s',
             }}
-                onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.06)')}
-                onMouseLeave={e => (e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.03)')}
+                onMouseEnter={e => {
+                    e.currentTarget.style.boxShadow = 'rgba(0,0,0,0.42) 0px 18px 36px 0px'
+                    e.currentTarget.style.transform = 'translateY(-2px)'
+                }}
+                onMouseLeave={e => {
+                    e.currentTarget.style.boxShadow = 'rgba(0,0,0,0.30) 0px 8px 24px 0px'
+                    e.currentTarget.style.transform = 'translateY(0)'
+                }}
             >
                 <div style={{ padding: '20px 20px 16px', flex: 1, display: 'flex', flexDirection: 'column', gap: 14 }}>
                     {/* Status + Client */}
@@ -963,7 +971,7 @@ function PiCard({ group, router, isPending, startTransition, formats }: { group:
                                     <span style={{ fontSize: 11, fontWeight: 500, color: C.text, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{getFormatLabel(c.format)}</span>
                                     {c.isMonitoringActive && (
                                         <Link href={`/monitoring/live/${c.id}`}
-                                            style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '1px 6px', background: '#f0fdf4', border: '0.5px solid #86efac', borderRadius: 3, fontSize: 8, fontWeight: 700, color: '#16a34a', textDecoration: 'none' }}
+                                            style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '1px 6px', background: 'rgba(34,197,94,0.12)', border: '0.5px solid rgba(34,197,94,0.28)', borderRadius: 3, fontSize: 8, fontWeight: 700, color: '#22c55e', textDecoration: 'none' }}
                                             onClick={e => e.stopPropagation()}>
                                             <Radio size={7} className="animate-pulse" /> LIVE
                                         </Link>
@@ -983,7 +991,7 @@ function PiCard({ group, router, isPending, startTransition, formats }: { group:
                                 <span style={{ fontSize: 10, color: C.muted, fontWeight: 600 }}>{progressPercent}%</span>
                             </div>
                             <div style={{ height: 4, background: C.surface, borderRadius: 2, overflow: 'hidden' }}>
-                                <div style={{ height: '100%', width: `${progressPercent}%`, background: progressPercent === 100 ? '#ef4444' : C.text, borderRadius: 2, transition: 'width 1s' }} />
+                                <div style={{ height: '100%', width: `${progressPercent}%`, background: progressPercent === 100 ? '#ef4444' : C.primary, borderRadius: 2, transition: 'width 1s' }} />
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 10, color: C.dim }}>
                                 <span>{group.earliestStart ? formatDate(group.earliestStart, 'dd/MM/yy') : '—'}</span>
@@ -992,7 +1000,7 @@ function PiCard({ group, router, isPending, startTransition, formats }: { group:
                         </div>
                     )}
 
-                    <CaptureDelayControl campaigns={group.campaigns} router={router} />
+                    <CaptureDelayControl campaigns={group.campaigns} router={router} tone="dark" />
                 </div>
 
                 {/* Footer */}
@@ -1005,7 +1013,7 @@ function PiCard({ group, router, isPending, startTransition, formats }: { group:
                         <Pencil size={11} /> Editar
                     </button>
                     <button onClick={handleRunBatch} disabled={isPending}
-                        style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', background: isPending ? C.surface : C.text, border: `0.5px solid ${isPending ? C.border : C.text}`, borderRadius: 5, fontSize: 11, fontWeight: 600, color: isPending ? C.muted : '#faf9f7', cursor: isPending ? 'not-allowed' : 'pointer', transition: 'all 0.15s' }}>
+                        style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', background: isPending ? C.surface : C.primary, border: `0.5px solid ${isPending ? C.border : C.primary}`, borderRadius: 8, fontSize: 11, fontWeight: 600, color: isPending ? C.muted : '#ffffff', cursor: isPending ? 'not-allowed' : 'pointer', transition: 'all 0.15s' }}>
                         <Zap size={11} className="fill-current" /> Capturar
                     </button>
                 </div>

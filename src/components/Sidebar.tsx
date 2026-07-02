@@ -23,7 +23,7 @@ function StorageMonitor() {
     const isCriticalUsage = usage.percentage > 95
 
     return (
-        <div className="px-4 py-4 rounded-2xl bg-white/3 border border-white/8 space-y-3">
+        <div className="px-4 py-4 rounded-xl bg-white/[0.04] border border-white/8 space-y-3 shadow-[rgba(0,0,0,0.30)_0px_8px_24px_0px]">
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     <Database size={14} className={isCriticalUsage ? 'text-red-500' : isHighUsage ? 'text-orange-500' : 'text-white/50'} />
@@ -34,7 +34,7 @@ function StorageMonitor() {
 
             <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
                 <div
-                    className={`h-full transition-all duration-1000 ${isCriticalUsage ? 'bg-red-500' : isHighUsage ? 'bg-orange-500' : 'bg-white/60'}`}
+                    className={`h-full transition-all duration-1000 ${isCriticalUsage ? 'bg-red-500' : isHighUsage ? 'bg-orange-500' : 'bg-[#7c3aed]'}`}
                     style={{ width: `${usage.percentage}%` }}
                 />
             </div>
@@ -96,7 +96,7 @@ export function Sidebar() {
             {/* Mobile Menu Toggle Button */}
             <button
                 onClick={() => setIsOpen(true)}
-                className="lg:hidden fixed top-6 left-6 z-50 p-3 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-xl text-white hover:bg-white/10 transition-all shadow-2xl"
+                className="lg:hidden fixed top-6 left-6 z-50 p-3 bg-white/5 border border-white/10 rounded-xl backdrop-blur-xl text-white hover:bg-white/10 transition-all shadow-2xl"
             >
                 <Menu size={24} />
             </button>
@@ -113,8 +113,8 @@ export function Sidebar() {
                 className={`w-72 flex flex-col h-screen fixed inset-y-0 left-0 z-70 glass transition-transform duration-500 lg:sticky lg:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'
                     }`}
                 style={{
-                    background: '#111111',
-                    borderRight: '1px solid rgba(255,255,255,0.07)'
+                    background: '#0f0f0f',
+                    borderRight: '1px solid rgba(255,255,255,0.08)'
                 }}
             >
                 {/* Logo Area */}
@@ -141,21 +141,23 @@ export function Sidebar() {
                     <div className="relative pt-4">
                         {/* Floating Badge for Workplace Identification */}
                         <div
-                            className="absolute -top-1 left-4 px-3 py-1 bg-white border border-gray-200 rounded-full text-[8px] font-black uppercase text-gray-800 tracking-[0.2em] z-20 shadow-xl flex items-center gap-2"
-                            style={{ boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                            className="absolute -top-1 left-4 px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-[0.2em] z-20 shadow-xl flex items-center gap-2"
+                            style={{ background: 'rgba(124,58,237,0.16)', border: '1px solid rgba(124,58,237,0.35)', color: '#e5e5e5', boxShadow: '0 8px 20px rgba(0,0,0,0.35)' }}
                         >
-                            <div className="w-1.5 h-1.5 rounded-full bg-[#ff0000] animate-pulse" />
+                            <div className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] animate-pulse" />
                             Client Workplace
                         </div>
 
-                        <div className="bg-white border border-gray-200 rounded-2xl shadow-xl p-5 flex flex-col items-center gap-3">
-                            <img
+                        <div className="rounded-xl p-4 flex flex-col items-center gap-3 shadow-[rgba(0,0,0,0.30)_0px_8px_24px_0px]" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                            <div className="w-full rounded-lg bg-white px-4 py-3 flex items-center justify-center">
+                                <img
                                 src="https://assets.metroimg.com/images/logo-maisacessado.gif"
                                 alt="Metrópoles"
-                                className="h-10 w-auto object-contain"
-                            />
-                            <div className="h-px w-8 bg-gray-100" />
-                            <span className="text-[10px] font-bold tracking-[0.15em] uppercase text-gray-900">
+                                className="h-9 w-auto object-contain"
+                                />
+                            </div>
+                            <div className="h-px w-8 bg-white/10" />
+                            <span className="text-[10px] font-bold tracking-[0.15em] uppercase text-white/70">
                                 Metrópoles
                             </span>
                         </div>
@@ -173,18 +175,19 @@ export function Sidebar() {
                                 onClick={() => setIsOpen(false)}
                                 className="flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all duration-300 group relative overflow-hidden"
                                 style={{
-                                    background: isActive ? 'rgba(255,255,255,0.07)' : 'transparent',
+                                    background: isActive ? 'rgba(124,58,237,0.16)' : 'transparent',
+                                    border: isActive ? '1px solid rgba(124,58,237,0.28)' : '1px solid transparent',
                                 }}
                             >
                                 <div
                                     className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                                    style={{ background: 'var(--gradient-glow)' }}
+                                    style={{ background: 'rgba(124,58,237,0.10)' }}
                                 />
 
                                 <item.icon
                                     size={20}
                                     style={{
-                                        color: isActive ? '#ffffff' : '#525252',
+                                        color: isActive ? '#a78bfa' : '#737373',
                                     }}
                                     className="relative z-10 group-hover:scale-110 transition-transform duration-300"
                                 />
@@ -200,7 +203,7 @@ export function Sidebar() {
                                 {isActive && (
                                     <div
                                         className="ml-auto w-2 h-2 rounded-full animate-pulse-glow relative z-10"
-                                        style={{ background: 'rgba(255,255,255,0.7)' }}
+                                        style={{ background: '#7c3aed' }}
                                     />
                                 )}
                             </Link>
@@ -218,8 +221,9 @@ export function Sidebar() {
                         onClick={() => setIsOpen(false)}
                         className="flex items-center gap-3 px-4 py-3 w-full rounded-xl transition-all group"
                         style={{
-                            color: pathname === '/settings' ? '#ffffff' : '#525252',
-                            background: pathname === '/settings' ? 'rgba(255,255,255,0.07)' : 'transparent'
+                            color: pathname === '/settings' ? '#ffffff' : '#737373',
+                            background: pathname === '/settings' ? 'rgba(124,58,237,0.16)' : 'transparent',
+                            border: pathname === '/settings' ? '1px solid rgba(124,58,237,0.28)' : '1px solid transparent',
                         }}
                     >
                         <Settings size={18} className="group-hover:rotate-90 transition-transform duration-500" />
