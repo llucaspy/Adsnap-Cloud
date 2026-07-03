@@ -5,7 +5,8 @@ import prisma from '@/lib/prisma'
 import { nexusLogStore } from '@/lib/nexusLogStore'
 import type { GamImportDraft } from '@/lib/gamImportPlanner'
 import type { GamImportWriteResult } from '@/lib/gamImportWriter'
-import { triggerGamWorker } from '@/app/actions'
+import { triggerGamWorker, triggerNexusWorker } from '@/app/actions'
+import { enqueueCaptureJobs } from '@/lib/workerJobs'
 
 type NexusOrderDetails = Partial<GamImportDraft> & {
     orderUrl?: string
@@ -19,6 +20,49 @@ type NexusOrderDetails = Partial<GamImportDraft> & {
         email?: boolean
     }
     executionLogs?: Array<{ at: string; message: string; tone: 'info' | 'success' | 'error' }>
+}
+
+type NexusAssistantAction = {
+    label: string
+    command?: string
+    href?: string
+    variant?: 'primary' | 'secondary' | 'danger'
+}
+
+type NexusAssistantCard = {
+    title: string
+    description?: string
+    meta?: string
+    command?: string
+    href?: string
+}
+
+export type NexusAssistantResponse = {
+    text: string
+    tone?: 'info' | 'success' | 'warning' | 'error'
+    actions?: NexusAssistantAction[]
+    cards?: NexusAssistantCard[]
+}
+
+type AssistantCampaign = {
+    id: string
+    pi: string
+    client: string
+    campaignName: string
+    format: string
+    device: string
+    status: string
+    flightStart: Date | null
+    flightEnd: Date | null
+}
+
+type CampaignGroup = {
+    pi: string
+    client: string
+    campaignName: string
+    campaignIds: string[]
+    formats: string[]
+    status: string
 }
 
 function readDetails(details: string | null): NexusOrderDetails {
@@ -158,4 +202,329 @@ export async function getNexusOrderJobs() {
             executionLogs: details.executionLogs || [],
         }
     })
+}
+
+function normalizeText(value: string) {
+    return value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+}
+
+function extractGamOrderUrl(message: string) {
+    return message.match(/https:\/\/admanager\.google\.com\/\S*order_id=\d+\S*/i)?.[0]?.replace(/[),.;]+$/, '') || null
+}
+
+function extractPi(message: string) {
+    return message.match(/\b(?:pi\s*)?([0-9]{3,8})\b/i)?.[1] || null
+}
+
+function wantsCapture(message: string) {
+    const normalized = normalizeText(message)
+    return /\b(captur|print|screenshot|tirar)\w*/i.test(normalized)
+}
+
+function wantsGeneralCapture(message: string) {
+    const normalized = normalizeText(message)
+    return wantsCapture(message) && /\b(geral|todas|todos|tudo|global)\b/i.test(normalized)
+}
+
+function wantsDownload(message: string) {
+    const normalized = normalizeText(message)
+    return /\b(baixar|download|zip|book|comprovante)\w*/i.test(normalized)
+        && /\b(print|prints|captura|capturas|book|comprovante)\w*/i.test(normalized)
+}
+
+function wantsOrderRegistration(message: string) {
+    const normalized = normalizeText(message)
+    return /\b(order|gam)\b/i.test(normalized)
+        && /\b(cadastr|registr|import|criar)\w*/i.test(normalized)
+}
+
+function cleanupSearchText(message: string) {
+    return normalizeText(message)
+        .replace(/https?:\/\/\S+/g, ' ')
+        .replace(/\b(?:disparar|rodar|fazer|tirar|capturar|capture|prints?|screenshot|campanha|especifica|especifico|baixar|download|zip|book|comprovantes?|todos?|todas?|geral|pi|da|de|do|para|por|os|as|o|a)\b/g, ' ')
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+}
+
+function groupCampaigns(campaigns: AssistantCampaign[]): CampaignGroup[] {
+    const groups = new Map<string, CampaignGroup>()
+
+    for (const campaign of campaigns) {
+        const key = campaign.pi || campaign.id
+        const current = groups.get(key) || {
+            pi: campaign.pi,
+            client: campaign.client,
+            campaignName: campaign.campaignName,
+            campaignIds: [],
+            formats: [],
+            status: campaign.status,
+        }
+
+        current.campaignIds.push(campaign.id)
+        current.formats.push(`${campaign.format}${campaign.device ? `/${campaign.device}` : ''}`)
+        groups.set(key, current)
+    }
+
+    return Array.from(groups.values())
+}
+
+async function findActiveCampaigns() {
+    const now = new Date()
+    return prisma.campaign.findMany({
+        where: {
+            isArchived: false,
+            status: { notIn: ['EXPIRED', 'FINISHED', 'PROCESSING'] },
+            AND: [
+                { OR: [{ flightStart: null }, { flightStart: { lte: now } }] },
+                { OR: [{ flightEnd: null }, { flightEnd: { gte: now } }] },
+            ],
+        },
+        select: {
+            id: true,
+            pi: true,
+            client: true,
+            campaignName: true,
+            format: true,
+            device: true,
+            status: true,
+            flightStart: true,
+            flightEnd: true,
+        },
+        orderBy: [{ client: 'asc' }, { pi: 'asc' }, { format: 'asc' }],
+    })
+}
+
+async function findCampaignGroups(message: string, activeOnly: boolean) {
+    const pi = extractPi(message)
+    const searchText = cleanupSearchText(message)
+    const now = new Date()
+
+    const dateFilter = activeOnly
+        ? {
+            AND: [
+                { OR: [{ flightStart: null }, { flightStart: { lte: now } }] },
+                { OR: [{ flightEnd: null }, { flightEnd: { gte: now } }] },
+            ],
+        }
+        : {}
+
+    const campaigns = await prisma.campaign.findMany({
+        where: {
+            isArchived: false,
+            ...(activeOnly ? { status: { notIn: ['EXPIRED', 'FINISHED', 'PROCESSING'] } } : {}),
+            ...dateFilter,
+            ...(pi
+                ? { pi }
+                : searchText.length >= 2
+                    ? {
+                        OR: [
+                            { client: { contains: searchText, mode: 'insensitive' } },
+                            { campaignName: { contains: searchText, mode: 'insensitive' } },
+                            { agency: { contains: searchText, mode: 'insensitive' } },
+                        ],
+                    }
+                    : {}),
+        },
+        select: {
+            id: true,
+            pi: true,
+            client: true,
+            campaignName: true,
+            format: true,
+            device: true,
+            status: true,
+            flightStart: true,
+            flightEnd: true,
+        },
+        orderBy: [{ client: 'asc' }, { pi: 'asc' }, { format: 'asc' }],
+        take: 80,
+    })
+
+    return groupCampaigns(campaigns)
+}
+
+function campaignCards(groups: CampaignGroup[], action: 'capture' | 'download'): NexusAssistantCard[] {
+    return groups.slice(0, 8).map(group => ({
+        title: `${group.client} | PI ${group.pi}`,
+        description: group.campaignName || `${group.campaignIds.length} formato(s)`,
+        meta: `${group.campaignIds.length} formato(s): ${group.formats.slice(0, 4).join(', ')}`,
+        command: action === 'capture'
+            ? `capturar PI ${group.pi}`
+            : undefined,
+        href: action === 'download'
+            ? `/api/books/download?pi=${encodeURIComponent(group.pi)}`
+            : undefined,
+    }))
+}
+
+async function queueCampaignGroup(group: CampaignGroup, source: string) {
+    const queueResult = await enqueueCaptureJobs(group.campaignIds, {
+        source,
+        priority: 25,
+        allowTerminalStatuses: true,
+    })
+
+    const triggered = await triggerNexusWorker(queueResult.campaignIds)
+    await nexusLogStore.addLog(
+        `Nexus Assistant: ${queueResult.campaignIds.length} campanha(s) enfileirada(s) para PI ${group.pi}.`,
+        triggered ? 'SUCCESS' : 'ERROR',
+        JSON.stringify({ queueResult, triggered }),
+    )
+
+    return { queueResult, triggered }
+}
+
+async function queueAllActiveCampaigns() {
+    const campaigns = await findActiveCampaigns()
+    const ids = campaigns.map(campaign => campaign.id)
+    const queueResult = await enqueueCaptureJobs(ids, {
+        source: 'nexus-assistant-general',
+        priority: 10,
+        allowTerminalStatuses: true,
+    })
+    const triggered = await triggerNexusWorker(queueResult.campaignIds)
+
+    await nexusLogStore.addLog(
+        `Nexus Assistant: captura geral enfileirada para ${queueResult.campaignIds.length} campanha(s).`,
+        triggered ? 'SUCCESS' : 'ERROR',
+        JSON.stringify({ queueResult, triggered }),
+    )
+
+    return { total: campaigns.length, queueResult, triggered }
+}
+
+function capabilityResponse(): NexusAssistantResponse {
+    return {
+        tone: 'info',
+        text: 'Posso operar o Nexus por linguagem natural. Me mande uma order do GAM, peça prints gerais, peça captura de uma campanha/PI especifico ou solicite download dos prints.',
+        actions: [
+            { label: 'Cadastrar order GAM', command: 'Cadastrar order GAM' },
+            { label: 'Disparar prints geral', command: 'Disparar prints geral', variant: 'primary' },
+            { label: 'Capturar PI especifico', command: 'Capturar PI ' },
+            { label: 'Baixar prints por PI', command: 'Baixar prints PI ' },
+        ],
+    }
+}
+
+export async function submitNexusAssistantMessage(message: string): Promise<NexusAssistantResponse> {
+    const input = message.trim()
+    if (!input) return capabilityResponse()
+
+    const orderUrl = extractGamOrderUrl(input)
+    if (orderUrl) {
+        const result = await submitNexusOrderLink(orderUrl)
+        return {
+            tone: result.existing ? 'warning' : 'success',
+            text: result.existing
+                ? `Essa Order ${result.orderId} ja estava no fluxo Nexus. Mantive o job ${result.jobId} e tentei acionar o worker quando aplicavel.`
+                : `Recebi a Order ${result.orderId}. Enfileirei o cadastro automatico e acionei o worker GAM para preparar a revisao.`,
+            actions: [
+                { label: 'Ver revisao', href: `/campaigns?jobId=${encodeURIComponent(result.jobId)}`, variant: 'primary' },
+                { label: 'Ver fila Nexus', command: 'mostrar jobs nexus' },
+            ],
+        }
+    }
+
+    if (wantsGeneralCapture(input)) {
+        const result = await queueAllActiveCampaigns()
+        return {
+            tone: result.queueResult.campaignIds.length > 0 ? 'success' : 'warning',
+            text: result.queueResult.campaignIds.length > 0
+                ? `Captura geral enfileirada: ${result.queueResult.campaignIds.length} campanha(s) elegivel(is). Worker ${result.triggered ? 'acionado' : 'nao acionado automaticamente; a fila ficou pronta'}.`
+                : `Nao encontrei campanhas ativas elegiveis para captura geral agora.`,
+            actions: [
+                { label: 'Abrir Workers', href: '/workers' },
+                { label: 'Ver Monitoramento', href: '/monitoring' },
+            ],
+        }
+    }
+
+    if (wantsDownload(input)) {
+        const groups = await findCampaignGroups(input, false)
+        if (groups.length === 0) {
+            return {
+                tone: 'warning',
+                text: 'Nao encontrei prints/campanhas para esse termo. Me mande o PI para gerar o download.',
+                actions: [{ label: 'Exemplo', command: 'baixar prints PI 402716' }],
+            }
+        }
+        if (groups.length > 1 && !extractPi(input)) {
+            return {
+                tone: 'info',
+                text: `Encontrei ${groups.length} PIs possiveis. Escolha qual book devo baixar.`,
+                cards: campaignCards(groups, 'download'),
+            }
+        }
+
+        const group = groups[0]
+        return {
+            tone: 'success',
+            text: `Pronto. Preparei o download dos prints da campanha ${group.client} | PI ${group.pi}.`,
+            actions: [
+                { label: 'Baixar ZIP', href: `/api/books/download?pi=${encodeURIComponent(group.pi)}`, variant: 'primary' },
+                { label: 'Abrir book', href: `/books/${encodeURIComponent(group.pi)}` },
+            ],
+        }
+    }
+
+    if (wantsCapture(input)) {
+        const groups = await findCampaignGroups(input, true)
+        if (groups.length === 0) {
+            return {
+                tone: 'warning',
+                text: 'Nao encontrei uma campanha ativa com esse termo. Me mande o PI ou um nome mais especifico.',
+                actions: [{ label: 'Exemplo', command: 'capturar PI 402716' }],
+            }
+        }
+        if (groups.length > 1 && !extractPi(input)) {
+            return {
+                tone: 'info',
+                text: `Encontrei ${groups.length} campanhas possiveis. Escolha qual PI devo capturar.`,
+                cards: campaignCards(groups, 'capture'),
+            }
+        }
+
+        const group = groups[0]
+        const result = await queueCampaignGroup(group, 'nexus-assistant-specific')
+        return {
+            tone: result.queueResult.campaignIds.length > 0 ? 'success' : 'warning',
+            text: result.queueResult.campaignIds.length > 0
+                ? `Enfileirei ${result.queueResult.campaignIds.length} formato(s) da campanha ${group.client} | PI ${group.pi}. Worker ${result.triggered ? 'acionado' : 'nao acionado automaticamente; a fila ficou pronta'}.`
+                : `A campanha ${group.client} | PI ${group.pi} nao tem formatos elegiveis para captura agora.`,
+            actions: [
+                { label: 'Abrir Workers', href: '/workers' },
+                { label: 'Baixar prints desse PI', href: `/api/books/download?pi=${encodeURIComponent(group.pi)}` },
+            ],
+        }
+    }
+
+    if (wantsOrderRegistration(input)) {
+        return {
+            tone: 'info',
+            text: 'Pode me mandar o link completo da Order do Google Ad Manager. Assim que eu receber, eu cadastro automaticamente e aviso por Telegram/e-mail quando estiver pronta para revisao.',
+            actions: [{ label: 'Colar order GAM', command: 'Cadastrar order GAM: ' }],
+        }
+    }
+
+    if (/jobs?|fila|status|orders?/i.test(normalizeText(input))) {
+        const jobs = await getNexusOrderJobs()
+        return {
+            tone: 'info',
+            text: jobs.length > 0
+                ? `Tenho ${jobs.length} job(s) GAM recentes no Nexus.`
+                : 'Nao ha jobs GAM recentes no Nexus.',
+            cards: jobs.slice(0, 6).map(job => ({
+                title: `Order ${job.orderId || 'GAM'} | ${job.level.replace('JOB_GAM_', '')}`,
+                description: job.client || job.message,
+                meta: job.pi ? `PI ${job.pi} | ${job.formats} formato(s)` : `${job.formats} formato(s)`,
+                href: job.level === 'JOB_GAM_REVIEW' ? `/campaigns?jobId=${encodeURIComponent(job.id)}` : undefined,
+            })),
+        }
+    }
+
+    return capabilityResponse()
 }
