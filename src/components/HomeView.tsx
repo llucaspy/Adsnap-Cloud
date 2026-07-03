@@ -187,7 +187,7 @@ export function HomeView({
                                 {operationLabel}
                             </div>
                             <h1 style={{ margin: 0, maxWidth: 760, color: C.inkDeep, fontFamily: 'var(--font-display)', fontSize: 'clamp(40px, 6vw, 76px)', lineHeight: 1.04, fontWeight: 700, letterSpacing: '-1px' }}>
-                                Controle de capturas, fila e evidencias em uma unica Home.
+                                Controle de capturas, fila e evidencias.
                             </h1>
                         </div>
 
