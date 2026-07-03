@@ -25,6 +25,7 @@ export default async function HomePage() {
     failedJobs,
     queuedCampaigns,
     processingCampaigns,
+    activePrintCampaigns,
   ] = await Promise.all([
     prisma.capture.count({ where: { createdAt: { gte: brtStart }, status: 'SUCCESS' } }).catch(() => 0),
     prisma.capture.count({ where: { createdAt: { gte: brtStart }, status: 'FAILED' } }).catch(() => 0),
@@ -45,6 +46,23 @@ export default async function HomePage() {
     prisma.workerJob.count({ where: { status: { in: ['FAILED', 'ERROR'] } } }).catch(() => 0),
     prisma.campaign.count({ where: { status: { in: ['QUEUED', 'AUTOCONFIG'] }, isArchived: false } }).catch(() => 0),
     prisma.campaign.count({ where: { status: 'PROCESSING', isArchived: false } }).catch(() => 0),
+    prisma.campaign.findMany({
+      where: {
+        status: { in: ['PROCESSING', 'QUEUED', 'AUTOCONFIG'] },
+        isArchived: false,
+      },
+      take: 20,
+      orderBy: { updatedAt: 'desc' },
+      select: {
+        id: true,
+        pi: true,
+        client: true,
+        campaignName: true,
+        format: true,
+        device: true,
+        status: true,
+      },
+    }).catch(() => []),
   ])
 
   const distinctPis = new Set(campaigns.map(campaign => campaign.pi)).size
@@ -85,6 +103,22 @@ export default async function HomePage() {
         level: log.level,
         message: log.message,
         createdAt: log.createdAt.toISOString(),
+      }))}
+      activePrintTotal={queuedCampaigns + processingCampaigns}
+      activePrintCampaigns={activePrintCampaigns
+        .slice()
+        .sort((a, b) => {
+          const priority: Record<string, number> = { PROCESSING: 0, QUEUED: 1, AUTOCONFIG: 2 }
+          return (priority[a.status] ?? 9) - (priority[b.status] ?? 9)
+        })
+        .map(campaign => ({
+        id: campaign.id,
+        pi: campaign.pi,
+        client: campaign.client,
+        campaignName: campaign.campaignName,
+        format: campaign.format,
+        device: campaign.device,
+        status: campaign.status,
       }))}
     />
   )

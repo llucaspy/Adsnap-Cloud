@@ -56,6 +56,16 @@ type RecentLog = {
     createdAt: string
 }
 
+type ActivePrintCampaign = {
+    id: string
+    pi: string
+    client: string
+    campaignName: string
+    format: string
+    device: string
+    status: string
+}
+
 const C = {
     canvas: '#0f0f0f',
     surface: '#141414',
@@ -119,16 +129,27 @@ function levelColor(level: string) {
     return C.ink
 }
 
+function printStatusMeta(status: string) {
+    if (status === 'PROCESSING') return { label: 'Capturando', tone: C.success }
+    if (status === 'QUEUED') return { label: 'Na fila', tone: C.warning }
+    if (status === 'AUTOCONFIG') return { label: 'Preparando', tone: C.ink }
+    return { label: status, tone: C.slate }
+}
+
 export function HomeView({
     generatedAt,
     stats,
     recentCaptures,
     recentLogs,
+    activePrintTotal,
+    activePrintCampaigns,
 }: {
     generatedAt: string
     stats: HomeStats
     recentCaptures: RecentCapture[]
     recentLogs: RecentLog[]
+    activePrintTotal: number
+    activePrintCampaigns: ActivePrintCampaign[]
 }) {
     const hasAttention = stats.failedToday > 0 || stats.quarantined > 0 || stats.failedJobs > 0
     const operationLabel = hasAttention ? 'Atencao operacional' : 'Operacao estavel'
@@ -224,6 +245,32 @@ export function HomeView({
                             <PulseRow label="Fila" value={stats.queued} tone={stats.queued > 0 ? C.warning : C.slate} />
                             <PulseRow label="Processando" value={stats.processing} tone={stats.processing > 0 ? C.ink : C.slate} />
                             <PulseRow label="Quarentena" value={stats.quarantined} tone={stats.quarantined > 0 ? C.error : C.slate} />
+                        </div>
+
+                        <div style={{ marginTop: 24, paddingTop: 18, borderTop: `1px solid ${C.hairline}` }}>
+                            <div style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+                                <div>
+                                    <p style={{ margin: 0, color: C.slate, fontSize: 10, fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase' }}>Prints atuais</p>
+                                    <strong style={{ display: 'block', marginTop: 5, color: C.inkDeep, fontSize: 15, fontWeight: 800 }}>Campanhas ativas</strong>
+                                </div>
+                                <span style={{ color: C.inkDeep, fontSize: 20, fontWeight: 800 }}>{activePrintTotal}</span>
+                            </div>
+
+                            <div style={{ display: 'grid', gap: 0, maxHeight: 210, overflowY: 'auto', paddingRight: 2 }}>
+                                {activePrintCampaigns.length === 0 && (
+                                    <div style={{ minHeight: 54, display: 'flex', alignItems: 'center', color: C.slate, fontSize: 12, fontWeight: 700, borderTop: `1px solid ${C.hairline}` }}>
+                                        Nenhuma campanha em captura agora
+                                    </div>
+                                )}
+                                {activePrintCampaigns.map(campaign => (
+                                    <ActivePrintRow key={campaign.id} campaign={campaign} />
+                                ))}
+                            </div>
+                            {activePrintTotal > activePrintCampaigns.length && (
+                                <p style={{ margin: '10px 0 0', color: C.slate, fontSize: 10, fontWeight: 700 }}>
+                                    Exibindo {activePrintCampaigns.length} de {activePrintTotal}
+                                </p>
+                            )}
                         </div>
                     </motion.aside>
                 </div>
@@ -372,6 +419,29 @@ function PulseRow({ label, value, tone }: { label: string; value: string | numbe
         <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 16, alignItems: 'center', padding: '12px 0', borderTop: `1px solid ${C.hairline}` }}>
             <span style={{ color: C.charcoal, fontSize: 13, fontWeight: 600 }}>{label}</span>
             <strong style={{ color: tone, fontSize: 18, fontWeight: 800 }}>{value}</strong>
+        </div>
+    )
+}
+
+function ActivePrintRow({ campaign }: { campaign: ActivePrintCampaign }) {
+    const meta = printStatusMeta(campaign.status)
+
+    return (
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 12, alignItems: 'center', minHeight: 58, borderTop: `1px solid ${C.hairline}` }}>
+            <div style={{ minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: 999, background: meta.tone, boxShadow: `0 0 0 3px ${meta.tone}22`, flex: '0 0 auto' }} />
+                    <strong style={{ color: C.ink, fontSize: 12, fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {campaign.client || campaign.campaignName}
+                    </strong>
+                </div>
+                <span style={{ display: 'block', marginTop: 5, color: C.slate, fontSize: 11, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    PI {campaign.pi} - {campaign.format} - {campaign.device}
+                </span>
+            </div>
+            <span style={{ color: meta.tone, fontSize: 10, fontWeight: 900, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                {meta.label}
+            </span>
         </div>
     )
 }
