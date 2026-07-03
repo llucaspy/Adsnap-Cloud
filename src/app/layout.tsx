@@ -4,6 +4,7 @@ import "./globals.css";
 import { Sidebar } from "@/components/Sidebar";
 import { ScrollEffects } from "@/components/ScrollEffects";
 import { AlertToast } from "@/components/AlertToast";
+import { NexusFloatingChat } from "@/components/NexusFloatingChat";
 
 const interBody = Inter({
   subsets: ["latin"],
@@ -47,6 +48,7 @@ export default function RootLayout({
           </div>
         </main>
         <AlertToast />
+        <NexusFloatingChat />
       </body>
     </html>
   );
