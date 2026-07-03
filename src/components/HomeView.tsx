@@ -131,8 +131,9 @@ function levelColor(level: string) {
 
 function printStatusMeta(status: string) {
     if (status === 'PROCESSING') return { label: 'Capturando', tone: C.success }
-    if (status === 'QUEUED') return { label: 'Na fila', tone: C.warning }
+    if (status.includes('QUEUED')) return { label: 'Na fila', tone: C.warning }
     if (status === 'AUTOCONFIG') return { label: 'Preparando', tone: C.ink }
+    if (['ACTIVE', 'SUCCESS', 'PENDING'].includes(status)) return { label: 'Ativa', tone: C.success }
     return { label: status, tone: C.slate }
 }
 
@@ -259,7 +260,7 @@ export function HomeView({
                             <div style={{ display: 'grid', gap: 0, maxHeight: 210, overflowY: 'auto', paddingRight: 2 }}>
                                 {activePrintCampaigns.length === 0 && (
                                     <div style={{ minHeight: 54, display: 'flex', alignItems: 'center', color: C.slate, fontSize: 12, fontWeight: 700, borderTop: `1px solid ${C.hairline}` }}>
-                                        Nenhuma campanha em captura agora
+                                        Nenhuma campanha ativa para print agora
                                     </div>
                                 )}
                                 {activePrintCampaigns.map(campaign => (

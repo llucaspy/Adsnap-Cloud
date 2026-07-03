@@ -1,5 +1,6 @@
 import prisma from '@/lib/prisma'
 import { HomeView } from '@/components/HomeView'
+import type { Prisma } from '@prisma/client'
 
 export const revalidate = 30
 
@@ -10,8 +11,28 @@ function getBrazilDayStart() {
   return new Date(`${dateStr}T03:00:00.000Z`)
 }
 
+function getBrazilDateAnchor() {
+  const now = new Date()
+  const brtNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }))
+  return new Date(Date.UTC(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate()))
+}
+
 export default async function HomePage() {
   const brtStart = getBrazilDayStart()
+  const brtDateAnchor = getBrazilDateAnchor()
+  const activePrintCampaignWhere: Prisma.CampaignWhereInput = {
+    isArchived: false,
+    status: { notIn: ['EXPIRED', 'FINISHED', 'FAILED', 'QUARANTINE'] },
+    OR: [
+      { status: { in: ['PROCESSING', 'QUEUED', 'AUTOCONFIG'] } },
+      {
+        AND: [
+          { flightStart: { lte: brtDateAnchor } },
+          { flightEnd: { gte: brtDateAnchor } },
+        ],
+      },
+    ],
+  }
 
   const [
     totalToday,
@@ -25,6 +46,7 @@ export default async function HomePage() {
     failedJobs,
     queuedCampaigns,
     processingCampaigns,
+    activePrintCampaignTotal,
     activePrintCampaigns,
   ] = await Promise.all([
     prisma.capture.count({ where: { createdAt: { gte: brtStart }, status: 'SUCCESS' } }).catch(() => 0),
@@ -46,11 +68,9 @@ export default async function HomePage() {
     prisma.workerJob.count({ where: { status: { in: ['FAILED', 'ERROR'] } } }).catch(() => 0),
     prisma.campaign.count({ where: { status: { in: ['QUEUED', 'AUTOCONFIG'] }, isArchived: false } }).catch(() => 0),
     prisma.campaign.count({ where: { status: 'PROCESSING', isArchived: false } }).catch(() => 0),
+    prisma.campaign.count({ where: activePrintCampaignWhere }).catch(() => 0),
     prisma.campaign.findMany({
-      where: {
-        status: { in: ['PROCESSING', 'QUEUED', 'AUTOCONFIG'] },
-        isArchived: false,
-      },
+      where: activePrintCampaignWhere,
       take: 20,
       orderBy: { updatedAt: 'desc' },
       select: {
@@ -104,11 +124,11 @@ export default async function HomePage() {
         message: log.message,
         createdAt: log.createdAt.toISOString(),
       }))}
-      activePrintTotal={queuedCampaigns + processingCampaigns}
+      activePrintTotal={activePrintCampaignTotal}
       activePrintCampaigns={activePrintCampaigns
         .slice()
         .sort((a, b) => {
-          const priority: Record<string, number> = { PROCESSING: 0, QUEUED: 1, AUTOCONFIG: 2 }
+          const priority: Record<string, number> = { PROCESSING: 0, QUEUED: 1, AUTOCONFIG: 2, ACTIVE: 3, SUCCESS: 4, PENDING: 5 }
           return (priority[a.status] ?? 9) - (priority[b.status] ?? 9)
         })
         .map(campaign => ({
