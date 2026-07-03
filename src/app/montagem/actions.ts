@@ -1,6 +1,7 @@
 'use server'
 
 import prisma from '@/lib/prisma'
+import { getFormatLabelMap, resolveFormatLabel } from '@/lib/formatLabels'
 
 export interface TemplateCapture {
     screenshotUrl: string
@@ -10,6 +11,7 @@ export interface TemplateCapture {
 export interface TemplateInfo {
     campaignId: string
     format: string
+    formatLabel: string
     device: string
     latestScreenshot: string
     /** Todas as capturas disponíveis, indexadas por data (YYYY-MM-DD) */
@@ -23,22 +25,25 @@ export interface TemplateInfo {
 export async function getMontagemTemplates(): Promise<{
     templates: TemplateInfo[]
 }> {
-    const campaigns = await prisma.campaign.findMany({
-        where: { pi: '000' },
-        select: {
-            id: true,
-            format: true,
-            device: true,
-            captures: {
-                where: { status: 'SUCCESS' },
-                select: {
-                    screenshotPath: true,
-                    createdAt: true,
+    const [formatLabelMap, campaigns] = await Promise.all([
+        getFormatLabelMap(),
+        prisma.campaign.findMany({
+            where: { pi: '000' },
+            select: {
+                id: true,
+                format: true,
+                device: true,
+                captures: {
+                    where: { status: 'SUCCESS' },
+                    select: {
+                        screenshotPath: true,
+                        createdAt: true,
+                    },
+                    orderBy: { createdAt: 'desc' },
                 },
-                orderBy: { createdAt: 'desc' },
             }
-        }
-    })
+        }),
+    ])
 
     const templates: TemplateInfo[] = campaigns
         .filter(c => c.captures.length > 0)
@@ -56,6 +61,7 @@ export async function getMontagemTemplates(): Promise<{
             return {
                 campaignId: c.id,
                 format: c.format,
+                formatLabel: resolveFormatLabel(formatLabelMap, c.format),
                 device: c.device || 'desktop',
                 latestScreenshot: c.captures[0].screenshotPath,
                 capturesByDate,

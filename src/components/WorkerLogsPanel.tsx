@@ -25,6 +25,7 @@ type QueueItem = {
     client: string
     campaignName: string
     format: string
+    formatLabel: string
     device: string
     status: string
     updatedAt: string
@@ -46,7 +47,7 @@ type LogItem = {
     details: string | null
     campaignId: string | null
     createdAt: string
-    campaign: { id: string; pi: string; client: string; format: string; status: string } | null
+    campaign: { id: string; pi: string; client: string; format: string; formatLabel: string; status: string } | null
 }
 
 type CountItem = { status?: string; level?: string; count: number }
@@ -319,7 +320,7 @@ export function WorkerLogsPanel({
                                             {item.client}
                                         </h3>
                                         <p style={{ margin: '6px 0 0', color: C.muted, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                            {item.campaignName || item.format}
+                                            {[item.campaignName, item.formatLabel].filter(Boolean).join(' - ')}
                                         </p>
                                         {item.lastWorkerError && (
                                             <p style={{ margin: '10px 0 0', color: C.error, fontSize: 12, lineHeight: 1.45 }}>
@@ -396,7 +397,7 @@ export function WorkerLogsPanel({
                                 <p style={{ margin: 0, color: C.text, fontSize: 12, lineHeight: 1.45 }}>{log.message}</p>
                                 {log.campaign && (
                                     <p style={{ margin: '8px 0 0', color: C.muted, fontSize: 11 }}>
-                                        PI {log.campaign.pi} - {log.campaign.client}
+                                        PI {log.campaign.pi} - {log.campaign.client} - {log.campaign.formatLabel}
                                     </p>
                                 )}
                             </div>
@@ -426,7 +427,7 @@ export function WorkerLogsPanel({
                                         <p style={{ margin: 0, color: C.text, fontSize: 12, fontWeight: 700, lineHeight: 1.4 }}>{log.message}</p>
                                         {log.campaign && (
                                             <p style={{ margin: '5px 0 0', color: C.muted, fontSize: 11 }}>
-                                                PI {log.campaign.pi} - {log.campaign.client}
+                                                PI {log.campaign.pi} - {log.campaign.client} - {log.campaign.formatLabel}
                                             </p>
                                         )}
                                     </div>

@@ -1,6 +1,7 @@
 import prisma from '@/lib/prisma'
 import { HomeView } from '@/components/HomeView'
 import type { Prisma } from '@prisma/client'
+import { getFormatLabelMap, resolveFormatLabel } from '@/lib/formatLabels'
 
 export const revalidate = 30
 
@@ -35,6 +36,7 @@ export default async function HomePage() {
   }
 
   const [
+    formatLabelMap,
     totalToday,
     failedToday,
     quarantined,
@@ -49,6 +51,7 @@ export default async function HomePage() {
     activePrintCampaignTotal,
     activePrintCampaigns,
   ] = await Promise.all([
+    getFormatLabelMap(),
     prisma.capture.count({ where: { createdAt: { gte: brtStart }, status: 'SUCCESS' } }).catch(() => 0),
     prisma.capture.count({ where: { createdAt: { gte: brtStart }, status: 'FAILED' } }).catch(() => 0),
     prisma.campaign.count({ where: { status: 'QUARANTINE', isArchived: false } }).catch(() => 0),
@@ -114,6 +117,7 @@ export default async function HomePage() {
           pi: capture.campaign.pi,
           client: capture.campaign.client,
           format: capture.campaign.format,
+          formatLabel: resolveFormatLabel(formatLabelMap, capture.campaign.format),
           device: capture.campaign.device,
           campaignName: capture.campaign.campaignName,
         } : null,
@@ -137,6 +141,7 @@ export default async function HomePage() {
         client: campaign.client,
         campaignName: campaign.campaignName,
         format: campaign.format,
+        formatLabel: resolveFormatLabel(formatLabelMap, campaign.format),
         device: campaign.device,
         status: campaign.status,
       }))}

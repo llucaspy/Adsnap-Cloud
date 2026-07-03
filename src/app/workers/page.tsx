@@ -1,6 +1,7 @@
 import prisma from '@/lib/prisma'
 import { WorkerLogsPanel } from '@/components/WorkerLogsPanel'
 import { isWorkerJobStorageMissing, WORKER_JOB_TYPE_CAPTURE } from '@/lib/workerJobs'
+import { getFormatLabelMap, resolveFormatLabel } from '@/lib/formatLabels'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,6 +36,7 @@ export default async function WorkersPage() {
     const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
 
     const [
+        formatLabelMap,
         queue,
         campaignStatusCounts,
         recentLogs,
@@ -43,6 +45,7 @@ export default async function WorkersPage() {
         gamJobs,
         processingRunGroups,
     ] = await Promise.all([
+        getFormatLabelMap(),
         prisma.campaign.findMany({
             where: {
                 isArchived: false,
@@ -240,6 +243,7 @@ export default async function WorkersPage() {
             batchMetrics={batchMetrics}
             queue={(hasWorkerJobMetrics ? workerJobQueue : queue).map(item => ({
                 ...item,
+                formatLabel: resolveFormatLabel(formatLabelMap, item.format),
                 updatedAt: serializeDate(item.updatedAt)!,
                 lastCaptureAt: serializeDate(item.lastCaptureAt),
                 processingStartedAt: serializeDate(item.processingStartedAt),
@@ -257,7 +261,14 @@ export default async function WorkersPage() {
                 ...log,
                 details: log.details,
                 createdAt: log.createdAt.toISOString(),
-                campaign: log.campaignId ? campaignMap.get(log.campaignId) || null : null,
+                campaign: log.campaignId
+                    ? (() => {
+                        const campaign = campaignMap.get(log.campaignId)
+                        return campaign
+                            ? { ...campaign, formatLabel: resolveFormatLabel(formatLabelMap, campaign.format) }
+                            : null
+                    })()
+                    : null,
             }))}
             logLevelCounts={logLevelCounts.map(item => ({
                 level: item.level,

@@ -63,7 +63,7 @@ export function BookCampaignList({ campaigns }: { campaigns: Campaign[] }) {
                                 >
                                     {campaign.formatLabel}
                                     <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-[var(--bg-tertiary)] text-[var(--text-muted)] border border-[var(--border)]">
-                                        {campaign.format}
+                                        {campaign.device}
                                     </span>
                                 </h2>
                                 <div

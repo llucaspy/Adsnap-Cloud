@@ -1,5 +1,6 @@
 import prisma from '@/lib/prisma'
 import { archiveCampaign, deleteCampaign } from '@/app/actions'
+import { getFormatLabelMap, resolveFormatLabel } from '@/lib/formatLabels'
 import { RotateCcw, Trash2, History, Clock } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -7,11 +8,14 @@ import { ptBR } from 'date-fns/locale'
 export const dynamic = 'force-dynamic'
 
 export default async function ArchivePage() {
-    const campaigns = await prisma.campaign.findMany({
-        where: { isArchived: true },
-        orderBy: { updatedAt: 'desc' },
-        include: { captures: { take: 5, orderBy: { createdAt: 'desc' } } }
-    })
+    const [formatLabelMap, campaigns] = await Promise.all([
+        getFormatLabelMap(),
+        prisma.campaign.findMany({
+            where: { isArchived: true },
+            orderBy: { updatedAt: 'desc' },
+            include: { captures: { take: 5, orderBy: { createdAt: 'desc' } } }
+        }),
+    ])
 
     return (
         <div className="space-y-12 animate-slide-up">
@@ -86,7 +90,7 @@ export default async function ArchivePage() {
                                 className="flex items-center gap-3 text-xs font-medium"
                                 style={{ color: 'var(--text-muted)' }}
                             >
-                                <span>{c.format}</span>
+                                <span>{resolveFormatLabel(formatLabelMap, c.format)}</span>
                                 <span style={{ color: 'var(--border)' }}>•</span>
                                 <span>{c.captures.length} capturas</span>
                                 <span style={{ color: 'var(--border)' }}>•</span>

@@ -27,6 +27,10 @@ interface TemplateCreatives {
     creatives: CreativeEntry[]
 }
 
+function safeZipSegment(value: string) {
+    return value.replace(/[^a-z0-9._-]+/gi, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'formato'
+}
+
 export default function PrintAssembler() {
     const [step, setStep] = useState(1)
     const [templates, setTemplates] = useState<TemplateInfo[]>([])
@@ -284,7 +288,7 @@ export default function PrintAssembler() {
 
         for (const tmpl of selectedTemplates) {
             if (!tmpl.position) continue
-            const folderName = `${tmpl.template.device}_${tmpl.template.format.substring(0, 8)}`
+            const folderName = `${tmpl.template.device}_${safeZipSegment(tmpl.template.formatLabel || tmpl.template.format)}`
             const folder = zip.folder(folderName)!
 
             for (const day of days) {
@@ -379,9 +383,10 @@ export default function PrintAssembler() {
                                         className={`relative cursor-pointer rounded-xl overflow-hidden border-2 transition-all ${
                                             isSelected(t) ? 'border-[#00ff88] ring-2 ring-[#00ff88]/20' : 'border-white/10 hover:border-white/20'
                                         }`}>
-                                        <img src={t.latestScreenshot} alt={`${t.format.substring(0, 8)}`}
+                                        <img src={t.latestScreenshot} alt={t.formatLabel}
                                             className="w-full h-48 object-cover object-top" crossOrigin="anonymous" />
                                         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 to-transparent p-3">
+                                            <p className="text-sm font-bold truncate mb-2">{t.formatLabel}</p>
                                             <div className="flex items-center justify-between">
                                                 <span className="text-xs font-medium px-2 py-0.5 rounded bg-white/10">
                                                     {t.device === 'mobile' ? '📱 Mobile' : '🖥️ Desktop'}
@@ -457,10 +462,10 @@ export default function PrintAssembler() {
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex items-center gap-2">
                                                     <span className="text-sm font-medium">
-                                                        {st.template.device === 'mobile' ? '📱' : '🖥️'} Formato {stIdx + 1}
+                                                        {st.template.device === 'mobile' ? '📱' : '🖥️'} {st.template.formatLabel}
                                                     </span>
                                                     <span className="text-[10px] text-white/30 px-1.5 py-0.5 bg-white/5 rounded">
-                                                        {st.template.format.substring(0, 8)}
+                                                        {st.template.device}
                                                     </span>
                                                 </div>
                                                 <p className="text-[10px] text-white/30">

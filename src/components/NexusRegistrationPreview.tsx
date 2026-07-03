@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { X, Check, AlertCircle, Plus, Trash2, Edit2, Save, Sparkles, Building2, User2, Hash, Globe, Calendar, Layout, Shield } from 'lucide-react'
-import { bulkCreateCampaigns } from '@/app/actions'
+import { bulkCreateCampaigns, getSettings } from '@/app/actions'
 
 interface ParsedCampaign {
     id: string
@@ -24,6 +24,7 @@ interface NexusRegistrationPreviewProps {
 }
 
 export function NexusRegistrationPreview({ campaigns: initialCampaigns, onClose, onConfirm }: NexusRegistrationPreviewProps) {
+    const [formatLabels, setFormatLabels] = useState<Record<string, string>>({})
     const [data, setData] = useState<Partial<ParsedCampaign>[]>(
         initialCampaigns.map((c, i) => ({
             ...c,
@@ -35,6 +36,28 @@ export function NexusRegistrationPreview({ campaigns: initialCampaigns, onClose,
     )
     const [editingId, setEditingId] = useState<string | null>(null)
     const [isSubmitting, setIsSubmitting] = useState(false)
+
+    useEffect(() => {
+        getSettings().then(settings => {
+            try {
+                const formats = JSON.parse(settings.bannerFormats || '[]') as { id?: string; label?: string; width?: number; height?: number }[]
+                const labels: Record<string, string> = {}
+                for (const format of formats) {
+                    if (!format.id) continue
+                    labels[format.id.trim().toLowerCase()] = format.label || (format.width && format.height ? `${format.width}x${format.height}` : format.id)
+                }
+                setFormatLabels(labels)
+            } catch {
+                setFormatLabels({})
+            }
+        })
+    }, [])
+
+    const getFormatLabel = (formatId: string | undefined) => {
+        const raw = String(formatId || '').trim()
+        if (!raw) return '-'
+        return formatLabels[raw.toLowerCase()] || raw
+    }
 
     const handleUpdate = (id: string, field: keyof ParsedCampaign, value: string) => {
         setData(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c))
@@ -235,7 +258,7 @@ export function NexusRegistrationPreview({ campaigns: initialCampaigns, onClose,
                                                             className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-sm text-white outline-none focus:border-accent"
                                                         />
                                                     ) : (
-                                                        <p className="text-xs text-white/60">{campaign.format || '-'}</p>
+                                                        <p className="text-xs text-white/60">{getFormatLabel(campaign.format)}</p>
                                                     )}
                                                 </div>
                                             </div>

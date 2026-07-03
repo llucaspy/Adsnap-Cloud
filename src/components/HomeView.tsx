@@ -44,6 +44,7 @@ type RecentCapture = {
         pi: string
         client: string
         format: string
+        formatLabel: string
         device: string
         campaignName: string
     } | null
@@ -62,6 +63,7 @@ type ActivePrintCampaign = {
     client: string
     campaignName: string
     format: string
+    formatLabel: string
     device: string
     status: string
 }
@@ -437,7 +439,7 @@ function ActivePrintRow({ campaign }: { campaign: ActivePrintCampaign }) {
                     </strong>
                 </div>
                 <span style={{ display: 'block', marginTop: 5, color: C.slate, fontSize: 11, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    PI {campaign.pi} - {campaign.format} - {campaign.device}
+                    PI {campaign.pi} - {campaign.formatLabel} - {campaign.device}
                 </span>
             </div>
             <span style={{ color: meta.tone, fontSize: 10, fontWeight: 900, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
@@ -526,7 +528,7 @@ function CaptureTile({ capture, index }: { capture: RecentCapture; index: number
                     {capture.campaign?.client || 'Campanha sem nome'}
                 </h3>
                 <p style={{ margin: '6px 0 0', color: C.charcoal, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {capture.campaign?.format || 'Formato'} - {formatClock(capture.createdAt)}
+                    {capture.campaign?.formatLabel || 'Formato'} - {formatClock(capture.createdAt)}
                 </p>
             </div>
         </motion.article>

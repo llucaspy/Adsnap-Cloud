@@ -3,20 +3,29 @@
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { processManualCapture } from '@/lib/assemblyService'
+import { getFormatLabelMap, resolveFormatLabel } from '@/lib/formatLabels'
 
 export async function getAvailableCampaigns() {
-    return await prisma.campaign.findMany({
-        where: { isArchived: false },
-        orderBy: { createdAt: 'desc' },
-        select: {
-            id: true,
-            pi: true,
-            client: true,
-            campaignName: true,
-            format: true,
-            device: true
-        }
-    })
+    const [formatLabelMap, campaigns] = await Promise.all([
+        getFormatLabelMap(),
+        prisma.campaign.findMany({
+            where: { isArchived: false },
+            orderBy: { createdAt: 'desc' },
+            select: {
+                id: true,
+                pi: true,
+                client: true,
+                campaignName: true,
+                format: true,
+                device: true
+            }
+        }),
+    ])
+
+    return campaigns.map(campaign => ({
+        ...campaign,
+        formatLabel: resolveFormatLabel(formatLabelMap, campaign.format),
+    }))
 }
 
 export async function runManualCaptureAction(campaignId: string, customDate: string, customTime: string) {

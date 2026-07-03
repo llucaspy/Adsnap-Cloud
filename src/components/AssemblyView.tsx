@@ -45,7 +45,8 @@ export function AssemblyView() {
     const filteredCampaigns = campaigns.filter(c =>
         c.client.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.pi.includes(searchTerm) ||
-        c.campaignName?.toLowerCase().includes(searchTerm.toLowerCase())
+        c.campaignName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.formatLabel?.toLowerCase().includes(searchTerm.toLowerCase())
     )
 
     const selectedCampaign = campaigns.find(c => c.id === selectedCampaignId)
@@ -128,7 +129,7 @@ export function AssemblyView() {
                                         <span className="text-[9px] font-bold text-white/20 uppercase">{c.device}</span>
                                     </div>
                                     <p className="font-bold truncate">{c.client}</p>
-                                    <p className="text-[10px] opacity-40 truncate">{c.format} • {c.campaignName}</p>
+                                    <p className="text-[10px] opacity-40 truncate">{c.formatLabel} - {c.campaignName}</p>
                                 </button>
                             ))}
                         </div>
@@ -162,7 +163,7 @@ export function AssemblyView() {
                                     </div>
                                     <div className="p-4 rounded-2xl bg-white/5 border border-white/10 text-left">
                                         <p className="text-[9px] font-black text-white/20 uppercase tracking-widest mb-1">Formato</p>
-                                        <p className="font-bold truncate">{selectedCampaign.format}</p>
+                                        <p className="font-bold truncate">{selectedCampaign.formatLabel}</p>
                                     </div>
                                 </div>
 
