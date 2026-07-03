@@ -158,8 +158,8 @@ export function HomeView({
     const kpis = [
         { label: 'Capturas hoje', value: stats.totalCapturesToday, hint: `${stats.failedToday} falhas hoje`, icon: Camera, tone: C.ink },
         { label: 'Taxa de sucesso', value: `${stats.successRate}%`, hint: 'janela do dia', icon: ShieldCheck, tone: stats.successRate >= 95 ? C.success : C.warning },
-        { label: 'PIs ativos', value: stats.activePis, hint: `${stats.activeCampaigns} campanhas`, icon: MonitorDot, tone: C.ink },
-        { label: 'Formatos', value: stats.totalFormats, hint: 'em monitoramento', icon: Layers, tone: C.ink },
+        { label: 'PIs cadastrados', value: stats.activePis, hint: `${stats.activeCampaigns} campanhas cadastradas`, icon: MonitorDot, tone: C.ink },
+        { label: 'Formatos por campanhas', value: stats.totalFormats, hint: 'cadastros de formatos', icon: Layers, tone: C.ink },
     ]
 
     const queueSignals = [
