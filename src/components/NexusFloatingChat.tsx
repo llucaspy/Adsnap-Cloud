@@ -78,7 +78,7 @@ function AstronautHelmet({ compact = false }: { compact?: boolean }) {
                     border: '2px solid #a3a3a3',
                     borderRadius: '55% 45% 42% 58%',
                     transform: 'rotate(-7deg)',
-                    boxShadow: 'inset rgba(124,58,237,0.35) -8px -8px 18px',
+                    boxShadow: 'inset rgba(255,255,255,0.14) -8px -8px 18px',
                 }}
             />
             <div
@@ -105,16 +105,49 @@ function AstronautHelmet({ compact = false }: { compact?: boolean }) {
                     border: '1px solid #737373',
                 }}
             />
-            <div
+            <motion.div
                 className="absolute"
                 style={{
-                    right: compact ? 1 : 0,
-                    top: compact ? 2 : 1,
-                    width: compact ? 12 : 14,
-                    height: compact ? 12 : 14,
+                    right: compact ? -1 : -2,
+                    top: compact ? 0 : -1,
+                    width: compact ? 18 : 20,
+                    height: compact ? 18 : 20,
+                    border: '1px solid rgba(34,197,94,0.32)',
+                    borderRadius: '999px',
+                }}
+                animate={{
+                    scale: [1, 1.16, 1],
+                    opacity: [0.72, 1, 0.72],
+                }}
+                transition={{
+                    duration: 2.4,
+                    repeat: Infinity,
+                    ease: [0.16, 1, 0.3, 1],
+                }}
+            />
+            <motion.div
+                className="absolute"
+                style={{
+                    right: compact ? 3 : 2,
+                    top: compact ? 4 : 3,
+                    width: compact ? 10 : 12,
+                    height: compact ? 10 : 12,
                     background: '#22c55e',
                     border: '2px solid #0f0f0f',
                     borderRadius: '999px',
+                    boxShadow: 'rgba(34,197,94,0.32) 0px 0px 14px 2px',
+                }}
+                animate={{
+                    boxShadow: [
+                        'rgba(34,197,94,0.18) 0px 0px 8px 1px',
+                        'rgba(34,197,94,0.36) 0px 0px 18px 3px',
+                        'rgba(34,197,94,0.18) 0px 0px 8px 1px',
+                    ],
+                }}
+                transition={{
+                    duration: 2.4,
+                    repeat: Infinity,
+                    ease: [0.16, 1, 0.3, 1],
                 }}
             />
         </div>
@@ -131,9 +164,9 @@ function MissionAction({
     const isPrimary = action.variant === 'primary'
     const isDanger = action.variant === 'danger'
     const style = {
-        background: isPrimary ? '#7c3aed' : isDanger ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.06)',
-        color: isPrimary ? '#ffffff' : isDanger ? '#ef4444' : '#e5e5e5',
-        border: isPrimary ? '1px solid #7c3aed' : '1px solid rgba(255,255,255,0.08)',
+        background: isPrimary ? '#e5e5e5' : isDanger ? 'rgba(239,68,68,0.12)' : 'rgba(255,255,255,0.06)',
+        color: isPrimary ? '#0f0f0f' : isDanger ? '#ef4444' : '#e5e5e5',
+        border: isPrimary ? '1px solid #e5e5e5' : '1px solid rgba(255,255,255,0.08)',
         borderRadius: 8,
     }
 
@@ -181,7 +214,7 @@ function MissionMessage({
                     <Bot size={15} />
                 </div>
             )}
-            <div className={`max-w-[82%] ${isUser ? 'items-end' : 'items-start'} flex flex-col gap-2`}>
+            <div className={`max-w-[86%] ${isUser ? 'items-end' : 'items-start'} flex flex-col gap-2`}>
                 <div
                     className="px-3 py-2.5 text-sm leading-5"
                     style={{
@@ -300,7 +333,7 @@ export function NexusFloatingChat() {
                         animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
                         exit={{ opacity: 0, y: 16, scale: 0.97, filter: 'blur(6px)' }}
                         transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
-                        className="fixed left-3 right-3 bottom-24 sm:left-auto sm:right-6 sm:bottom-24 sm:w-[420px] h-[min(680px,calc(100vh-120px))] overflow-hidden"
+                        className="fixed left-3 right-3 bottom-24 sm:left-auto sm:right-6 sm:bottom-24 sm:w-[520px] lg:w-[560px] h-[min(760px,calc(100vh-96px))] overflow-hidden"
                         style={{
                             background: '#0f0f0f',
                             border: '1px solid rgba(255,255,255,0.16)',
@@ -318,7 +351,7 @@ export function NexusFloatingChat() {
                         />
 
                         <div className="relative h-full flex flex-col">
-                            <header className="p-4 flex items-center justify-between gap-3" style={{ background: 'rgba(20,20,20,0.82)', backdropFilter: 'blur(16px) saturate(180%)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                            <header className="p-5 flex items-center justify-between gap-3" style={{ background: 'rgba(20,20,20,0.86)', backdropFilter: 'blur(16px) saturate(180%)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
                                 <div className="flex items-center gap-3 min-w-0">
                                     <AstronautHelmet compact />
                                     <div className="min-w-0">
@@ -339,7 +372,7 @@ export function NexusFloatingChat() {
                                 </div>
                             </header>
 
-                            <div className="relative flex-1 overflow-y-auto p-4 space-y-4">
+                            <div className="relative flex-1 overflow-y-auto p-5 space-y-4">
                                 <AnimatePresence initial={false}>
                                     {messages.map(message => (
                                         <MissionMessage key={message.id} message={message} onCommand={handleCommand} />
@@ -347,14 +380,14 @@ export function NexusFloatingChat() {
                                 </AnimatePresence>
                                 {isPending && (
                                     <div className="flex items-center gap-2 pl-11">
-                                        <Loader2 size={15} className="animate-spin" style={{ color: '#7c3aed' }} />
+                                        <Loader2 size={15} className="animate-spin" style={{ color: '#e5e5e5' }} />
                                         <span className="text-[11px] font-semibold" style={{ color: '#a3a3a3' }}>Calculando rota...</span>
                                     </div>
                                 )}
                                 <div ref={bottomRef} />
                             </div>
 
-                            <div className="relative px-4 pb-3">
+                            <div className="relative px-5 pb-3">
                                 <div className="flex gap-2 overflow-x-auto pb-2">
                                     {quickActions.map(action => (
                                         <button
@@ -370,7 +403,7 @@ export function NexusFloatingChat() {
                                 </div>
                             </div>
 
-                            <form onSubmit={handleSubmit} className="relative p-4 pt-0" style={{ background: 'rgba(15,15,15,0.86)', backdropFilter: 'blur(16px) saturate(180%)' }}>
+                            <form onSubmit={handleSubmit} className="relative p-5 pt-0" style={{ background: 'rgba(15,15,15,0.88)', backdropFilter: 'blur(16px) saturate(180%)' }}>
                                 <div className="flex items-end gap-2">
                                     <textarea
                                         value={input}
@@ -390,7 +423,7 @@ export function NexusFloatingChat() {
                                         type="submit"
                                         disabled={isPending || !input.trim()}
                                         className="w-11 h-11 shrink-0 flex items-center justify-center disabled:opacity-40 transition-transform hover:-translate-y-0.5"
-                                        style={{ background: '#7c3aed', color: '#ffffff', border: '1px solid #7c3aed', borderRadius: 8 }}
+                                        style={{ background: '#e5e5e5', color: '#0f0f0f', border: '1px solid #e5e5e5', borderRadius: 8 }}
                                         title="Enviar missao"
                                     >
                                         {isPending ? <Loader2 size={17} className="animate-spin" /> : <ArrowUp size={18} />}
@@ -406,19 +439,58 @@ export function NexusFloatingChat() {
                 type="button"
                 onClick={() => setIsOpen(current => !current)}
                 initial={{ opacity: 0, y: 16, filter: 'blur(8px)' }}
-                animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+                animate={{
+                    opacity: 1,
+                    y: 0,
+                    filter: 'blur(0px)',
+                    boxShadow: [
+                        'rgba(0,0,0,0.30) 0px 8px 24px 0px, rgba(255,255,255,0.04) 0px 0px 0px 0px',
+                        'rgba(0,0,0,0.34) 0px 12px 30px 0px, rgba(255,255,255,0.10) 0px 0px 0px 4px',
+                        'rgba(0,0,0,0.30) 0px 8px 24px 0px, rgba(255,255,255,0.04) 0px 0px 0px 0px',
+                    ],
+                }}
                 whileHover={{ y: -4 }}
-                transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
+                whileTap={{ scale: 0.97 }}
+                transition={{
+                    opacity: { duration: 0.42, ease: [0.16, 1, 0.3, 1] },
+                    filter: { duration: 0.42, ease: [0.16, 1, 0.3, 1] },
+                    y: { duration: 0.42, ease: [0.16, 1, 0.3, 1] },
+                    boxShadow: { duration: 3.4, repeat: Infinity, ease: 'easeInOut' },
+                }}
                 className="relative w-16 h-16 sm:w-[72px] sm:h-[72px] flex items-center justify-center"
                 style={{
                     background: '#141414',
                     border: '1px solid rgba(255,255,255,0.16)',
                     borderRadius: 20,
-                    boxShadow: 'rgba(0,0,0,0.30) 0px 8px 24px 0px',
                 }}
                 aria-label={isOpen ? 'Fechar chat Nexus' : 'Abrir chat Nexus'}
             >
-                <span className="absolute -top-2 -left-2 w-7 h-7 flex items-center justify-center" style={{ background: '#7c3aed', color: '#ffffff', borderRadius: 8, border: '1px solid rgba(255,255,255,0.16)' }}>
+                <motion.span
+                    aria-hidden="true"
+                    className="absolute"
+                    style={{
+                        inset: -4,
+                        border: '1px solid rgba(255,255,255,0.14)',
+                        borderRadius: 24,
+                    }}
+                    animate={{
+                        scale: [0.96, 1.06, 0.96],
+                        opacity: [0.22, 0.58, 0.22],
+                    }}
+                    transition={{ duration: 3.4, repeat: Infinity, ease: 'easeInOut' }}
+                />
+                <motion.span
+                    aria-hidden="true"
+                    className="absolute"
+                    style={{
+                        inset: 7,
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        borderRadius: 16,
+                    }}
+                    animate={{ rotate: [0, 360] }}
+                    transition={{ duration: 18, repeat: Infinity, ease: 'linear' }}
+                />
+                <span className="absolute -top-2 -left-2 w-7 h-7 flex items-center justify-center" style={{ background: '#e5e5e5', color: '#0f0f0f', borderRadius: 8, border: '1px solid rgba(255,255,255,0.16)' }}>
                     {isOpen ? <X size={15} /> : <Rocket size={15} />}
                 </span>
                 <AstronautHelmet />
@@ -427,7 +499,7 @@ export function NexusFloatingChat() {
                 </span>
                 {!isOpen && (
                     <span className="absolute right-1 top-1">
-                        <Sparkles size={13} style={{ color: '#7c3aed' }} />
+                        <Sparkles size={13} style={{ color: '#e5e5e5' }} />
                     </span>
                 )}
             </motion.button>
