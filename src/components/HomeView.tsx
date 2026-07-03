@@ -189,9 +189,6 @@ export function HomeView({
                             <h1 style={{ margin: 0, maxWidth: 760, color: C.inkDeep, fontFamily: 'var(--font-display)', fontSize: 'clamp(40px, 6vw, 76px)', lineHeight: 1.04, fontWeight: 700, letterSpacing: '-1px' }}>
                                 Controle de capturas, fila e evidencias em uma unica Home.
                             </h1>
-                            <p style={{ margin: '22px 0 0', maxWidth: 620, color: C.charcoal, fontSize: 16, lineHeight: 1.65 }}>
-                                Uma visao objetiva para saber se o Nexus esta trabalhando, onde existe risco e qual evidencia visual acabou de ser gerada.
-                            </p>
                         </div>
 
                         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
