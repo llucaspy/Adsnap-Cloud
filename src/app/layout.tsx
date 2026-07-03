@@ -39,7 +39,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-BR" className="dark">
-      <body className={`${interBody.variable} ${interDisplay.variable} ${jetbrainsMono.variable} font-sans flex min-h-screen`} style={{ fontFamily: 'var(--font-body)' }}>
+      <body className={`${interBody.variable} ${interDisplay.variable} ${jetbrainsMono.variable} font-sans flex min-h-screen flex-col`} style={{ fontFamily: 'var(--font-body)' }}>
         <ScrollEffects />
         <Sidebar />
         <main className="flex-1 overflow-auto" style={{ background: 'var(--bg-primary)' }}>

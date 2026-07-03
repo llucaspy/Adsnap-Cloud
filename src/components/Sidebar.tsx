@@ -1,10 +1,27 @@
 'use client'
 
-import { LayoutDashboard, Library, Archive, Settings, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database, MessageCircle, Menu, X, Landmark } from 'lucide-react'
+import {
+    Archive,
+    Database,
+    Landmark,
+    LayoutDashboard,
+    Library,
+    LogOut,
+    Menu,
+    Settings,
+    ShieldCheck,
+    X,
+} from 'lucide-react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { getStorageUsage } from '@/app/actions'
+
+type MenuItem = {
+    icon: typeof LayoutDashboard
+    label: string
+    href: string
+}
 
 function StorageMonitor() {
     const [usage, setUsage] = useState<{ used: number; limit: number; percentage: number; formattedUsed: string } | null>(null)
@@ -21,28 +38,47 @@ function StorageMonitor() {
 
     const isHighUsage = usage.percentage > 85
     const isCriticalUsage = usage.percentage > 95
+    const tone = isCriticalUsage ? '#d93025' : isHighUsage ? '#f9ab00' : '#188038'
 
     return (
-        <div className="px-4 py-4 rounded-xl bg-white/[0.04] border border-white/8 space-y-3 shadow-[rgba(0,0,0,0.30)_0px_8px_24px_0px]">
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                    <Database size={14} className={isCriticalUsage ? 'text-red-500' : isHighUsage ? 'text-orange-500' : 'text-white/50'} />
-                    <span className="text-[10px] font-black uppercase tracking-widest text-white/30">Storage</span>
+        <div className="hidden xl:flex min-w-[180px] items-center gap-3 rounded-[8px] border border-[#e8eaed] bg-[#f8fafd] px-3 py-2">
+            <Database size={15} style={{ color: tone }} />
+            <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-extrabold uppercase tracking-[0.08em] text-[#5f6368]">Storage</span>
+                    <span className="text-[11px] font-bold text-[#3c4043]">{usage.percentage.toFixed(1)}%</span>
                 </div>
-                <span className="text-[10px] font-bold text-white/50">{usage.percentage.toFixed(1)}%</span>
+                <div className="mt-1 h-1 overflow-hidden rounded-full bg-[#e8eaed]">
+                    <div className="h-full transition-all duration-700" style={{ width: `${usage.percentage}%`, background: tone }} />
+                </div>
             </div>
-
-            <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                <div
-                    className={`h-full transition-all duration-1000 ${isCriticalUsage ? 'bg-red-500' : isHighUsage ? 'bg-orange-500' : 'bg-[#e5e5e5]'}`}
-                    style={{ width: `${usage.percentage}%` }}
-                />
-            </div>
-
-            <p className="text-[9px] font-medium text-white/25 text-center">
-                {usage.formattedUsed} de 1024 MB usados
-            </p>
         </div>
+    )
+}
+
+function isActivePath(pathname: string, href: string) {
+    if (href === '/') return pathname === '/'
+    if (href === '/books') return pathname === '/books' || /^\/books\/(?!governo).+/.test(pathname)
+    return pathname === href || pathname.startsWith(`${href}/`)
+}
+
+function NavLink({ item, active, onClick }: { item: MenuItem; active: boolean; onClick?: () => void }) {
+    const Icon = item.icon
+
+    return (
+        <Link
+            href={item.href}
+            onClick={onClick}
+            className="group inline-flex h-10 items-center gap-2 rounded-[8px] px-3 text-[13px] font-bold transition-all"
+            style={{
+                background: active ? '#e8f0fe' : 'transparent',
+                color: active ? '#1a73e8' : '#3c4043',
+                border: active ? '1px solid #d2e3fc' : '1px solid transparent',
+            }}
+        >
+            <Icon size={16} className="transition-transform duration-200 group-hover:-translate-y-0.5" />
+            {item.label}
+        </Link>
     )
 }
 
@@ -73,7 +109,7 @@ export function Sidebar() {
         }
     }
 
-    const baseMenuItems = [
+    const baseMenuItems: MenuItem[] = [
         { icon: LayoutDashboard, label: 'Home', href: '/' },
         { icon: Library, label: 'Books', href: '/books' },
         { icon: Landmark, label: 'Gov Federal', href: '/books/governo' },
@@ -83,197 +119,92 @@ export function Sidebar() {
     const menuItems = user?.role === 'admin'
         ? [
             ...baseMenuItems,
-            { icon: ShieldCheck, label: 'Admin', href: '/admin' }
+            { icon: ShieldCheck, label: 'Admin', href: '/admin' },
         ]
         : baseMenuItems
 
     return (
-        <>
-            {/* Mobile Menu Toggle Button */}
-            <button
-                onClick={() => setIsOpen(true)}
-                className="lg:hidden fixed top-6 left-6 z-50 p-3 bg-white/5 border border-white/10 rounded-xl backdrop-blur-xl text-white hover:bg-white/10 transition-all shadow-2xl"
-            >
-                <Menu size={24} />
-            </button>
-
-            {/* Mobile Overlay */}
-            {isOpen && (
-                <div
-                    className="fixed inset-0 bg-black/60 backdrop-blur-sm z-60 lg:hidden animate-fade-in"
-                    onClick={() => setIsOpen(false)}
-                />
-            )}
-
-            <aside
-                className={`w-72 flex flex-col h-screen fixed inset-y-0 left-0 z-70 glass transition-transform duration-500 lg:sticky lg:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'
-                    }`}
-                style={{
-                    background: '#0f0f0f',
-                    borderRight: '1px solid rgba(255,255,255,0.08)'
-                }}
-            >
-                {/* Logo Area */}
-                <div
-                    className="p-6 space-y-5"
-                    style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}
-                >
-                    {/* Header with Close Button for Mobile */}
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center px-1">
-                            <span className="text-[11px] font-black uppercase tracking-[0.4em] text-white/50">
-                                Adsnap <span className="text-white/20">Cloud</span>
-                            </span>
-                        </div>
-                        <button
-                            onClick={() => setIsOpen(false)}
-                            className="lg:hidden p-2 text-white/30 hover:text-white transition-colors"
-                        >
-                            <X size={20} />
-                        </button>
+        <header
+            className="sticky top-0 z-70 border-b border-[#e8eaed] bg-white/95 backdrop-blur-xl"
+            style={{ boxShadow: 'rgba(60,64,67,0.10) 0px 1px 2px 0px' }}
+        >
+            <div className="flex min-h-[72px] items-center gap-4 px-4 md:px-8">
+                <Link href="/" className="flex min-w-0 items-center gap-3 no-underline" onClick={() => setIsOpen(false)}>
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] border border-[#d2e3fc] bg-[#e8f0fe] text-[#1a73e8]">
+                        <LayoutDashboard size={18} />
                     </div>
-
-                    {/* Workspace Card */}
-                    <div className="relative pt-4">
-                        {/* Floating Badge for Workplace Identification */}
-                        <div
-                            className="absolute -top-1 left-4 px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-[0.2em] z-20 shadow-xl flex items-center gap-2"
-                            style={{ background: 'rgba(255,255,255,0.16)', border: '1px solid rgba(255,255,255,0.35)', color: '#e5e5e5', boxShadow: '0 8px 20px rgba(0,0,0,0.35)' }}
-                        >
-                            <div className="w-1.5 h-1.5 rounded-full bg-[#e5e5e5] animate-pulse" />
-                            Client Workplace
-                        </div>
-
-                        <div className="rounded-xl p-4 flex flex-col items-center gap-3 shadow-[rgba(0,0,0,0.30)_0px_8px_24px_0px]" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                            <div className="w-full rounded-lg bg-white px-4 py-3 flex items-center justify-center">
-                                <img
-                                src="https://assets.metroimg.com/images/logo-maisacessado.gif"
-                                alt="Metrópoles"
-                                className="h-9 w-auto object-contain"
-                                />
-                            </div>
-                            <div className="h-px w-8 bg-white/10" />
-                            <span className="text-[10px] font-bold tracking-[0.15em] uppercase text-white/70">
-                                Metrópoles
-                            </span>
-                        </div>
+                    <div className="min-w-0">
+                        <p className="m-0 text-[10px] font-black uppercase tracking-[0.24em] text-[#5f6368]">Adsnap Cloud</p>
+                        <p className="m-0 truncate text-[14px] font-extrabold text-[#202124]">Metropoles Workspace</p>
                     </div>
-                </div>
+                </Link>
 
-                {/* Navigation */}
-                <nav className="flex-1 p-4 space-y-1 overflow-y-auto custom-scrollbar">
-                    {menuItems.map((item) => {
-                        const isActive = pathname === item.href
-                        return (
-                            <Link
-                                key={item.href}
-                                href={item.href}
-                                onClick={() => setIsOpen(false)}
-                                className="flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all duration-300 group relative overflow-hidden"
-                                style={{
-                                    background: isActive ? 'rgba(255,255,255,0.16)' : 'transparent',
-                                    border: isActive ? '1px solid rgba(255,255,255,0.28)' : '1px solid transparent',
-                                }}
-                            >
-                                <div
-                                    className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                                    style={{ background: 'rgba(255,255,255,0.10)' }}
-                                />
-
-                                <item.icon
-                                    size={20}
-                                    style={{
-                                        color: isActive ? '#f5f5f5' : '#737373',
-                                    }}
-                                    className="relative z-10 group-hover:scale-110 transition-transform duration-300"
-                                />
-                                <span
-                                    className="relative z-10 text-sm font-semibold transition-colors duration-300"
-                                    style={{
-                                        color: isActive ? '#ffffff' : '#a3a3a3',
-                                        fontFamily: 'var(--font-body)'
-                                    }}
-                                >
-                                    {item.label}
-                                </span>
-                                {isActive && (
-                                    <div
-                                        className="ml-auto w-2 h-2 rounded-full animate-pulse-glow relative z-10"
-                                        style={{ background: '#e5e5e5' }}
-                                    />
-                                )}
-                            </Link>
-                        )
-                    })}
+                <nav className="ml-2 hidden flex-1 items-center gap-1 lg:flex">
+                    {menuItems.map(item => (
+                        <NavLink
+                            key={item.href}
+                            item={item}
+                            active={isActivePath(pathname, item.href)}
+                        />
+                    ))}
                 </nav>
 
-                {/* Footer */}
-                <div
-                    className="p-4 space-y-3 mt-auto"
-                    style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}
-                >
+                <div className="ml-auto hidden items-center gap-2 lg:flex">
+                    {user?.role === 'admin' && <StorageMonitor />}
                     <Link
                         href="/settings"
-                        onClick={() => setIsOpen(false)}
-                        className="flex items-center gap-3 px-4 py-3 w-full rounded-xl transition-all group"
-                        style={{
-                            color: pathname === '/settings' ? '#ffffff' : '#737373',
-                            background: pathname === '/settings' ? 'rgba(255,255,255,0.16)' : 'transparent',
-                            border: pathname === '/settings' ? '1px solid rgba(255,255,255,0.28)' : '1px solid transparent',
-                        }}
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-[8px] border border-[#e8eaed] bg-white text-[#5f6368] transition-colors hover:bg-[#f8fafd] hover:text-[#202124]"
+                        aria-label="Configuracoes"
                     >
-                        <Settings size={18} className="group-hover:rotate-90 transition-transform duration-500" />
-                        <span className="text-[13px]">Configurações</span>
+                        <Settings size={17} />
                     </Link>
-
                     <button
                         onClick={handleLogout}
-                        className="flex items-center gap-3 px-4 py-3 w-full rounded-xl transition-all group hover:bg-red-500/10 text-white/30 hover:text-red-400"
-                        style={{ background: 'transparent' }}
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-[8px] border border-[#e8eaed] bg-white text-[#5f6368] transition-colors hover:bg-[#fce8e6] hover:text-[#d93025]"
+                        aria-label="Sair"
                     >
-                        <LogOut size={18} className="group-hover:-translate-x-1 transition-transform" />
-                        <span className="text-sm font-medium">Sair</span>
+                        <LogOut size={17} />
                     </button>
-
-                    {user?.role === 'admin' && <StorageMonitor />}
-
-                    {/* Developer Credits - Lucas Paim */}
-                    <div className="mt-6 p-px rounded-2xl relative overflow-hidden group transition-all duration-500 hover:shadow-[0_0_30px_rgba(255,255,255,0.08)] hidden lg:block">
-                        <div className="relative z-10 p-4 rounded-2xl bg-[#0a0a0a]/95 backdrop-blur-xl flex flex-col gap-4 border border-white/5">
-                            <div className="flex items-center gap-3">
-                                <div className="relative w-12 h-12 rounded-xl overflow-hidden group-hover:scale-105 transition-transform duration-500 shadow-2xl border border-white/10">
-                                    <img
-                                        src="https://images.metroimg.com/2026/02/foto-lucas-paim.png"
-                                        alt="Lucas Paim"
-                                        className="w-full h-full object-cover filter grayscale brightness-110 hover:grayscale-0 transition-all duration-700"
-                                    />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-[9px] font-black uppercase tracking-[0.25em] text-white/50 px-1.5 py-0.5 bg-white/5 rounded-sm">Desenvolvedor:</p>
-                                    <p className="text-base font-black truncate text-white tracking-tighter" style={{ fontFamily: 'var(--font-display)' }}>LUCAS PAIM</p>
-                                </div>
-                            </div>
-
-
-                            {/* Social Links Grid */}
-                            <div className="grid grid-cols-4 gap-2">
-                                <a href="https://github.com/llucaspy" target="_blank" rel="noopener noreferrer" className="flex items-center justify-center p-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/25 text-white/40 hover:text-white transition-all duration-300 shadow-lg">
-                                    <Github size={16} />
-                                </a>
-                                <a href="https://www.linkedin.com/in/lucas-mendon%C3%A7a-1296412b8" target="_blank" rel="noopener noreferrer" className="flex items-center justify-center p-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-blue-500/10 hover:border-blue-500/30 text-white/40 hover:text-blue-400 transition-all duration-300 shadow-lg">
-                                    <Linkedin size={16} />
-                                </a>
-                                <a href="https://wa.me/556191761606" target="_blank" rel="noopener noreferrer" className="flex items-center justify-center p-2.5 rounded-lg bg-green-500/5 border border-white/10 hover:bg-green-500/10 hover:border-green-500/30 text-white/40 hover:text-green-400 transition-all duration-300 shadow-lg">
-                                    <MessageCircle size={16} />
-                                </a>
-                                <a href="https://www.instagram.com/llucas.py/" target="_blank" rel="noopener noreferrer" className="flex items-center justify-center p-2.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/25 text-white/40 hover:text-white transition-all duration-300 shadow-lg">
-                                    <Instagram size={16} />
-                                </a>
-                            </div>
-                        </div>
-                    </div>
                 </div>
-            </aside>
-        </>
+
+                <button
+                    onClick={() => setIsOpen(open => !open)}
+                    className="ml-auto inline-flex h-10 w-10 items-center justify-center rounded-[8px] border border-[#e8eaed] bg-white text-[#202124] lg:hidden"
+                    aria-label="Menu"
+                >
+                    {isOpen ? <X size={20} /> : <Menu size={20} />}
+                </button>
+            </div>
+
+            {isOpen && (
+                <div className="border-t border-[#e8eaed] bg-white px-4 py-3 lg:hidden">
+                    <nav className="grid gap-1">
+                        {menuItems.map(item => (
+                            <NavLink
+                                key={item.href}
+                                item={item}
+                                active={isActivePath(pathname, item.href)}
+                                onClick={() => setIsOpen(false)}
+                            />
+                        ))}
+                        <Link
+                            href="/settings"
+                            onClick={() => setIsOpen(false)}
+                            className="inline-flex h-10 items-center gap-2 rounded-[8px] px-3 text-[13px] font-bold text-[#3c4043] no-underline"
+                        >
+                            <Settings size={16} />
+                            Configuracoes
+                        </Link>
+                        <button
+                            onClick={handleLogout}
+                            className="inline-flex h-10 items-center gap-2 rounded-[8px] px-3 text-left text-[13px] font-bold text-[#d93025]"
+                        >
+                            <LogOut size={16} />
+                            Sair
+                        </button>
+                    </nav>
+                </div>
+            )}
+        </header>
     )
 }

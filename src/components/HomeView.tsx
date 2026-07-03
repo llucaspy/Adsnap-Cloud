@@ -22,7 +22,6 @@ import {
     Search,
     ServerCog,
     ShieldCheck,
-    Sparkles,
     TimerReset,
     TrendingUp,
     type LucideIcon,
@@ -92,13 +91,12 @@ const C = {
     amberSoft: '#fef7e0',
     red: '#d93025',
     redSoft: '#fce8e6',
-    shadow: 'rgba(60,64,67,0.16) 0px 1px 3px 0px, rgba(60,64,67,0.08) 0px 4px 12px 0px',
-    shadowHover: 'rgba(60,64,67,0.18) 0px 8px 24px -8px, rgba(60,64,67,0.12) 0px 4px 12px 0px',
+    shadow: 'rgba(60,64,67,0.12) 0px 1px 2px 0px, rgba(60,64,67,0.08) 0px 1px 3px 1px',
+    shadowHover: 'rgba(60,64,67,0.16) 0px 8px 24px -12px, rgba(60,64,67,0.12) 0px 2px 6px 0px',
 }
 
 const GRID = {
-    hero: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))',
-    kpis: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))',
+    kpis: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))',
     panels: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))',
     captures: 'repeat(auto-fit, minmax(min(100%, 232px), 1fr))',
 }
@@ -225,9 +223,9 @@ export function HomeView({
 
                 .gam-home-inner {
                     width: 100%;
-                    max-width: 1360px;
-                    margin: 0 auto;
-                    padding: 72px 16px 72px;
+                    max-width: 1480px;
+                    margin: 0;
+                    padding: 24px 16px 72px;
                 }
 
                 @media (min-width: 768px) {
@@ -249,34 +247,22 @@ export function HomeView({
             >
                 <TopWorkspaceBar generatedAt={generatedAt} operationLabel={operationLabel} operationTone={operationTone} />
 
-                <section style={{ display: 'grid', gridTemplateColumns: GRID.hero, gap: 20, alignItems: 'stretch', marginTop: 20 }}>
-                    <motion.div variants={item}>
-                        <CommandCenter stats={stats} operationLabel={operationLabel} operationTone={operationTone} />
-                    </motion.div>
+                <WorkspaceOverview stats={stats} kpis={kpis} operationLabel={operationLabel} operationTone={operationTone} />
 
-                    <motion.aside variants={item}>
+                <RevealSection>
+                    <div style={{ display: 'grid', gridTemplateColumns: GRID.panels, gap: 20, alignItems: 'start' }}>
+                        <DeliveryPanel signals={queueSignals} />
                         <PulseCard
                             stats={stats}
                             activePrintTotal={activePrintTotal}
                             activePrintCampaigns={activePrintCampaigns}
                             operationTone={operationTone}
                         />
-                    </motion.aside>
-                </section>
-
-                <motion.section variants={container} initial="hidden" whileInView="show" viewport={{ once: true, amount: 0.18 }} style={{ marginTop: 20 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: GRID.kpis, gap: 12 }}>
-                        {kpis.map((kpi, index) => (
-                            <KpiCard key={kpi.label} {...kpi} index={index} />
-                        ))}
                     </div>
-                </motion.section>
+                </RevealSection>
 
                 <RevealSection>
-                    <div style={{ display: 'grid', gridTemplateColumns: GRID.panels, gap: 20, alignItems: 'start' }}>
-                        <DeliveryPanel signals={queueSignals} />
-                        <EventsPanel recentLogs={recentLogs} />
-                    </div>
+                    <EventsPanel recentLogs={recentLogs} />
                 </RevealSection>
 
                 <RevealSection bottom>
@@ -308,7 +294,7 @@ function TopWorkspaceBar({ generatedAt, operationLabel, operationTone }: { gener
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: C.muted, fontSize: 12, fontWeight: 600 }}>
                         <span>Home</span>
                         <ChevronRight size={14} />
-                        <span>Delivery workspace</span>
+                        <span>Operacao Nexus</span>
                     </div>
                     <strong style={{ display: 'block', marginTop: 2, color: C.text, fontSize: 18, fontWeight: 700, letterSpacing: '-0.2px' }}>
                         Adsnap Cloud
@@ -338,7 +324,17 @@ function ToolbarPill({ icon: Icon, label }: { icon: LucideIcon; label: string })
     )
 }
 
-function CommandCenter({ stats, operationLabel, operationTone }: { stats: HomeStats; operationLabel: string; operationTone: string }) {
+function WorkspaceOverview({
+    stats,
+    kpis,
+    operationLabel,
+    operationTone,
+}: {
+    stats: HomeStats
+    kpis: Array<{ label: string; value: string | number; hint: string; icon: LucideIcon; tone: string; bg: string }>
+    operationLabel: string
+    operationTone: string
+}) {
     const flow = [
         { label: 'Fila', value: stats.queued, tone: C.amber },
         { label: 'Worker', value: stats.processing, tone: C.blue },
@@ -347,53 +343,73 @@ function CommandCenter({ stats, operationLabel, operationTone }: { stats: HomeSt
     ]
 
     return (
-        <motion.article
+        <motion.section
+            variants={item}
             whileHover={{ y: -2 }}
             transition={{ duration: 0.22, ease }}
             style={{
-                minHeight: 324,
-                height: '100%',
+                marginTop: 20,
                 background: C.surface,
                 border: `1px solid ${C.borderSoft}`,
                 borderRadius: 12,
                 boxShadow: C.shadow,
                 overflow: 'hidden',
-                display: 'grid',
-                gridTemplateRows: 'auto 1fr auto',
             }}
         >
-            <div style={{ minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '0 18px', borderBottom: `1px solid ${C.borderSoft}`, background: C.surfaceTint }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: C.muted, fontSize: 11, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                    <Sparkles size={14} color={C.blue} />
-                    Workspace
-                </span>
-                <span style={{ color: operationTone, fontSize: 12, fontWeight: 800 }}>{operationLabel}</span>
-            </div>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 20, flexWrap: 'wrap', padding: '20px 24px 18px', borderBottom: `1px solid ${C.borderSoft}` }}>
+                <div style={{ minWidth: 0 }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minHeight: 28, padding: '0 10px', borderRadius: 8, background: operationTone === C.green ? C.greenSoft : C.amberSoft, color: operationTone, fontSize: 11, fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase', marginBottom: 10 }}>
+                        <span style={{ width: 7, height: 7, borderRadius: 999, background: operationTone }} />
+                        {operationLabel}
+                    </div>
+                    <h1 style={{ margin: 0, color: C.text, fontFamily: 'var(--font-display)', fontSize: 'clamp(24px, 2.4vw, 34px)', lineHeight: 1.15, fontWeight: 750, letterSpacing: '-0.6px' }}>
+                        Controle de capturas, fila e evidencias
+                    </h1>
+                    <p style={{ margin: '6px 0 0', maxWidth: 620, color: C.muted, fontSize: 13, lineHeight: 1.5, fontWeight: 600 }}>
+                        Operacao do Nexus em tempo real, com visao de entrega, riscos e evidencias recentes.
+                    </p>
+                </div>
 
-            <div style={{ padding: 24 }}>
-                <h1 style={{ margin: 0, maxWidth: 720, color: C.text, fontFamily: 'var(--font-display)', fontSize: 'clamp(32px, 4.2vw, 52px)', lineHeight: 1.08, fontWeight: 700, letterSpacing: '-1px' }}>
-                    Controle de capturas, fila e evidencias.
-                </h1>
-
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 24 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end' }}>
                     <ActionLink href="/monitoring" label="Monitoramento" icon={Activity} primary />
                     <ActionLink href="/workers" label="Workers" icon={ServerCog} />
                     <ActionLink href="/campaigns" label="Novo setup" icon={PlusCircle} />
                 </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', borderTop: `1px solid ${C.borderSoft}` }}>
+            <div style={{ display: 'grid', gridTemplateColumns: GRID.kpis, borderBottom: `1px solid ${C.borderSoft}` }}>
+                {kpis.map((kpi, index) => (
+                    <MetricCell key={kpi.label} {...kpi} isFirst={index === 0} />
+                ))}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(136px, 1fr))', background: C.surfaceTint }}>
                 {flow.map((point, index) => (
-                    <div key={point.label} style={{ padding: '16px 18px', borderLeft: index === 0 ? 'none' : `1px solid ${C.borderSoft}`, minWidth: 0 }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 8, color: C.muted, fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    <div key={point.label} style={{ padding: '12px 18px', borderLeft: index === 0 ? 'none' : `1px solid ${C.borderSoft}`, minWidth: 0 }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 8, color: C.muted, fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                             <span style={{ width: 8, height: 8, borderRadius: 999, background: point.tone }} />
                             {point.label}
                         </span>
-                        <strong style={{ display: 'block', marginTop: 8, color: C.text, fontSize: 24, lineHeight: 1, fontWeight: 800 }}>{point.value}</strong>
+                        <strong style={{ display: 'block', marginTop: 7, color: C.text, fontSize: 20, lineHeight: 1, fontWeight: 800 }}>{point.value}</strong>
                     </div>
                 ))}
             </div>
-        </motion.article>
+        </motion.section>
+    )
+}
+
+function MetricCell({ label, value, hint, icon: Icon, tone, bg, isFirst }: { label: string; value: string | number; hint: string; icon: LucideIcon; tone: string; bg: string; isFirst: boolean }) {
+    return (
+        <div style={{ minHeight: 104, padding: 18, borderLeft: isFirst ? 'none' : `1px solid ${C.borderSoft}`, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 34px', gap: 12, alignItems: 'start' }}>
+            <div style={{ minWidth: 0 }}>
+                <span style={{ display: 'block', color: C.muted, fontSize: 10, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{label}</span>
+                <strong style={{ display: 'block', marginTop: 10, color: C.text, fontSize: 28, lineHeight: 1, fontWeight: 800, letterSpacing: '-0.4px' }}>{value}</strong>
+                <span style={{ display: 'block', marginTop: 8, color: C.muted, fontSize: 12, lineHeight: 1.35, fontWeight: 600 }}>{hint}</span>
+            </div>
+            <span style={{ width: 34, height: 34, borderRadius: 8, display: 'grid', placeItems: 'center', color: tone, background: bg }}>
+                <Icon size={17} />
+            </span>
+        </div>
     )
 }
 
@@ -451,20 +467,26 @@ function PulseCard({
                 overflow: 'hidden',
             }}
         >
-            <div style={{ minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '0 18px', borderBottom: `1px solid ${C.borderSoft}`, background: C.surfaceTint }}>
-                <span style={{ color: C.muted, fontSize: 11, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Pulso do Nexus</span>
-                <CheckCircle2 size={18} color={operationTone} />
+            <div style={{ minHeight: 56, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '0 18px', borderBottom: `1px solid ${C.borderSoft}`, background: C.surfaceTint }}>
+                <div>
+                    <p style={{ margin: 0, color: C.muted, fontSize: 10, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Operacao Nexus</p>
+                    <h2 style={{ margin: '3px 0 0', color: C.text, fontSize: 18, fontWeight: 750, letterSpacing: '-0.2px' }}>Pulso do Nexus</h2>
+                </div>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minHeight: 28, padding: '0 10px', borderRadius: 999, background: operationTone === C.green ? C.greenSoft : C.amberSoft, color: operationTone, fontSize: 11, fontWeight: 800 }}>
+                    <CheckCircle2 size={14} />
+                    {stats.successRate}%
+                </span>
             </div>
 
             <div style={{ padding: 18 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10, marginBottom: 18 }}>
-                    <MiniMetric label="Sucesso" value={`${stats.successRate}%`} tone={stats.successRate >= 95 ? C.green : C.amber} />
-                    <MiniMetric label="Capturando" value={stats.processing} tone={stats.processing > 0 ? C.blue : C.muted} />
-                    <MiniMetric label="Em fila" value={stats.queued} tone={stats.queued > 0 ? C.amber : C.muted} />
-                    <MiniMetric label="Quarentena" value={stats.quarantined} tone={stats.quarantined > 0 ? C.red : C.muted} />
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 0, border: `1px solid ${C.borderSoft}`, borderRadius: 10, overflow: 'hidden', marginBottom: 16 }}>
+                    <PulseStat label="Fila" value={stats.queued} tone={stats.queued > 0 ? C.amber : C.muted} />
+                    <PulseStat label="Execucao" value={stats.processing} tone={stats.processing > 0 ? C.blue : C.muted} divided />
+                    <PulseStat label="Quarentena" value={stats.quarantined} tone={stats.quarantined > 0 ? C.red : C.muted} divided />
+                    <PulseStat label="Erros" value={stats.failedJobs} tone={stats.failedJobs > 0 ? C.red : C.muted} divided />
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', gap: 12, paddingTop: 16, borderTop: `1px solid ${C.borderSoft}`, marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'end', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
                     <div>
                         <p style={{ margin: 0, color: C.muted, fontSize: 11, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Prints atuais</p>
                         <strong style={{ display: 'block', marginTop: 4, color: C.text, fontSize: 16, fontWeight: 800 }}>Campanhas ativas</strong>
@@ -472,9 +494,9 @@ function PulseCard({
                     <span style={{ color: C.text, fontSize: 26, lineHeight: 1, fontWeight: 800 }}>{activePrintTotal}</span>
                 </div>
 
-                <div style={{ display: 'grid', gap: 0, maxHeight: 210, overflowY: 'auto', paddingRight: 2 }}>
+                <div style={{ display: 'grid', gap: 0, maxHeight: 252, overflowY: 'auto', borderTop: `1px solid ${C.borderSoft}` }}>
                     {activePrintCampaigns.length === 0 && (
-                        <div style={{ minHeight: 56, display: 'flex', alignItems: 'center', color: C.muted, fontSize: 12, fontWeight: 700, borderTop: `1px solid ${C.borderSoft}` }}>
+                        <div style={{ minHeight: 64, display: 'flex', alignItems: 'center', color: C.muted, fontSize: 12, fontWeight: 700 }}>
                             Nenhuma campanha em captura agora
                         </div>
                     )}
@@ -492,11 +514,11 @@ function PulseCard({
     )
 }
 
-function MiniMetric({ label, value, tone }: { label: string; value: string | number; tone: string }) {
+function PulseStat({ label, value, tone, divided = false }: { label: string; value: string | number; tone: string; divided?: boolean }) {
     return (
-        <div style={{ minHeight: 72, borderRadius: 10, border: `1px solid ${C.borderSoft}`, background: C.surfaceTint, padding: 12 }}>
-            <span style={{ display: 'block', color: C.muted, fontSize: 11, fontWeight: 800 }}>{label}</span>
-            <strong style={{ display: 'block', marginTop: 8, color: tone, fontSize: 22, lineHeight: 1, fontWeight: 800 }}>{value}</strong>
+        <div style={{ minHeight: 62, background: C.surfaceTint, padding: 10, borderLeft: divided ? `1px solid ${C.borderSoft}` : 'none' }}>
+            <span style={{ display: 'block', color: C.muted, fontSize: 10, fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{label}</span>
+            <strong style={{ display: 'block', marginTop: 7, color: tone, fontSize: 20, lineHeight: 1, fontWeight: 800 }}>{value}</strong>
         </div>
     )
 }
@@ -531,39 +553,6 @@ function ActivePrintRow({ campaign }: { campaign: ActivePrintCampaign }) {
     )
 }
 
-function KpiCard({ label, value, hint, icon: Icon, tone, bg, index }: { label: string; value: string | number; hint: string; icon: LucideIcon; tone: string; bg: string; index: number }) {
-    return (
-        <motion.article
-            variants={item}
-            custom={index}
-            whileHover={{ y: -4, boxShadow: C.shadowHover }}
-            transition={{ duration: 0.22, ease }}
-            style={{
-                minHeight: 142,
-                padding: 18,
-                background: C.surface,
-                border: `1px solid ${C.borderSoft}`,
-                borderRadius: 12,
-                boxShadow: C.shadow,
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-            }}
-        >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                <span style={{ color: C.muted, fontSize: 11, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{label}</span>
-                <span style={{ width: 34, height: 34, borderRadius: 8, display: 'grid', placeItems: 'center', color: tone, background: bg }}>
-                    <Icon size={17} />
-                </span>
-            </div>
-            <div>
-                <strong style={{ display: 'block', color: C.text, fontSize: 34, lineHeight: 1, fontWeight: 800, letterSpacing: '-0.6px' }}>{value}</strong>
-                <span style={{ display: 'block', marginTop: 9, color: C.muted, fontSize: 12, fontWeight: 700 }}>{hint}</span>
-            </div>
-        </motion.article>
-    )
-}
-
 function RevealSection({ children, bottom = false }: { children: ReactNode; bottom?: boolean }) {
     return (
         <motion.section
@@ -580,7 +569,7 @@ function RevealSection({ children, bottom = false }: { children: ReactNode; bott
 
 function DeliveryPanel({ signals }: { signals: Array<{ label: string; value: number; hint: string; icon: LucideIcon; tone: string; bg: string }> }) {
     return (
-        <Panel title="Delivery overview" subtitle="Status do ciclo atual" icon={TrendingUp}>
+        <Panel title="Visao de entrega" subtitle="Status do ciclo atual" icon={TrendingUp}>
             <div style={{ display: 'grid', gap: 0 }}>
                 {signals.map((signal, index) => (
                     <SignalRow key={signal.label} signal={signal} isFirst={index === 0} />
