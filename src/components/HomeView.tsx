@@ -62,10 +62,10 @@ type ActivePrintCampaign = {
     pi: string
     client: string
     campaignName: string
-    format: string
-    formatLabel: string
-    device: string
     status: string
+    formatCount: number
+    formatSummary: string
+    deviceSummary: string
 }
 
 const C = {
@@ -428,9 +428,10 @@ function PulseRow({ label, value, tone }: { label: string; value: string | numbe
 
 function ActivePrintRow({ campaign }: { campaign: ActivePrintCampaign }) {
     const meta = printStatusMeta(campaign.status)
+    const formatCountLabel = `${campaign.formatCount} formato${campaign.formatCount === 1 ? '' : 's'}`
 
     return (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 12, alignItems: 'center', minHeight: 58, borderTop: `1px solid ${C.hairline}` }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 12, alignItems: 'center', minHeight: 68, borderTop: `1px solid ${C.hairline}` }}>
             <div style={{ minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                     <span style={{ width: 7, height: 7, borderRadius: 999, background: meta.tone, boxShadow: `0 0 0 3px ${meta.tone}22`, flex: '0 0 auto' }} />
@@ -439,7 +440,10 @@ function ActivePrintRow({ campaign }: { campaign: ActivePrintCampaign }) {
                     </strong>
                 </div>
                 <span style={{ display: 'block', marginTop: 5, color: C.slate, fontSize: 11, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    PI {campaign.pi} - {campaign.formatLabel} - {campaign.device}
+                    PI {campaign.pi} - {formatCountLabel} - {campaign.deviceSummary}
+                </span>
+                <span style={{ display: 'block', marginTop: 3, color: C.muted, fontSize: 10, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {campaign.formatSummary}
                 </span>
             </div>
             <span style={{ color: meta.tone, fontSize: 10, fontWeight: 900, letterSpacing: '0.08em', textTransform: 'uppercase' }}>

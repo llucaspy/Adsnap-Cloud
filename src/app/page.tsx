@@ -18,6 +18,106 @@ function getBrazilDateAnchor() {
   return new Date(Date.UTC(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate()))
 }
 
+type ActivePrintSource = {
+  id: string
+  pi: string
+  client: string
+  campaignName: string
+  format: string
+  device: string
+  status: string
+  updatedAt: Date
+}
+
+const printStatusPriority: Record<string, number> = {
+  PROCESSING: 0,
+  QUEUED: 1,
+  AUTOCONFIG: 2,
+  ACTIVE: 3,
+  SUCCESS: 4,
+  PENDING: 5,
+}
+
+function activeCampaignGroupKey(campaign: ActivePrintSource) {
+  return [
+    campaign.pi.trim(),
+    campaign.client.trim().toLowerCase(),
+    campaign.campaignName.trim().toLowerCase(),
+  ].join('|')
+}
+
+function summarizeFormats(labels: string[]) {
+  const visible = labels.slice(0, 3).join(', ')
+  const remaining = labels.length - 3
+  return remaining > 0 ? `${visible} +${remaining}` : visible
+}
+
+function groupActivePrintCampaigns(campaigns: ActivePrintSource[], formatLabelMap: Map<string, string>) {
+  const groups = new Map<string, {
+    id: string
+    pi: string
+    client: string
+    campaignName: string
+    status: string
+    updatedAt: Date
+    formats: Map<string, string>
+    devices: Set<string>
+  }>()
+
+  for (const campaign of campaigns) {
+    const key = activeCampaignGroupKey(campaign)
+    const formatLabel = resolveFormatLabel(formatLabelMap, campaign.format)
+    const formatKey = `${formatLabel}|${campaign.device}`
+    const existing = groups.get(key)
+
+    if (!existing) {
+      groups.set(key, {
+        id: campaign.id,
+        pi: campaign.pi,
+        client: campaign.client,
+        campaignName: campaign.campaignName,
+        status: campaign.status,
+        updatedAt: campaign.updatedAt,
+        formats: new Map([[formatKey, formatLabel]]),
+        devices: new Set([campaign.device]),
+      })
+      continue
+    }
+
+    existing.formats.set(formatKey, formatLabel)
+    existing.devices.add(campaign.device)
+
+    if ((printStatusPriority[campaign.status] ?? 9) < (printStatusPriority[existing.status] ?? 9)) {
+      existing.status = campaign.status
+    }
+
+    if (campaign.updatedAt > existing.updatedAt) {
+      existing.updatedAt = campaign.updatedAt
+    }
+  }
+
+  return Array.from(groups.values())
+    .sort((a, b) =>
+      (printStatusPriority[a.status] ?? 9) - (printStatusPriority[b.status] ?? 9)
+      || b.updatedAt.getTime() - a.updatedAt.getTime()
+    )
+    .map(group => {
+      const formatLabels = Array.from(new Set(group.formats.values()))
+      const devices = Array.from(group.devices).filter(Boolean).sort()
+
+      return {
+        id: group.id,
+        pi: group.pi,
+        client: group.client,
+        campaignName: group.campaignName,
+        status: group.status,
+        formatCount: group.formats.size,
+        formatSummary: summarizeFormats(formatLabels),
+        deviceSummary: devices.join(' / ') || 'device',
+      }
+    })
+}
+
 export default async function HomePage() {
   const brtStart = getBrazilDayStart()
   const brtDateAnchor = getBrazilDateAnchor()
@@ -48,7 +148,6 @@ export default async function HomePage() {
     failedJobs,
     queuedCampaigns,
     processingCampaigns,
-    activePrintCampaignTotal,
     activePrintCampaigns,
   ] = await Promise.all([
     getFormatLabelMap(),
@@ -71,10 +170,8 @@ export default async function HomePage() {
     prisma.workerJob.count({ where: { status: { in: ['FAILED', 'ERROR'] } } }).catch(() => 0),
     prisma.campaign.count({ where: { status: { in: ['QUEUED', 'AUTOCONFIG'] }, isArchived: false } }).catch(() => 0),
     prisma.campaign.count({ where: { status: 'PROCESSING', isArchived: false } }).catch(() => 0),
-    prisma.campaign.count({ where: activePrintCampaignWhere }).catch(() => 0),
     prisma.campaign.findMany({
       where: activePrintCampaignWhere,
-      take: 20,
       orderBy: { updatedAt: 'desc' },
       select: {
         id: true,
@@ -84,6 +181,7 @@ export default async function HomePage() {
         format: true,
         device: true,
         status: true,
+        updatedAt: true,
       },
     }).catch(() => []),
   ])
@@ -93,6 +191,7 @@ export default async function HomePage() {
   const successRate = totalToday + failedToday > 0
     ? Math.round((totalToday / (totalToday + failedToday)) * 100)
     : 100
+  const activePrintCampaignGroups = groupActivePrintCampaigns(activePrintCampaigns, formatLabelMap)
 
   return (
     <HomeView
@@ -128,23 +227,8 @@ export default async function HomePage() {
         message: log.message,
         createdAt: log.createdAt.toISOString(),
       }))}
-      activePrintTotal={activePrintCampaignTotal}
-      activePrintCampaigns={activePrintCampaigns
-        .slice()
-        .sort((a, b) => {
-          const priority: Record<string, number> = { PROCESSING: 0, QUEUED: 1, AUTOCONFIG: 2, ACTIVE: 3, SUCCESS: 4, PENDING: 5 }
-          return (priority[a.status] ?? 9) - (priority[b.status] ?? 9)
-        })
-        .map(campaign => ({
-        id: campaign.id,
-        pi: campaign.pi,
-        client: campaign.client,
-        campaignName: campaign.campaignName,
-        format: campaign.format,
-        formatLabel: resolveFormatLabel(formatLabelMap, campaign.format),
-        device: campaign.device,
-        status: campaign.status,
-      }))}
+      activePrintTotal={activePrintCampaignGroups.length}
+      activePrintCampaigns={activePrintCampaignGroups.slice(0, 20)}
     />
   )
 }
