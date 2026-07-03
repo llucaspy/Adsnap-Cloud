@@ -1,6 +1,6 @@
 'use client'
 
-import { LayoutDashboard, Activity, PlusCircle, Library, Archive, Settings, Sparkles, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database, MessageCircle, Menu, X, ServerCog, Landmark } from 'lucide-react'
+import { LayoutDashboard, Activity, PlusCircle, Library, Archive, Settings, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database, MessageCircle, Menu, X, ServerCog, Landmark } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
@@ -74,8 +74,7 @@ export function Sidebar() {
     }
 
     const baseMenuItems = [
-        { icon: Sparkles, label: 'Nexus Zero', href: '/' },
-        { icon: LayoutDashboard, label: 'Resumo', href: '/dashboard' },
+        { icon: LayoutDashboard, label: 'Home', href: '/' },
         { icon: Activity, label: 'Monitoramento', href: '/monitoring' },
         { icon: ServerCog, label: 'Workers', href: '/workers' },
         { icon: PlusCircle, label: 'Novo Setup', href: '/campaigns' },
