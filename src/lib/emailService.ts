@@ -49,7 +49,7 @@ interface EmailCampaignRow {
     printCount: number
 }
 
-async function getSmtpConfig() {
+export async function getSmtpConfig() {
     const secretRows = (!process.env.SMTP_USER || !process.env.SMTP_PASS || !process.env.SMTP_FROM)
         ? await prisma.nexusSecrets.findMany({
             where: { name: { in: ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM'] } },

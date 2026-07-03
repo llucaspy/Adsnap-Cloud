@@ -1,6 +1,6 @@
 'use client'
 
-import { LayoutDashboard, Library, Archive, Settings, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database, MessageCircle, Menu, X, Landmark } from 'lucide-react'
+import { LayoutDashboard, Library, Archive, Settings, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database, MessageCircle, Menu, X, Landmark, Bot } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
@@ -75,6 +75,7 @@ export function Sidebar() {
 
     const baseMenuItems = [
         { icon: LayoutDashboard, label: 'Home', href: '/' },
+        { icon: Bot, label: 'Nexus', href: '/nexus' },
         { icon: Library, label: 'Books', href: '/books' },
         { icon: Landmark, label: 'Gov Federal', href: '/books/governo' },
         { icon: Archive, label: 'Arquivado', href: '/archive' },

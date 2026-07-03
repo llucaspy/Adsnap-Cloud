@@ -11,7 +11,6 @@ import {
 } from 'lucide-react'
 import { getAdminMetrics } from '@/app/actions'
 import { TelegramStatusCard } from './TelegramStatusCard'
-import { NexusHealthCard } from './NexusHealthCard'
 
 export function MetricsDashboard() {
     const [metrics, setMetrics] = useState<any>(null)
@@ -64,7 +63,7 @@ export function MetricsDashboard() {
             </div>
 
             {/* Metrics Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-start">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
 
                 {/* Supabase Storage */}
                 <MetricCard
@@ -99,14 +98,6 @@ export function MetricsDashboard() {
                     description="Reset à meia-noite"
                 />
 
-                {/* Nexus AI Health Card (Unified Gemini + Nexus Monitoring) */}
-                <div className="md:col-span-2 lg:col-span-1">
-                    <NexusHealthCard 
-                        data={metrics.nexus} 
-                        gemini={metrics.gemini}
-                        onRefreshRequest={fetchMetrics}
-                    />
-                </div>
             </div>
 
             {/* Telegram Bot Status */}

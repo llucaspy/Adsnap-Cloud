@@ -184,16 +184,6 @@ model EmailDispatch {
   @@index([status, isActive, flightEnd])
 }
 
-model NexusMessage {
-  id          String   @id @default(dbgenerated("(gen_random_uuid())::text"))
-  role        String
-  content     String
-  metadata    Json?    @default("{}")
-  sessionId   String   @default("default")
-  isProcessed Boolean? @default(false)
-  createdAt   DateTime @default(now())
-}
-
 model DailyMetric {
   id          String   @id @default(cuid())
   campaignId  String

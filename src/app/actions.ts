@@ -1194,95 +1194,7 @@ export async function getAdminMetrics() {
             }
         }
 
-        // 5. Gemini AI Status
-        let geminiStatus = {
-            isActive: false,
-            isRateLimited: false,
-            tier: 'free' as string,
-            modelsAvailable: 0,
-            error: null as string | null,
-            retryAfter: null as string | null
-        }
-
-        const geminiKey = process.env.GEMINI_API_KEY
-        if (geminiKey) {
-            try {
-                // Check key validity by listing models
-                const modelsRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${geminiKey}`, {
-                    signal: AbortSignal.timeout(10000)
-                })
-                if (modelsRes.ok) {
-                    const modelsData = await modelsRes.json()
-                    geminiStatus.isActive = true
-                    geminiStatus.modelsAvailable = modelsData.models?.length || 0
-                }
-
-                // Quick generation test to check rate limits - using 1.5-flash which is more stable for Free Tier
-                const testRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ contents: [{ parts: [{ text: 'OK' }] }] }),
-                    signal: AbortSignal.timeout(10000)
-                })
-
-                if (testRes.status === 429) {
-                    geminiStatus.isRateLimited = true
-                    const errData = await testRes.json()
-                    const retryInfo = errData.error?.details?.find((d: any) => d.retryDelay)
-                    geminiStatus.retryAfter = retryInfo?.retryDelay || null
-                } else if (!testRes.ok) {
-                    const errData = await testRes.json().catch(() => ({}))
-                    geminiStatus.error = errData.error?.message || `Status ${testRes.status}`
-                    // If it's a "limit: 0" error, it's effectively a blocked model, not necessarily a global rate limit
-                }
-            } catch (err) {
-                geminiStatus.error = err instanceof Error ? err.message : 'Timeout'
-            }
-        } else {
-            geminiStatus.error = 'GEMINI_API_KEY não configurada'
-        }
-
-        // 6. Nexus Message Logs & Healthy (New)
-        let nexusHealth = {
-            totalMessages: 0,
-            errors24h: 0,
-            lastMessageAt: null as Date | null,
-            recentErrors: [] as any[]
-        }
-
-        try {
-            const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000)
-            
-            // Raw query to include NexusMessage table which might not be in Prisma schema yet
-            const nexusStats = await (prisma as any).$queryRawUnsafe(`
-                SELECT 
-                    COUNT(*) as total,
-                    COUNT(*) FILTER (WHERE metadata->>'error' = 'true') as errors_24h,
-                    MAX("createdAt") as last_msg
-                FROM "NexusMessage"
-                WHERE "createdAt" >= $1
-            `, yesterday) as any[]
-
-            if (nexusStats[0]) {
-                nexusHealth.totalMessages = Number(nexusStats[0].total || 0)
-                nexusHealth.errors24h = Number(nexusStats[0].errors_24h || 0)
-                nexusHealth.lastMessageAt = nexusStats[0].last_msg ? new Date(nexusStats[0].last_msg) : null
-            }
-
-            // Get last 5 actual errors
-            nexusHealth.recentErrors = await (prisma as any).$queryRawUnsafe(`
-                SELECT content, metadata, "createdAt"
-                FROM "NexusMessage"
-                WHERE metadata->>'error' = 'true'
-                ORDER BY "createdAt" DESC
-                LIMIT 5
-            `) as any[]
-
-        } catch (err) {
-            console.error('[Actions] Nexus health check failed:', err)
-        }
-
-        // 7. Storage Health
+        // 5. Storage Health
         const lastRun = settings?.storageCheckLastRun
 
         return {
@@ -1306,8 +1218,6 @@ export async function getAdminMetrics() {
                 percentage: (dailyEmails / 100) * 100
             },
             telegram: telegramStatus,
-            gemini: geminiStatus,
-            nexus: nexusHealth,
             health: {
                 lastRun: lastRun,
                 isHealthy: lastRun ? (new Date().getTime() - lastRun.getTime() < 24 * 60 * 60 * 1000) : false
@@ -1353,41 +1263,6 @@ export async function getLatestCaptureId(campaignId: string) {
     } catch (error) {
         console.error('[Actions] Failed to get latest capture:', error);
         return null;
-    }
-}
-
-export async function testNexusConnection() {
-    try {
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-        if (!supabaseUrl) throw new Error('Supabase URL missing')
-
-        const start = Date.now()
-        const response = await fetch(`${supabaseUrl}/functions/v1/nexus-chat`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                message: "Teste de conexão administrativa.",
-                sessionId: "admin-health-check-" + Date.now()
-            }),
-            signal: AbortSignal.timeout(30000)
-        })
-
-        const data = await response.json()
-        const duration = Date.now() - start
-
-        return {
-            success: response.ok && data.success,
-            status: response.status,
-            message: data.message || data.error || 'Sem resposta',
-            latency: duration,
-            model: data.model || 'unknown'
-        }
-    } catch (err) {
-        return {
-            success: false,
-            message: err instanceof Error ? err.message : 'Falha desconhecida',
-            latency: 0
-        }
     }
 }
 
@@ -1743,110 +1618,4 @@ export async function simulateMonthlyCleanup() {
     }
 }
 
-/**
- * Permanently deletes campaigns and all associated captures (DB + Storage).
- */
-export async function deleteCampaignsAction(ids: string[]) {
-    if (!ids || ids.length === 0) return { success: false, error: 'Nenhum ID fornecido' }
-
-    try {
-        // 1. Get all capture screenshot paths for these campaigns
-        const captures = await prisma.capture.findMany({
-            where: { campaignId: { in: ids } },
-            select: { screenshotPath: true }
-        })
-
-        // 2. Extract relative paths and delete from Supabase
-        const { getSupabase } = await import('@/lib/supabase')
-        const sb = getSupabase()
-        
-        const storagePaths = captures
-            .map(c => {
-                const parts = c.screenshotPath.split('/public/screenshots/')
-                return parts.length > 1 ? parts[1] : null
-            })
-            .filter(Boolean) as string[]
-
-        if (storagePaths.length > 0) {
-            // Supabase remove can take up to 1000 paths at once
-            await sb.storage.from('screenshots').remove(storagePaths)
-        }
-
-        // 3. Delete campaigns (captures will cascade delete due to schema)
-        await prisma.campaign.deleteMany({
-            where: { id: { in: ids } }
-        })
-
-        // 4. Log the audit trail
-        nexusLogStore.addLog(`Nexus: ${ids.length} campanhas e seus prints foram excluídos permanentemente via chat.`, 'SYSTEM')
-        
-        revalidatePath('/')
-        revalidatePath('/monitoring')
-        return { success: true }
-    } catch (error) {
-        console.error('[Actions] Delete campaigns error:', error)
-        return { success: false, error: String(error) }
-    }
-}
-
-/**
- * Deletes specific prints (captures) for selected campaigns on selected dates.
- */
-export async function deletePrintsAction(campaignIds: string[], dates: string[]) {
-    if (!campaignIds.length || !dates.length) return { success: false, error: 'Seleção incompleta' }
-
-    try {
-        // 1. Find captures for these campaigns on these specific dates
-        // Dates come as YYYY-MM-DD
-        const captures = await prisma.capture.findMany({
-            where: {
-                campaignId: { in: campaignIds },
-                OR: dates.map(date => {
-                    const start = new Date(date)
-                    start.setUTCHours(0,0,0,0)
-                    const end = new Date(date)
-                    end.setUTCHours(23,59,59,999)
-                    return {
-                        createdAt: { gte: start, lte: end }
-                    }
-                })
-            },
-            select: { id: true, screenshotPath: true }
-        })
-
-        if (captures.length === 0) {
-            return { success: true, count: 0, message: 'Nenhum print encontrado nestas datas.' }
-        }
-
-        // 2. Extract relative paths and delete from Supabase
-        const { getSupabase } = await import('@/lib/supabase')
-        const sb = getSupabase()
-        
-        const storagePaths = captures
-            .map(c => {
-                const parts = c.screenshotPath.split('/public/screenshots/')
-                return parts.length > 1 ? parts[1] : null
-            })
-            .filter(Boolean) as string[]
-
-        if (storagePaths.length > 0) {
-            await sb.storage.from('screenshots').remove(storagePaths)
-        }
-
-        // 3. Delete capture records from Prisma
-        await prisma.capture.deleteMany({
-            where: { id: { in: captures.map(c => c.id) } }
-        })
-
-        // 4. Update parent campaigns' lastCaptureAt if necessary (optional improvement)
-        
-        nexusLogStore.addLog(`Nexus: ${captures.length} prints de ${dates.length} datas foram excluídos via chat.`, 'SYSTEM')
-        
-        revalidatePath('/')
-        return { success: true, count: captures.length }
-    } catch (error) {
-        console.error('[Actions] Delete prints error:', error)
-        return { success: false, error: String(error) }
-    }
-}
 
