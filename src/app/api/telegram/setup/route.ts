@@ -1,15 +1,12 @@
 import { NextResponse } from 'next/server'
 
+const DEFAULT_APP_URL = 'https://adsnap-cloud.vercel.app'
+
 function appUrl() {
-    const explicit = process.env.NEXT_PUBLIC_APP_URL?.trim()
+    const explicit = (process.env.TELEGRAM_APP_URL || process.env.NEXT_PUBLIC_APP_URL)?.trim()
     if (explicit) return explicit.replace(/\/$/, '')
 
-    const vercelUrl = process.env.VERCEL_URL?.trim()
-    if (vercelUrl) {
-        return (vercelUrl.startsWith('http') ? vercelUrl : `https://${vercelUrl}`).replace(/\/$/, '')
-    }
-
-    return ''
+    return DEFAULT_APP_URL
 }
 
 export async function GET() {
