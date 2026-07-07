@@ -8,6 +8,7 @@ import type { GamImportWriteResult } from '@/lib/gamImportWriter'
 import { triggerGamWorker, triggerNexusWorker } from '@/app/actions'
 import { enqueueCaptureJobs } from '@/lib/workerJobs'
 import { getFormatLabelMap, resolveFormatLabel } from '@/lib/formatLabels'
+import { GAM_AUTH_REQUIRED_LEVEL, GAM_JOB_LEVELS } from '@/lib/gamJobStatus'
 
 type NexusOrderDetails = Partial<GamImportDraft> & {
     orderUrl?: string
@@ -20,6 +21,7 @@ type NexusOrderDetails = Partial<GamImportDraft> & {
         telegram?: boolean
         email?: boolean
     }
+    authWorkflowUrl?: string
     executionLogs?: Array<{ at: string; message: string; tone: 'info' | 'success' | 'error' }>
 }
 
@@ -123,7 +125,7 @@ export async function submitNexusOrderLink(orderUrl: string) {
 
     const recentJobs = await prisma.nexusLog.findMany({
         where: {
-            level: { in: ['JOB_GAM_PENDING', 'JOB_GAM_RUNNING', 'JOB_GAM_REVIEW'] },
+            level: { in: ['JOB_GAM_PENDING', 'JOB_GAM_RUNNING', 'JOB_GAM_REVIEW', GAM_AUTH_REQUIRED_LEVEL] },
             createdAt: { gte: recentCutoff },
         },
         orderBy: { createdAt: 'desc' },
@@ -138,7 +140,9 @@ export async function submitNexusOrderLink(orderUrl: string) {
     })
 
     if (existingJob) {
-        const shouldTrigger = existingJob.level === 'JOB_GAM_PENDING' || existingJob.level === 'JOB_GAM_RUNNING'
+        const staleRunningJob = existingJob.level === 'JOB_GAM_RUNNING'
+            && existingJob.createdAt.getTime() < Date.now() - 30 * 60 * 1000
+        const shouldTrigger = existingJob.level === 'JOB_GAM_PENDING' || staleRunningJob
         const triggered = shouldTrigger ? await triggerGamWorker(existingJob.id) : false
 
         revalidatePath('/nexus')
@@ -150,6 +154,7 @@ export async function submitNexusOrderLink(orderUrl: string) {
             jobId: existingJob.id,
             orderId,
             status: existingJob.level,
+            authWorkflowUrl: readDetails(existingJob.details).authWorkflowUrl || '',
         }
     }
 
@@ -189,13 +194,14 @@ export async function submitNexusOrderLink(orderUrl: string) {
         jobId: job.id,
         orderId,
         status: job.level,
+        authWorkflowUrl: '',
     }
 }
 
 export async function getNexusOrderJobs() {
     const jobs = await prisma.nexusLog.findMany({
         where: {
-            level: { in: ['JOB_GAM_PENDING', 'JOB_GAM_RUNNING', 'JOB_GAM_REVIEW', 'JOB_GAM_ERROR', 'JOB_GAM_CANCELLED'] },
+            level: { in: GAM_JOB_LEVELS },
         },
         orderBy: { createdAt: 'desc' },
         take: 12,
@@ -217,6 +223,7 @@ export async function getNexusOrderJobs() {
             blocked: details.blockedItems?.length || 0,
             autoRegisterResult: details.autoRegisterResult || null,
             notifications: details.notifications || null,
+            authWorkflowUrl: details.authWorkflowUrl || '',
             executionLogs: details.executionLogs || [],
         }
     })
@@ -437,13 +444,18 @@ export async function submitNexusAssistantMessage(message: string): Promise<Nexu
     const orderUrl = extractGamOrderUrl(input)
     if (orderUrl) {
         const result = await submitNexusOrderLink(orderUrl)
+        const authRequired = result.status === GAM_AUTH_REQUIRED_LEVEL
         return {
-            tone: result.existing ? 'warning' : 'success',
-            text: result.existing
-                ? `Essa Order ${result.orderId} ja estava no fluxo Nexus. Mantive o job ${result.jobId} e tentei acionar o worker quando aplicavel.`
+            tone: authRequired ? 'warning' : result.existing ? 'warning' : 'success',
+            text: authRequired
+                ? `Essa Order ${result.orderId} esta aguardando renovacao do login Google para o Nexus entrar no GAM.`
+                : result.existing
+                    ? `Essa Order ${result.orderId} ja estava no fluxo Nexus. Mantive o job ${result.jobId} e tentei acionar o worker quando aplicavel.`
                 : `Recebi a Order ${result.orderId}. Enfileirei o cadastro automatico e acionei o worker GAM para preparar a revisao.`,
             actions: [
-                { label: 'Ver revisao', href: `/campaigns?jobId=${encodeURIComponent(result.jobId)}`, variant: 'primary' },
+                authRequired && result.authWorkflowUrl
+                    ? { label: 'Renovar login Google', href: result.authWorkflowUrl, variant: 'primary' as const }
+                    : { label: 'Ver revisao', href: `/campaigns?jobId=${encodeURIComponent(result.jobId)}`, variant: 'primary' as const },
                 { label: 'Ver fila Nexus', command: 'mostrar jobs nexus' },
             ],
         }
@@ -534,16 +546,24 @@ export async function submitNexusAssistantMessage(message: string): Promise<Nexu
 
     if (/jobs?|fila|status|orders?/i.test(normalizeText(input))) {
         const jobs = await getNexusOrderJobs()
+        const authJob = jobs.find(job => job.level === GAM_AUTH_REQUIRED_LEVEL && job.authWorkflowUrl)
         return {
             tone: 'info',
             text: jobs.length > 0
                 ? `Tenho ${jobs.length} job(s) GAM recentes no Nexus.`
                 : 'Nao ha jobs GAM recentes no Nexus.',
+            actions: authJob
+                ? [{ label: 'Renovar login Google', href: authJob.authWorkflowUrl, variant: 'primary' }]
+                : undefined,
             cards: jobs.slice(0, 6).map(job => ({
                 title: `Order ${job.orderId || 'GAM'} | ${job.level.replace('JOB_GAM_', '')}`,
                 description: job.client || job.message,
                 meta: job.pi ? `PI ${job.pi} | ${job.formats} formato(s)` : `${job.formats} formato(s)`,
-                href: job.level === 'JOB_GAM_REVIEW' ? `/campaigns?jobId=${encodeURIComponent(job.id)}` : undefined,
+                href: job.level === GAM_AUTH_REQUIRED_LEVEL && job.authWorkflowUrl
+                    ? job.authWorkflowUrl
+                    : job.level === 'JOB_GAM_REVIEW'
+                        ? `/campaigns?jobId=${encodeURIComponent(job.id)}`
+                        : undefined,
             })),
         }
     }

@@ -1,0 +1,57 @@
+name: Renovar sessao GAM
+run-name: Renovar sessao GAM ${{ inputs.network_code || 'default' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      network_code:
+        description: Codigo da rede GAM. Deixe vazio para usar GAM_NETWORK_CODE do ambiente.
+        required: false
+        type: string
+      process_queue:
+        description: Processar fila GAM apos renovar a sessao
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: gam-session-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh-session:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Create environment file
+        run: |
+          echo "${{ secrets.ADSNAP_CLOUD_KEYS }}" > .env
+          cp .env .env.local
+
+      - name: Renovar sessao autenticada
+        run: npx tsx src/scripts/gam-login-persistent.ts
+        env:
+          GITHUB_ACTIONS: "true"
+          GAM_REFRESH_NETWORK_CODE: ${{ inputs.network_code }}
+
+      - name: Processar fila GAM liberada
+        if: ${{ inputs.process_queue }}
+        run: npx tsx src/scripts/gam-worker.ts
+        env:
+          GITHUB_ACTIONS: "true"

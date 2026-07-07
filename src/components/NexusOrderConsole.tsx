@@ -19,6 +19,7 @@ import {
     User,
     Zap,
 } from 'lucide-react'
+import { GAM_AUTH_REQUIRED_LEVEL } from '@/lib/gamJobStatus'
 import {
     getNexusOrderJobs,
     submitNexusAssistantMessage,
@@ -49,6 +50,7 @@ const statusMap: Record<string, { label: string; color: string; icon: typeof Clo
     JOB_GAM_REVIEW: { label: 'Revisao', color: '#22c55e', icon: CheckCircle2 },
     JOB_GAM_ERROR: { label: 'Erro', color: '#ef4444', icon: AlertTriangle },
     JOB_GAM_CANCELLED: { label: 'Cancelado', color: '#a3a3a3', icon: Clock3 },
+    [GAM_AUTH_REQUIRED_LEVEL]: { label: 'Login', color: '#f59e0b', icon: AlertTriangle },
 }
 
 function newId() {
@@ -202,6 +204,7 @@ function RecentJobs({ jobs, onRefresh, isRefreshing }: {
         running: jobs.filter(job => job.level === 'JOB_GAM_RUNNING').length,
         review: jobs.filter(job => job.level === 'JOB_GAM_REVIEW').length,
         error: jobs.filter(job => job.level === 'JOB_GAM_ERROR').length,
+        auth: jobs.filter(job => job.level === GAM_AUTH_REQUIRED_LEVEL).length,
     }), [jobs])
 
     return (
@@ -228,7 +231,7 @@ function RecentJobs({ jobs, onRefresh, isRefreshing }: {
                         ['Fila', metrics.pending],
                         ['Exec.', metrics.running],
                         ['Rev.', metrics.review],
-                        ['Erro', metrics.error],
+                        ['Login', metrics.auth],
                     ].map(([label, value]) => (
                         <div key={label} className="px-3 py-2" style={{ background: '#0f0f0f', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
                             <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: '#737373' }}>{label}</p>

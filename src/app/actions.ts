@@ -8,6 +8,7 @@ import { createCampaignsFromGamDraft as writeCampaignsFromGamDraft } from '@/lib
 import { normalizeCaptureCadence, type CaptureCadence } from '@/lib/governmentReportScope'
 import { normalizeCaptureDelaySeconds } from '@/lib/captureTiming'
 import { enqueueCaptureJobs, isWorkerJobStorageMissing } from '@/lib/workerJobs'
+import { GAM_AUTH_REQUIRED_LEVEL, GAM_JOB_LEVELS, isGamActiveJobLevel } from '@/lib/gamJobStatus'
 
 export async function getNexusActivity() {
     try {
@@ -310,7 +311,7 @@ export async function requestGamImportDraft(input: {
     const orderId = url.match(/order_id=(\d+)/i)?.[1] || 'Unknown'
 
     const activeJobs = await prisma.nexusLog.findMany({
-        where: { level: { in: ['JOB_GAM_PENDING', 'JOB_GAM_RUNNING'] } },
+        where: { level: { in: ['JOB_GAM_PENDING', 'JOB_GAM_RUNNING', GAM_AUTH_REQUIRED_LEVEL] } },
         orderBy: { createdAt: 'desc' },
         take: 20,
     })
@@ -328,6 +329,7 @@ export async function requestGamImportDraft(input: {
             requestedPi?: string
             requestedSegmentation?: string
             requestedCaptureCadence?: CaptureCadence
+            authWorkflowUrl?: string
         }
         if (
             (existingDetails.requestedPi && existingDetails.requestedPi !== requestedPi)
@@ -338,10 +340,19 @@ export async function requestGamImportDraft(input: {
         }
         const staleRunningJob = existingJob.level === 'JOB_GAM_RUNNING'
             && existingJob.createdAt.getTime() < Date.now() - 30 * 60 * 1000
-        const triggered = existingJob.level === 'JOB_GAM_PENDING' || staleRunningJob
+        const shouldTrigger = existingJob.level === 'JOB_GAM_PENDING' || staleRunningJob
+        const triggered = shouldTrigger
             ? await triggerGamWorker(existingJob.id)
-            : true
-        return { success: true, orderId, triggered, existing: true, jobId: existingJob.id }
+            : false
+        return {
+            success: true,
+            orderId,
+            triggered,
+            existing: true,
+            jobId: existingJob.id,
+            status: existingJob.level,
+            authWorkflowUrl: existingDetails.authWorkflowUrl || '',
+        }
     }
 
     const job = await prisma.nexusLog.create({
@@ -370,12 +381,20 @@ export async function requestGamImportDraft(input: {
     }
 
     revalidatePath('/campaigns')
-    return { success: true, orderId, triggered, existing: false, jobId: job.id }
+    return {
+        success: true,
+        orderId,
+        triggered,
+        existing: false,
+        jobId: job.id,
+        status: job.level,
+        authWorkflowUrl: '',
+    }
 }
 
 export async function getGamImportDrafts() {
     const logs = await prisma.nexusLog.findMany({
-        where: { level: { in: ['JOB_GAM_REVIEW', 'JOB_GAM_ERROR', 'JOB_GAM_RUNNING', 'JOB_GAM_PENDING', 'JOB_GAM_CANCELLED'] } },
+        where: { level: { in: GAM_JOB_LEVELS } },
         orderBy: { createdAt: 'desc' },
         take: 10,
     })
@@ -387,6 +406,7 @@ export async function getGamImportDrafts() {
         let requestedPi = ''
         let requestedSegmentation = ''
         let requestedCaptureCadence: CaptureCadence = 'DAILY'
+        let authWorkflowUrl = ''
         let executionLogs: Array<{ at: string; message: string; tone: 'info' | 'success' | 'error' }> = []
         try {
             if (log.details) {
@@ -396,6 +416,7 @@ export async function getGamImportDrafts() {
                     requestedPi?: string
                     requestedSegmentation?: string
                     requestedCaptureCadence?: CaptureCadence
+                    authWorkflowUrl?: string
                     executionLogs?: Array<{ at: string; message: string; tone: 'info' | 'success' | 'error' }>
                 }
                 orderUrl = details.orderUrl || ''
@@ -406,6 +427,7 @@ export async function getGamImportDrafts() {
                     requestedSegmentation,
                     details.requestedCaptureCadence || details.captureCadence,
                 )
+                authWorkflowUrl = details.authWorkflowUrl || ''
                 executionLogs = details.executionLogs || []
                 if (log.level === 'JOB_GAM_REVIEW') draft = details
             }
@@ -423,6 +445,7 @@ export async function getGamImportDrafts() {
             requestedPi,
             requestedSegmentation,
             requestedCaptureCadence,
+            authWorkflowUrl,
             executionLogs,
             draft,
         }
@@ -432,7 +455,7 @@ export async function getGamImportDrafts() {
 export async function deleteGamImportDraft(jobId: string) {
     const job = await prisma.nexusLog.findUnique({ where: { id: jobId } })
     if (!job || !job.level.startsWith('JOB_GAM_')) return { success: true }
-    if (job.level === 'JOB_GAM_PENDING' || job.level === 'JOB_GAM_RUNNING') {
+    if (isGamActiveJobLevel(job.level)) {
         throw new Error('Encerre o worker antes de excluir este rascunho.')
     }
 
@@ -443,7 +466,7 @@ export async function deleteGamImportDraft(jobId: string) {
 
 export async function cancelGamImportJob(jobId: string) {
     const job = await prisma.nexusLog.findUnique({ where: { id: jobId } })
-    if (!job || !['JOB_GAM_PENDING', 'JOB_GAM_RUNNING'].includes(job.level)) {
+    if (!job || !isGamActiveJobLevel(job.level)) {
         return { success: true, cancelledRun: false }
     }
 

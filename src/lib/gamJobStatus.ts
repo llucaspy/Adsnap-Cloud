@@ -1,0 +1,21 @@
+export const GAM_AUTH_REQUIRED_LEVEL = 'JOB_GAM_AUTH_REQUIRED'
+export const GAM_PENDING_LEVEL = 'JOB_GAM_PENDING'
+export const GAM_RUNNING_LEVEL = 'JOB_GAM_RUNNING'
+export const GAM_REVIEW_LEVEL = 'JOB_GAM_REVIEW'
+export const GAM_ERROR_LEVEL = 'JOB_GAM_ERROR'
+export const GAM_CANCELLED_LEVEL = 'JOB_GAM_CANCELLED'
+
+export const GAM_ACTIVE_JOB_LEVELS = [GAM_PENDING_LEVEL, GAM_RUNNING_LEVEL]
+
+export const GAM_JOB_LEVELS = [
+    GAM_PENDING_LEVEL,
+    GAM_RUNNING_LEVEL,
+    GAM_REVIEW_LEVEL,
+    GAM_ERROR_LEVEL,
+    GAM_CANCELLED_LEVEL,
+    GAM_AUTH_REQUIRED_LEVEL,
+]
+
+export function isGamActiveJobLevel(level: string) {
+    return GAM_ACTIVE_JOB_LEVELS.includes(level)
+}

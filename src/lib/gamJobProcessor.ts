@@ -5,6 +5,7 @@ import { createCampaignsFromGamDraft, type GamImportWriteResult } from './gamImp
 import { sendGamOrderReviewEmail } from './gamOrderReviewEmail'
 import { sendTelegramAlert } from './telegram'
 import { normalizeCaptureCadence, type CaptureCadence } from './governmentReportScope'
+import { GAM_AUTH_REQUIRED_LEVEL } from './gamJobStatus'
 
 const STALE_JOB_MINUTES = 30
 const MAX_JOB_EVENTS = 100
@@ -27,6 +28,7 @@ type GamJobDetails = Partial<GamImportDraft> & {
         telegram?: boolean
         email?: boolean
     }
+    authWorkflowUrl?: string
     executionLogs?: GamJobEvent[]
 }
 
@@ -56,6 +58,80 @@ function isAutoRegisterMode(mode?: string) {
         || normalized === 'auto-register'
         || normalized === 'autoregister'
         || normalized === 'nexus-order-autoregister'
+}
+
+function normalizeRepo(value: string | undefined) {
+    if (!value) return ''
+    if (value.includes('github.com/')) {
+        return value.split('github.com/')[1].replace(/\/$/, '').replace(/\.git$/, '')
+    }
+    return value.replace(/\/$/, '').replace(/\.git$/, '')
+}
+
+function gamSessionRefreshWorkflowUrl() {
+    const repo = normalizeRepo(process.env.GITHUB_REPO || process.env.GITHUB_REPOSITORY)
+    return repo ? `https://github.com/${repo}/actions/workflows/gam-session-refresh.yml` : ''
+}
+
+function isGamAuthRequiredError(message: string) {
+    return /GAM_SESSION_EXPIRADA|GAM_SESSION_REMOTA_AUSENTE|GAM_LOGIN_NAO_CONCLUIDO|DESAFIO_LOGIN_DETECTADO/i.test(message)
+}
+
+export async function releaseGamAuthRequiredJobs() {
+    const jobs = await prisma.nexusLog.findMany({
+        where: { level: GAM_AUTH_REQUIRED_LEVEL },
+        orderBy: { createdAt: 'asc' },
+    })
+
+    for (const job of jobs) {
+        const details = withEvent(
+            readDetails(job.details),
+            'Sessao GAM renovada; job liberado para voltar a fila',
+            'success',
+        )
+        await prisma.nexusLog.updateMany({
+            where: { id: job.id, level: GAM_AUTH_REQUIRED_LEVEL },
+            data: {
+                level: 'JOB_GAM_PENDING',
+                message: 'Nexus GAM: sessao renovada; job liberado para processamento',
+                details: JSON.stringify(details),
+            },
+        })
+    }
+
+    return jobs.length
+}
+
+async function pausePendingGamJobsForAuth(workflowUrl: string, authRequiredAt: string) {
+    const pendingJobs = await prisma.nexusLog.findMany({
+        where: { level: 'JOB_GAM_PENDING' },
+        select: { id: true, details: true },
+        orderBy: { createdAt: 'asc' },
+    })
+
+    let pausedCount = 0
+    for (const pendingJob of pendingJobs) {
+        const details = {
+            ...withEvent(
+                readDetails(pendingJob.details),
+                'Sessao GAM expirada. Job pausado ate a renovacao do login Google.',
+                'error',
+            ),
+            authRequiredAt,
+            authWorkflowUrl: workflowUrl || undefined,
+        }
+        const paused = await prisma.nexusLog.updateMany({
+            where: { id: pendingJob.id, level: 'JOB_GAM_PENDING' },
+            data: {
+                level: GAM_AUTH_REQUIRED_LEVEL,
+                message: 'Nexus GAM: aguardando renovacao da sessao autenticada',
+                details: JSON.stringify(details),
+            },
+        })
+        pausedCount += paused.count
+    }
+
+    return pausedCount
 }
 
 async function updateProgress(jobId: string, message: string, tone: GamJobEvent['tone'] = 'info') {
@@ -214,6 +290,37 @@ export async function processPendingGamJobs(limit = 5, targetJobId?: string) {
 
             const message = error instanceof Error ? error.message : String(error)
             console.error('[Nexus GAM] Falha no job:', error)
+            if (isGamAuthRequiredError(message)) {
+                const workflowUrl = gamSessionRefreshWorkflowUrl()
+                const authRequiredAt = new Date().toISOString()
+                const details = {
+                    ...withEvent(
+                        readDetails(current.details),
+                        'Sessao GAM expirada. Renove a autenticacao supervisionada antes de retomar a fila.',
+                        'error',
+                    ),
+                    authRequiredAt,
+                    authWorkflowUrl: workflowUrl || undefined,
+                }
+                await prisma.nexusLog.update({
+                    where: { id: job.id },
+                    data: {
+                        level: GAM_AUTH_REQUIRED_LEVEL,
+                        message: 'Nexus GAM: autenticacao supervisionada necessaria',
+                        details: JSON.stringify(details),
+                    },
+                })
+                const pausedCount = await pausePendingGamJobsForAuth(workflowUrl, authRequiredAt)
+                await sendTelegramAlert(
+                    'Sessao GAM expirada',
+                    'O Google solicitou uma nova autenticacao supervisionada. A fila GAM foi pausada ate a sessao ser renovada.',
+                    `Jobs pausados: ${pausedCount + 1}. Rode o workflow "Renovar sessao GAM" no GitHub e aprove a verificacao no celular quando solicitado.`,
+                    undefined,
+                    workflowUrl ? { label: 'Renovar no GitHub', url: workflowUrl } : undefined,
+                )
+                break
+            }
+
             await prisma.nexusLog.update({
                 where: { id: job.id },
                 data: {

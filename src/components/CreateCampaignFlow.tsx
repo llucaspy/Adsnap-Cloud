@@ -17,7 +17,7 @@ import {
     Building2, User2, Hash, Layers, Sparkles,
     CalendarRange, Landmark, Building, Users,
     ChevronDown, Trash2, X, Wand2, RefreshCw, FileCheck2,
-    Loader2, CircleCheck, CircleX, RotateCcw, Terminal, Square
+    Loader2, CircleCheck, CircleX, RotateCcw, Terminal, Square, ExternalLink
 } from 'lucide-react'
 import { MultiTimePicker } from './MultiTimePicker'
 import {
@@ -26,6 +26,7 @@ import {
     MIN_CAPTURE_DELAY_SECONDS,
     normalizeCaptureDelaySeconds,
 } from '@/lib/captureTiming'
+import { GAM_AUTH_REQUIRED_LEVEL, isGamActiveJobLevel } from '@/lib/gamJobStatus'
 
 interface MediaEntry {
     url: string
@@ -49,6 +50,7 @@ interface GamImportJob {
     requestedPi: string
     requestedSegmentation: string
     requestedCaptureCadence: CaptureCadence
+    authWorkflowUrl: string
     executionLogs: Array<{
         at: string
         message: string
@@ -148,7 +150,7 @@ export function CreateCampaignFlow({
             setGamDrafts(drafts)
             setSelectedGamJobId(current => {
                 if (current && drafts.some(job => job.id === current)) return current
-                return drafts.find(job => job.level === 'JOB_GAM_RUNNING' || job.level === 'JOB_GAM_PENDING')?.id
+                return drafts.find(job => job.level === 'JOB_GAM_RUNNING' || job.level === 'JOB_GAM_PENDING' || job.level === GAM_AUTH_REQUIRED_LEVEL)?.id
                     || drafts[0]?.id
                     || null
             })
@@ -162,7 +164,7 @@ export function CreateCampaignFlow({
         refreshGamDrafts().catch(() => null)
     }, [refreshGamDrafts])
 
-    const hasActiveGamJob = gamDrafts.some(job => job.level === 'JOB_GAM_PENDING' || job.level === 'JOB_GAM_RUNNING')
+    const hasActiveGamJob = gamDrafts.some(job => isGamActiveJobLevel(job.level) || job.level === GAM_AUTH_REQUIRED_LEVEL)
 
     useEffect(() => {
         if (!hasActiveGamJob) return
@@ -220,7 +222,9 @@ export function CreateCampaignFlow({
                 const result = await requestGamImportDraft({ orderUrl: url, pi, segmentation, captureCadence })
                 setSelectedGamJobId(result.jobId)
                 setGamStatus(result.existing
-                    ? `A Order ${result.orderId} ja esta em processamento.`
+                    ? result.status === GAM_AUTH_REQUIRED_LEVEL
+                        ? `A Order ${result.orderId} esta aguardando renovacao do login Google.`
+                        : `A Order ${result.orderId} ja esta em processamento.`
                     : result.triggered
                         ? `Order ${result.orderId} enviada ao worker.`
                         : `Order ${result.orderId} enfileirada; aguardando o agendador.`)
@@ -511,7 +515,7 @@ function GamImportPanel({
 }) {
     const visibleJobs = drafts.slice(0, 8)
     const selectedJob = visibleJobs.find(job => job.id === selectedJobId)
-        || visibleJobs.find(job => ['JOB_GAM_PENDING', 'JOB_GAM_RUNNING'].includes(job.level))
+        || visibleJobs.find(job => isGamActiveJobLevel(job.level) || job.level === GAM_AUTH_REQUIRED_LEVEL)
         || visibleJobs[0]
         || null
     const hasValidPi = /^\d{3,8}$/.test(pi)
@@ -697,7 +701,7 @@ function GamImportPanel({
                     {visibleJobs.map(job => {
                         const presentation = debuggerPresentation(job)
                         const active = job.id === selectedJob?.id
-                        const canDelete = !['JOB_GAM_PENDING', 'JOB_GAM_RUNNING'].includes(job.level)
+                        const canDelete = !isGamActiveJobLevel(job.level)
                         return (
                             <div
                                 key={job.id}
@@ -728,6 +732,11 @@ function GamImportPanel({
                                             <RotateCcw size={14} />
                                         </button>
                                     )}
+                                    {job.level === GAM_AUTH_REQUIRED_LEVEL && job.authWorkflowUrl && (
+                                        <a href={job.authWorkflowUrl} target="_blank" rel="noreferrer" className="h-9 px-3 flex items-center gap-2 text-xs font-semibold" style={{ color: '#f59e0b', border: '1px solid rgba(245,158,11,0.28)', borderRadius: '8px' }} title="Renovar login Google">
+                                            Login <ExternalLink size={13} />
+                                        </a>
+                                    )}
                                     {canDelete && (
                                         <button onClick={() => onDelete(job.id)} className="w-9 h-9 flex items-center justify-center" style={{ color: '#ef4444', border: '1px solid rgba(239,68,68,0.28)', borderRadius: '8px' }} title="Excluir rascunho">
                                             <Trash2 size={14} />
@@ -751,7 +760,7 @@ function GamJobDebugger({ job, onStop, onDelete, presentation }: {
 }) {
     if (!job || !presentation) return null
 
-    const isActive = job.level === 'JOB_GAM_PENDING' || job.level === 'JOB_GAM_RUNNING'
+    const isActive = isGamActiveJobLevel(job.level)
     const logs = job.executionLogs.length > 0
         ? job.executionLogs
         : [{ at: job.createdAt, message: job.message.replace(/^Nexus GAM:\s*/i, ''), tone: 'info' as const }]
@@ -798,7 +807,17 @@ function GamJobDebugger({ job, onStop, onDelete, presentation }: {
             </div>
 
             <div className="px-4 py-3 flex justify-end gap-2" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-                {isActive ? (
+                {job.level === GAM_AUTH_REQUIRED_LEVEL && job.authWorkflowUrl ? (
+                    <a
+                        href={job.authWorkflowUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-3 py-2 flex items-center gap-2 text-xs font-semibold transition-colors"
+                        style={{ color: '#f59e0b', border: '1px solid rgba(245,158,11,0.28)', borderRadius: '8px' }}
+                    >
+                        <ExternalLink size={13} /> Renovar login Google
+                    </a>
+                ) : isActive ? (
                     <button
                         onClick={() => onStop(job.id)}
                         className="px-3 py-2 flex items-center gap-2 text-xs font-semibold transition-colors"
@@ -823,6 +842,7 @@ function GamJobDebugger({ job, onStop, onDelete, presentation }: {
 function debuggerPresentation(job: GamImportJob) {
     if (job.level === 'JOB_GAM_RUNNING') return { label: 'Processando', color: '#e5e5e5', background: 'rgba(255,255,255,0.12)' }
     if (job.level === 'JOB_GAM_PENDING') return { label: 'Na fila', color: '#f59e0b', background: 'rgba(245,158,11,0.10)' }
+    if (job.level === GAM_AUTH_REQUIRED_LEVEL) return { label: 'Login Google', color: '#f59e0b', background: 'rgba(245,158,11,0.10)' }
     if (job.level === 'JOB_GAM_REVIEW') return { label: 'Pronto', color: '#22c55e', background: 'rgba(34,197,94,0.10)' }
     if (job.level === 'JOB_GAM_CANCELLED') return { label: 'Encerrado', color: '#f59e0b', background: 'rgba(245,158,11,0.10)' }
     return { label: 'Erro', color: '#ef4444', background: 'rgba(239,68,68,0.10)' }

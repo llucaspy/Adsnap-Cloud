@@ -2,6 +2,7 @@ import prisma from '@/lib/prisma'
 import { WorkerLogsPanel } from '@/components/WorkerLogsPanel'
 import { isWorkerJobStorageMissing, WORKER_JOB_TYPE_CAPTURE } from '@/lib/workerJobs'
 import { getFormatLabelMap, resolveFormatLabel } from '@/lib/formatLabels'
+import { GAM_JOB_LEVELS } from '@/lib/gamJobStatus'
 
 export const dynamic = 'force-dynamic'
 
@@ -105,7 +106,7 @@ export default async function WorkersPage() {
             _count: { _all: true },
         }),
         prisma.nexusLog.findMany({
-            where: { level: { in: ['JOB_GAM_PENDING', 'JOB_GAM_RUNNING', 'JOB_GAM_REVIEW', 'JOB_GAM_ERROR', 'JOB_GAM_CANCELLED'] } },
+            where: { level: { in: GAM_JOB_LEVELS } },
             orderBy: { createdAt: 'desc' },
             take: 12,
             select: { id: true, level: true, message: true, details: true, createdAt: true },

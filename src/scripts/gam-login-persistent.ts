@@ -2,8 +2,10 @@ import 'dotenv/config'
 import path from 'path'
 import { chromium } from 'playwright'
 import { saveGamSessionState } from '../lib/gamSessionStore'
+import { releaseGamAuthRequiredJobs } from '../lib/gamJobProcessor'
+import prisma from '../lib/prisma'
 
-const NETWORK_CODE = process.env.GAM_NETWORK_CODE || '123935210'
+const NETWORK_CODE = process.env.GAM_REFRESH_NETWORK_CODE || process.env.GAM_NETWORK_CODE || '123935210'
 const LOGIN_TARGET = `https://admanager.google.com/${NETWORK_CODE}`
 const USER_DATA_DIR = process.env.GAM_USER_DATA_DIR || path.join(process.cwd(), '.gam-session')
 
@@ -53,10 +55,13 @@ async function main() {
 
         const state = await context.storageState({ indexedDB: true })
         await saveGamSessionState(state, NETWORK_CODE)
+        const released = await releaseGamAuthRequiredJobs()
         console.log('GAM_SESSION_SYNCED')
         console.log('GAM_SESSION_AUTHENTICATED')
+        console.log(`GAM_AUTH_REQUIRED_JOBS_RELEASED=${released}`)
     } finally {
         await context.close()
+        await prisma.$disconnect()
     }
 }
 
