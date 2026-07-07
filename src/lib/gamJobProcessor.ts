@@ -6,6 +6,7 @@ import { sendGamOrderReviewEmail } from './gamOrderReviewEmail'
 import { sendTelegramAlert } from './telegram'
 import { normalizeCaptureCadence, type CaptureCadence } from './governmentReportScope'
 import { GAM_AUTH_REQUIRED_LEVEL } from './gamJobStatus'
+import { buildGamReviewUrl, notifyGamOrderReadyForReview, notifyGamOrderStarted } from './gamOrderTelegram'
 
 const STALE_JOB_MINUTES = 30
 const MAX_JOB_EVENTS = 100
@@ -27,6 +28,12 @@ type GamJobDetails = Partial<GamImportDraft> & {
         reviewUrl?: string
         telegram?: boolean
         email?: boolean
+        reviewReadyAt?: string
+        reviewReminderCount?: number
+        reviewReminderLastAt?: string
+        reviewReminderTelegram?: boolean
+        orderStartedTelegram?: boolean
+        orderStartedTelegramAt?: string
     }
     authWorkflowUrl?: string
     executionLogs?: GamJobEvent[]
@@ -191,6 +198,8 @@ export async function processPendingGamJobs(limit = 5, targetJobId?: string) {
         if (claim.count === 0) continue
 
         try {
+            await notifyGamOrderStarted(job.id)
+
             const url = initialDetails.orderUrl || ''
             if (!url.startsWith('http')) throw new Error('URL de job invalida')
 
@@ -253,19 +262,9 @@ export async function processPendingGamJobs(limit = 5, targetJobId?: string) {
             })
 
             if (completed.count > 0) {
-                const appUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://adsnap-cloud.vercel.app').replace(/\/$/, '')
-                const reviewUrl = `${appUrl}/campaigns?jobId=${encodeURIComponent(job.id)}`
-                const telegramSent = await sendTelegramAlert(
-                    'Order pronta para revisao',
-                    writeResult
-                        ? `${draft.client} foi cadastrada automaticamente e precisa de conferencia.`
-                        : `${draft.client} esta pronta para conferencia antes do cadastro.`,
-                    writeResult
-                        ? `Order ${draft.orderId} | PI ${draft.pi} | ${writeResult.created} criada(s) | ${writeResult.skipped} existente(s) | ${writeResult.blocked} pendente(s)`
-                        : `Order ${draft.orderId} | PI ${draft.pi} | ${draft.mediaEntries.length} formato(s) | ${draft.blockedItems.length} bloqueado(s)`,
-                    undefined,
-                    { label: 'Abrir revisao', url: reviewUrl },
-                )
+                const reviewUrl = buildGamReviewUrl(job.id)
+                const reviewReadyAt = new Date().toISOString()
+                const telegramSent = await notifyGamOrderReadyForReview({ jobId: job.id, draft, reviewUrl, writeResult })
 
                 const emailSent = writeResult
                     ? await sendGamOrderReviewEmail({ draft, jobId: job.id, reviewUrl, writeResult })
@@ -276,7 +275,15 @@ export async function processPendingGamJobs(limit = 5, targetJobId?: string) {
                     data: {
                         details: JSON.stringify({
                             ...completedDetails,
-                            notifications: { reviewUrl, telegram: telegramSent, email: emailSent },
+                            notifications: {
+                                ...(completedDetails.notifications || {}),
+                                reviewUrl,
+                                telegram: telegramSent,
+                                email: emailSent,
+                                reviewReadyAt,
+                                reviewReminderCount: 0,
+                                reviewReminderLastAt: reviewReadyAt,
+                            },
                         }),
                     },
                 })

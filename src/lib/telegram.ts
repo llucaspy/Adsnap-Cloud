@@ -56,11 +56,12 @@ export async function sendTelegramAlert(
     message: string,
     details?: string,
     campaignId?: string,
-    action?: { label: string; url: string }
+    action?: { label: string; url: string },
+    options?: { dedupeMinutes?: number; dedupeKey?: string }
 ): Promise<boolean> {
     try {
-        const dedupeMinutes = readAlertDedupeMinutes()
-        const dedupeKey = buildAlertDedupeKey(title, message, campaignId)
+        const dedupeMinutes = options?.dedupeMinutes ?? readAlertDedupeMinutes()
+        const dedupeKey = options?.dedupeKey || buildAlertDedupeKey(title, message, campaignId)
         if (await shouldSuppressDuplicateAlert(dedupeKey, dedupeMinutes)) {
             console.log(`[Telegram] Alerta duplicado suprimido por ${dedupeMinutes}min: ${title} (${campaignId || 'global'})`)
             return true

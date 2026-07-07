@@ -9,6 +9,7 @@ import { triggerGamWorker, triggerNexusWorker } from '@/app/actions'
 import { enqueueCaptureJobs } from '@/lib/workerJobs'
 import { getFormatLabelMap, resolveFormatLabel } from '@/lib/formatLabels'
 import { GAM_AUTH_REQUIRED_LEVEL, GAM_JOB_LEVELS } from '@/lib/gamJobStatus'
+import { notifyGamOrderStarted } from '@/lib/gamOrderTelegram'
 
 type NexusOrderDetails = Partial<GamImportDraft> & {
     orderUrl?: string
@@ -177,6 +178,7 @@ export async function submitNexusOrderLink(orderUrl: string) {
     })
 
     const triggered = await triggerGamWorker(job.id)
+    await notifyGamOrderStarted(job.id)
     if (!triggered) {
         await nexusLogStore.addLog(
             `Nexus V2: Order ${orderId} entrou na fila, mas o worker nao foi disparado automaticamente.`,

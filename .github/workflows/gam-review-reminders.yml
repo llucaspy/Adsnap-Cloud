@@ -1,0 +1,36 @@
+name: Lembretes de revisao GAM
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/30 * * * *'
+
+concurrency:
+  group: gam-review-reminders
+  cancel-in-progress: false
+
+jobs:
+  review-reminders:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create environment file
+        run: |
+          echo "${{ secrets.ADSNAP_CLOUD_KEYS }}" > .env
+          cp .env .env.local
+
+      - name: Send pending review reminders
+        run: npx tsx src/scripts/gam-review-reminders.ts

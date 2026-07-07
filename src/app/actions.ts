@@ -9,6 +9,7 @@ import { normalizeCaptureCadence, type CaptureCadence } from '@/lib/governmentRe
 import { normalizeCaptureDelaySeconds } from '@/lib/captureTiming'
 import { enqueueCaptureJobs, isWorkerJobStorageMissing } from '@/lib/workerJobs'
 import { GAM_AUTH_REQUIRED_LEVEL, GAM_JOB_LEVELS, isGamActiveJobLevel } from '@/lib/gamJobStatus'
+import { notifyGamOrderStarted } from '@/lib/gamOrderTelegram'
 
 export async function getNexusActivity() {
     try {
@@ -376,6 +377,7 @@ export async function requestGamImportDraft(input: {
     })
 
     const triggered = await triggerGamWorker(job.id)
+    await notifyGamOrderStarted(job.id)
     if (!triggered) {
         await nexusLogStore.addLog('Nexus GAM: rascunho enfileirado, mas worker nao foi disparado automaticamente.', 'INFO')
     }
