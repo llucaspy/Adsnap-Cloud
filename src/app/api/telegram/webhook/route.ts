@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { handleUpdate } from '@/lib/telegramBot'
+import { handleUpdate, isTelegramWebhookSecretValid } from '@/lib/telegramBot'
 
 /**
  * Telegram Webhook — receives updates from Telegram Bot API
@@ -10,6 +10,10 @@ import { handleUpdate } from '@/lib/telegramBot'
  */
 export async function POST(request: Request) {
     try {
+        if (!isTelegramWebhookSecretValid(request.headers)) {
+            return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 })
+        }
+
         const update = await request.json()
         
         // MUST await — Vercel kills the function after response

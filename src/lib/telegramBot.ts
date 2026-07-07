@@ -1,1225 +1,996 @@
-import { supabase } from './supabase'
-import { nexusLogStore } from './nexusLogStore'
 import prisma from './prisma'
+import { enqueueCaptureJobs, WORKER_JOB_TYPE_CAPTURE } from './workerJobs'
+import { getFormatLabelMap, resolveFormatLabel } from './formatLabels'
+import { nexusLogStore } from './nexusLogStore'
+import { buildGamReviewUrl, notifyGamOrderStarted, sendPendingGamReviewReminders } from './gamOrderTelegram'
+import {
+    GAM_AUTH_REQUIRED_LEVEL,
+    GAM_ERROR_LEVEL,
+    GAM_JOB_LEVELS,
+    GAM_PENDING_LEVEL,
+    GAM_REVIEW_LEVEL,
+    GAM_RUNNING_LEVEL,
+} from './gamJobStatus'
 
-// =============================================================================
-// TELEGRAM BOT ENGINE — 100% Interactive Menu (SDK + Inline Keyboards)
-// =============================================================================
+type TelegramInlineButton = {
+    text: string
+    callback_data?: string
+    url?: string
+}
 
-const BOT_TOKEN = () => process.env.NexusTelegram || ''
-const ALLOWED_CHAT_ID = () => process.env.chatidtelegram || ''
-const APP_URL = () => process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://adsnap-cloud.vercel.app'
+type SendOptions = {
+    reply_markup?: { inline_keyboard: TelegramInlineButton[][] }
+    parse_mode?: 'HTML' | 'MarkdownV2'
+}
 
-// ---------------------------------------------------------------------------
-// Format ID → Label resolver (cached)
-// ---------------------------------------------------------------------------
-let _formatMapCache: Record<string, string> | null = null
+type BotCommandContext = {
+    chatId: string
+    messageId?: number
+    isNewMessage?: boolean
+}
 
-async function loadFormatMap(): Promise<Record<string, string>> {
-    if (_formatMapCache) return _formatMapCache
+type GamJobDetails = {
+    orderUrl?: string
+    orderId?: string
+    client?: string
+    pi?: string
+    mediaEntries?: unknown[]
+    blockedItems?: unknown[]
+    notifications?: { reviewUrl?: string }
+}
+
+const DEFAULT_APP_URL = 'https://adsnap-cloud.vercel.app'
+const CAPTURE_BLOCKED_STATUSES = ['EXPIRED', 'FINISHED', 'PROCESSING', 'QUEUED', 'AUTOCONFIG']
+const CAPTURE_BLOCKED_ADOPS_STATUSES = ['CONCLUIDA', 'PAUSADA', 'CANCELADA', 'ENCERRADA']
+
+function botToken() {
+    return process.env.NexusTelegram || ''
+}
+
+function webhookSecret() {
+    return process.env.TELEGRAM_WEBHOOK_SECRET || process.env.TELEGRAM_SECRET_TOKEN || ''
+}
+
+function appUrl() {
+    const explicit = process.env.NEXT_PUBLIC_APP_URL?.trim()
+    if (explicit) return explicit.replace(/\/$/, '')
+
+    const vercelUrl = process.env.VERCEL_URL?.trim()
+    if (vercelUrl) {
+        return (vercelUrl.startsWith('http') ? vercelUrl : `https://${vercelUrl}`).replace(/\/$/, '')
+    }
+
+    return DEFAULT_APP_URL
+}
+
+function normalizeRepo(value: string | undefined) {
+    if (!value) return ''
+    if (value.includes('github.com/')) {
+        return value.split('github.com/')[1].replace(/\/$/, '').replace(/\.git$/, '')
+    }
+    return value.replace(/\/$/, '').replace(/\.git$/, '')
+}
+
+function githubWorkflowUrl(workflow: string) {
+    const repo = normalizeRepo(process.env.GITHUB_REPO || process.env.GITHUB_REPOSITORY)
+    return repo ? `https://github.com/${repo}/actions/workflows/${workflow}` : ''
+}
+
+async function triggerWorkflow(workflow: string, inputs: Record<string, string> = {}) {
+    const token = process.env.GITHUB_TOKEN
+    const repo = normalizeRepo(process.env.GITHUB_REPO || process.env.GITHUB_REPOSITORY)
+    if (!token || !repo) return false
+
     try {
-        const { data: settings } = await supabase
-            .from('Settings')
-            .select('bannerFormats')
-            .eq('id', 1)
-            .single()
-        if (settings?.bannerFormats) {
-            const formats = JSON.parse(settings.bannerFormats || '[]') as { id: string, label: string }[]
-            _formatMapCache = {}
-            for (const f of formats) _formatMapCache[f.id] = f.label
+        const response = await fetch(
+            `https://api.github.com/repos/${repo}/actions/workflows/${workflow}/dispatches`,
+            {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    Accept: 'application/vnd.github+json',
+                    'X-GitHub-Api-Version': '2022-11-28',
+                    'User-Agent': 'Adsnap-Telegram-Bot',
+                },
+                body: JSON.stringify({ ref: 'main', inputs }),
+            },
+        )
+
+        if (!response.ok) {
+            console.error(`[TelegramBot] Falha ao disparar ${workflow}:`, response.status, await response.text())
+            return false
         }
-    } catch (e) {
-        console.error('[TelegramBot] Erro ao carregar formatos:', e)
+
+        return true
+    } catch (error) {
+        console.error(`[TelegramBot] Erro ao disparar ${workflow}:`, error)
+        return false
     }
-    return _formatMapCache || {}
 }
 
-function fl(formatMap: Record<string, string>, formatId: string): string {
-    return formatMap[formatId] || formatId
+async function triggerNexusWorker(campaignIds: string[]) {
+    const ids = [...new Set(campaignIds.map(id => id.trim()).filter(Boolean))]
+    return triggerWorkflow('nexus-worker.yml', { campaign_ids: ids.join(',') })
 }
 
-// ---------------------------------------------------------------------------
-// Telegram API Helpers
-// ---------------------------------------------------------------------------
-export async function sendMessage(chatId: string, text: string, options?: {
-    parse_mode?: 'MarkdownV2' | 'HTML'
-    reply_markup?: any
-}) {
-    const url = `https://api.telegram.org/bot${BOT_TOKEN()}/sendMessage`
+async function triggerGamWorker(jobId?: string) {
+    return triggerWorkflow('gam-import.yml', jobId ? { job_id: jobId } : {})
+}
+
+function html(value: unknown) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+}
+
+function normalizeText(value: string) {
+    return value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+}
+
+function truncate(value: string, max = 36) {
+    return value.length > max ? `${value.slice(0, Math.max(0, max - 1))}...` : value
+}
+
+function button(text: string, callbackData: string): TelegramInlineButton {
+    return { text, callback_data: callbackData }
+}
+
+function linkButton(text: string, url: string): TelegramInlineButton {
+    return { text, url }
+}
+
+function keyboard(rows: TelegramInlineButton[][]) {
+    return { inline_keyboard: rows }
+}
+
+async function telegramCall<T = Record<string, unknown>>(method: string, payload: Record<string, unknown>) {
+    const token = botToken()
+    if (!token) {
+        console.warn('[TelegramBot] NexusTelegram nao configurado.')
+        return null
+    }
+
     try {
-        const res = await fetch(url, {
+        const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: chatId,
-                text,
-                parse_mode: options?.parse_mode || 'HTML',
-                disable_web_page_preview: true,
-                reply_markup: options?.reply_markup,
-            }),
+            body: JSON.stringify(payload),
         })
-        return await res.json()
-    } catch (err) {
-        console.error('[TelegramBot] Send error:', err)
+        const data = await response.json() as T & { ok?: boolean; description?: string }
+        if (!data.ok) console.error(`[TelegramBot] ${method} falhou:`, data.description)
+        return data
+    } catch (error) {
+        console.error(`[TelegramBot] ${method} erro:`, error)
         return null
     }
 }
 
-async function editMsg(chatId: string, msgId: number, text: string, markup?: any) {
-    const url = `https://api.telegram.org/bot${BOT_TOKEN()}/editMessageText`
-    try {
-        const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: chatId,
-                message_id: msgId,
-                text,
-                parse_mode: 'HTML',
-                disable_web_page_preview: true,
-                reply_markup: markup,
-            }),
+export async function sendMessage(chatId: string, text: string, options: SendOptions = {}) {
+    const result = await telegramCall<{ ok?: boolean }>('sendMessage', {
+        chat_id: chatId,
+        text,
+        parse_mode: options.parse_mode || 'HTML',
+        disable_web_page_preview: true,
+        reply_markup: options.reply_markup,
+    })
+
+    if (!result?.ok) {
+        await telegramCall('sendMessage', {
+            chat_id: chatId,
+            text: text.replace(/<[^>]+>/g, ''),
+            disable_web_page_preview: true,
+            reply_markup: options.reply_markup,
         })
-        return await res.json()
-    } catch (err) {
-        console.error('[TelegramBot] Edit error:', err)
-        return null
+    }
+
+    return result
+}
+
+async function editMessage(chatId: string, messageId: number, text: string, replyMarkup?: SendOptions['reply_markup']) {
+    const result = await telegramCall<{ ok?: boolean; description?: string }>('editMessageText', {
+        chat_id: chatId,
+        message_id: messageId,
+        text,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        reply_markup: replyMarkup,
+    })
+
+    if (!result?.ok) {
+        await sendMessage(chatId, text, { reply_markup: replyMarkup })
     }
 }
 
-async function sendPhoto(chatId: string, photoUrl: string, caption?: string) {
-    const url = `https://api.telegram.org/bot${BOT_TOKEN()}/sendPhoto`
-    try {
-        const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: chatId,
-                photo: photoUrl,
-                caption: caption || '',
-                parse_mode: 'HTML',
-            }),
-        })
-        return await res.json()
-    } catch (err) {
-        console.error('[TelegramBot] Photo error:', err)
-        return null
-    }
+async function sendPhoto(chatId: string, photoUrl: string, caption: string) {
+    return telegramCall('sendPhoto', {
+        chat_id: chatId,
+        photo: photoUrl,
+        caption,
+        parse_mode: 'HTML',
+    })
 }
 
 async function ackCallback(callbackQueryId: string, text?: string) {
-    const url = `https://api.telegram.org/bot${BOT_TOKEN()}/answerCallbackQuery`
-    try { await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callback_query_id: callbackQueryId, text: text || '' }) }) } catch (e) { /* ignore */ }
+    await telegramCall('answerCallbackQuery', {
+        callback_query_id: callbackQueryId,
+        text: text || '',
+    })
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-function isAuthorized(chatId: string | number): boolean {
-    const allowed = ALLOWED_CHAT_ID()
-    if (!allowed) return false
-    return String(chatId) === String(allowed)
+async function getAllowedChatIds() {
+    const ids = new Set(
+        String(process.env.chatidtelegram || '')
+            .split(',')
+            .map(value => value.trim())
+            .filter(Boolean),
+    )
+
+    try {
+        const settings = await prisma.settings.findUnique({
+            where: { id: 1 },
+            select: { telegramChatId: true },
+        })
+        if (settings?.telegramChatId) ids.add(String(settings.telegramChatId).trim())
+    } catch {
+        // Keep env-only auth if Settings is unavailable.
+    }
+
+    return ids
 }
 
-function esc(s: string): string {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+async function isAuthorized(chatId: string) {
+    const allowed = await getAllowedChatIds()
+    return allowed.size > 0 && allowed.has(String(chatId))
 }
 
-function btn(text: string, data: string) { return { text, callback_data: data } }
-function kb(rows: { text: string, callback_data: string }[][]) { return { inline_keyboard: rows } }
+function readDetails(details: string | null): GamJobDetails {
+    const raw = details || ''
+    if (!raw.trim().startsWith('{')) return { orderUrl: raw }
 
-// Persistent Menu (Reply Keyboard)
-function getPersistentMenu() {
+    try {
+        return JSON.parse(raw) as GamJobDetails
+    } catch {
+        return { orderUrl: raw }
+    }
+}
+
+function getOrderIdFromUrl(value: string) {
+    return value.match(/order_id=(\d+)/i)?.[1] || ''
+}
+
+function extractGamOrderUrl(message: string) {
+    return message.match(/https:\/\/admanager\.google\.com\/\S*order_id=\d+\S*/i)?.[0]?.replace(/[),.;]+$/, '') || null
+}
+
+function getBrtTodayStart(now = new Date()) {
+    const brtNowStr = now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })
+    const brtNow = new Date(brtNowStr)
+    return new Date(Date.UTC(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate()))
+}
+
+function activeCaptureWhere(now = new Date()) {
+    const today = getBrtTodayStart(now)
+
     return {
-        keyboard: [
-            [{ text: '📊 Status' }, { text: '⚙️ Gerenciar' }],
-            [{ text: '📚 Books' }, { text: '🔄 Fila' }],
-            [{ text: '📜 Logs' }, { text: 'ℹ️ Ajuda' }]
+        isArchived: false,
+        status: { notIn: CAPTURE_BLOCKED_STATUSES },
+        adOpsStatus: { notIn: CAPTURE_BLOCKED_ADOPS_STATUSES },
+        AND: [
+            { OR: [{ flightStart: null }, { flightStart: { lte: today } }] },
+            { OR: [{ flightEnd: null }, { flightEnd: { gte: today } }] },
         ],
-        resize_keyboard: true,
-        one_time_keyboard: false
     }
 }
 
-// =============================================================================
-// MAIN ROUTER
-// =============================================================================
-export async function handleUpdate(update: any) {
-    // Callback query (button press)
-    if (update?.callback_query) {
-        return await handleCallback(update.callback_query)
+function statusLabel(level: string) {
+    const map: Record<string, string> = {
+        [GAM_PENDING_LEVEL]: 'Fila',
+        [GAM_RUNNING_LEVEL]: 'Rodando',
+        [GAM_REVIEW_LEVEL]: 'Revisao',
+        [GAM_ERROR_LEVEL]: 'Erro',
+        [GAM_AUTH_REQUIRED_LEVEL]: 'Login Google',
+        JOB_GAM_CANCELLED: 'Cancelado',
+    }
+    return map[level] || level
+}
+
+async function respond(context: BotCommandContext, text: string, rows: TelegramInlineButton[][] = []) {
+    const markup = rows.length > 0 ? keyboard(rows) : undefined
+    if (context.messageId && !context.isNewMessage) {
+        await editMessage(context.chatId, context.messageId, text, markup)
+        return
+    }
+    await sendMessage(context.chatId, text, { reply_markup: markup })
+}
+
+async function showHome(context: BotCommandContext) {
+    await respond(
+        context,
+        [
+            '<b>Adsnap Nexus Bot</b>',
+            '<i>Controle operacional pelo Telegram.</i>',
+            '',
+            'Escolha uma area ou envie um comando em texto:',
+            '<code>capturar pi 402716</code>',
+            '<code>status</code>, <code>fila</code>, <code>orders</code>',
+            'ou cole um link de Order do Google Ad Manager.',
+        ].join('\n'),
+        [
+            [button('Status', 'menu:status'), button('Workers', 'menu:workers')],
+            [button('GAM Orders', 'menu:gam'), button('Capturas', 'menu:captures')],
+            [button('Books', 'menu:books'), button('Logs', 'menu:logs')],
+            [button('Alertas', 'menu:alerts'), button('Quarentena', 'menu:quarantine')],
+        ],
+    )
+}
+
+async function showStatus(context: BotCommandContext) {
+    const [
+        campaignCounts,
+        todayCaptures,
+        workerCounts,
+        gamCounts,
+        storage,
+    ] = await Promise.all([
+        prisma.campaign.groupBy({
+            by: ['status'],
+            where: { isArchived: false },
+            _count: { _all: true },
+        }),
+        prisma.capture.count({
+            where: {
+                status: 'SUCCESS',
+                createdAt: { gte: getBrtTodayStart() },
+            },
+        }),
+        prisma.workerJob.groupBy({
+            by: ['status'],
+            where: { type: WORKER_JOB_TYPE_CAPTURE, status: { in: ['QUEUED', 'PROCESSING', 'FAILED'] } },
+            _count: { _all: true },
+        }).catch(() => []),
+        prisma.nexusLog.groupBy({
+            by: ['level'],
+            where: { level: { in: GAM_JOB_LEVELS } },
+            _count: { _all: true },
+        }),
+        getStorageSummary(),
+    ])
+
+    const campaignStatus = (status: string) => campaignCounts.find(item => item.status === status)?._count._all || 0
+    const workerStatus = (status: string) => workerCounts.find(item => item.status === status)?._count._all || 0
+    const gamStatus = (level: string) => gamCounts.find(item => item.level === level)?._count._all || 0
+
+    await respond(
+        context,
+        [
+            '<b>Status do sistema</b>',
+            '',
+            `<b>Capturas hoje:</b> ${todayCaptures}`,
+            `<b>Campanhas ativas:</b> ${campaignStatus('PENDING') + campaignStatus('SUCCESS') + campaignStatus('FAILED') + campaignStatus('QUEUED') + campaignStatus('PROCESSING')}`,
+            `<b>Fila worker:</b> ${workerStatus('QUEUED')} em espera, ${workerStatus('PROCESSING')} em execucao, ${workerStatus('FAILED')} com erro`,
+            `<b>GAM:</b> ${gamStatus(GAM_PENDING_LEVEL)} fila, ${gamStatus(GAM_RUNNING_LEVEL)} rodando, ${gamStatus(GAM_REVIEW_LEVEL)} revisao`,
+            `<b>Storage:</b> ${storage}`,
+        ].join('\n'),
+        [
+            [button('Atualizar', 'menu:status')],
+            [button('Workers', 'menu:workers'), button('GAM Orders', 'menu:gam')],
+            [button('Menu', 'menu:home')],
+        ],
+    )
+}
+
+async function getStorageSummary() {
+    try {
+        const result = await (prisma as any).$queryRawUnsafe(
+            `SELECT SUM((metadata->>'size')::bigint) as total_size FROM storage.objects WHERE bucket_id = 'screenshots'`,
+        ) as Array<{ total_size?: bigint | number | string | null }>
+        const bytes = Number(result[0]?.total_size || 0)
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    } catch {
+        return 'indisponivel'
+    }
+}
+
+async function showWorkers(context: BotCommandContext) {
+    const [jobs, fallbackCampaigns] = await Promise.all([
+        prisma.workerJob.findMany({
+            where: { type: WORKER_JOB_TYPE_CAPTURE, status: { in: ['QUEUED', 'PROCESSING', 'FAILED'] } },
+            orderBy: [{ status: 'asc' }, { priority: 'desc' }, { scheduledFor: 'asc' }],
+            take: 10,
+            include: {
+                campaign: {
+                    select: { pi: true, client: true, format: true, device: true },
+                },
+            },
+        }).catch(() => []),
+        prisma.campaign.findMany({
+            where: { isArchived: false, status: { in: ['QUEUED', 'PROCESSING', 'FAILED', 'QUARANTINE'] } },
+            orderBy: { updatedAt: 'asc' },
+            take: 10,
+            select: { id: true, pi: true, client: true, format: true, device: true, status: true },
+        }),
+    ])
+    const formatMap = await getFormatLabelMap()
+    const rows: string[] = ['<b>Workers e fila</b>', '']
+
+    if (jobs.length > 0) {
+        for (const job of jobs) {
+            rows.push(
+                `${job.status} | ${html(job.campaign?.client || 'Campanha')} | PI ${html(job.campaign?.pi || '-')}`,
+                `Formato: ${html(resolveFormatLabel(formatMap, job.campaign?.format))} / ${html(job.campaign?.device || '-')}`,
+                '',
+            )
+        }
+    } else if (fallbackCampaigns.length > 0) {
+        for (const campaign of fallbackCampaigns) {
+            rows.push(
+                `${campaign.status} | ${html(campaign.client)} | PI ${html(campaign.pi)}`,
+                `Formato: ${html(resolveFormatLabel(formatMap, campaign.format))} / ${html(campaign.device)}`,
+                '',
+            )
+        }
+    } else {
+        rows.push('Fila vazia.')
     }
 
-    // Text message
+    await respond(
+        context,
+        rows.join('\n').trim(),
+        [
+            [button('Atualizar', 'menu:workers'), button('Capturas', 'menu:captures')],
+            [linkButton('Abrir painel', `${appUrl()}/workers`)],
+            [button('Menu', 'menu:home')],
+        ],
+    )
+}
+
+async function showGamOrders(context: BotCommandContext) {
+    const jobs = await prisma.nexusLog.findMany({
+        where: { level: { in: GAM_JOB_LEVELS } },
+        orderBy: { createdAt: 'desc' },
+        take: 8,
+        select: { id: true, level: true, message: true, details: true, createdAt: true },
+    })
+
+    const rows = ['<b>GAM Orders</b>', '']
+    const buttons: TelegramInlineButton[][] = []
+
+    if (jobs.length === 0) {
+        rows.push('Nenhuma Order GAM recente.')
+    }
+
+    for (const job of jobs) {
+        const details = readDetails(job.details)
+        const orderId = details.orderId || getOrderIdFromUrl(details.orderUrl || '') || 'GAM'
+        const client = details.client || job.message.replace(/^Nexus GAM:\s*/i, '')
+        rows.push(
+            `<b>${html(statusLabel(job.level))}</b> | Order <code>${html(orderId)}</code>`,
+            `${html(truncate(client, 52))}`,
+            '',
+        )
+
+        if (job.level === GAM_REVIEW_LEVEL) {
+            buttons.push([linkButton(`Revisar ${orderId}`, details.notifications?.reviewUrl || buildGamReviewUrl(job.id))])
+        }
+        if (job.level === GAM_AUTH_REQUIRED_LEVEL) {
+            const refreshUrl = githubWorkflowUrl('gam-session-refresh.yml')
+            if (refreshUrl) buttons.push([linkButton('Renovar login Google', refreshUrl)])
+        }
+    }
+
+    buttons.push([button('Atualizar', 'menu:gam'), button('Enviar lembretes', 'alerts:review-reminders')])
+    buttons.push([button('Menu', 'menu:home')])
+
+    await respond(context, rows.join('\n').trim(), buttons)
+}
+
+async function showCaptures(context: BotCommandContext) {
+    const campaigns = await prisma.campaign.findMany({
+        where: activeCaptureWhere(),
+        orderBy: [{ client: 'asc' }, { pi: 'asc' }],
+        take: 80,
+        select: { id: true, pi: true, client: true, campaignName: true, format: true, device: true },
+    })
+
+    const groups = new Map<string, typeof campaigns>()
+    for (const campaign of campaigns) {
+        const key = campaign.pi || campaign.id
+        if (!groups.has(key)) groups.set(key, [])
+        groups.get(key)!.push(campaign)
+    }
+
+    const rows = ['<b>Capturas</b>', `${groups.size} PI(s) ativos para captura.`, '']
+    const buttons: TelegramInlineButton[][] = [[button('Capturar tudo ativo', 'capture:all')]]
+
+    for (const [pi, items] of Array.from(groups.entries()).slice(0, 8)) {
+        const first = items[0]
+        rows.push(`${html(first.client)} | PI <code>${html(pi)}</code> | ${items.length} formato(s)`)
+        buttons.push([button(`Capturar PI ${pi}`, `capture:pi:${pi}`)])
+    }
+
+    if (groups.size === 0) rows.push('Nenhuma campanha ativa elegivel agora.')
+
+    buttons.push([button('Atualizar', 'menu:captures'), button('Menu', 'menu:home')])
+    await respond(context, rows.join('\n'), buttons)
+}
+
+async function queueAllActiveCaptures(context: BotCommandContext) {
+    const campaigns = await prisma.campaign.findMany({
+        where: activeCaptureWhere(),
+        select: { id: true },
+    })
+
+    await queueCaptures(context, campaigns.map(campaign => campaign.id), 'telegram-all-active', 'captura geral')
+}
+
+async function queuePiCaptures(context: BotCommandContext, pi: string) {
+    const campaigns = await prisma.campaign.findMany({
+        where: { ...activeCaptureWhere(), pi },
+        select: { id: true, client: true },
+    })
+
+    await queueCaptures(context, campaigns.map(campaign => campaign.id), 'telegram-pi', `PI ${pi}`)
+}
+
+async function queueCampaignCapture(context: BotCommandContext, campaignId: string) {
+    await queueCaptures(context, [campaignId], 'telegram-campaign', `campanha ${campaignId}`)
+}
+
+async function queueCaptures(context: BotCommandContext, campaignIds: string[], source: string, label: string) {
+    const queueResult = await enqueueCaptureJobs(campaignIds, {
+        source,
+        priority: 35,
+        allowTerminalStatuses: true,
+    })
+    const triggered = queueResult.campaignIds.length > 0
+        ? await triggerNexusWorker(queueResult.campaignIds)
+        : false
+
+    await nexusLogStore.addLog(
+        `Bot Telegram: ${queueResult.campaignIds.length} captura(s) enfileirada(s) para ${label}.`,
+        triggered ? 'SUCCESS' : 'INFO',
+        JSON.stringify({ queueResult, triggered }),
+    )
+
+    await respond(
+        context,
+        [
+            '<b>Captura enfileirada</b>',
+            '',
+            `Alvo: ${html(label)}`,
+            `Formatos elegiveis: ${queueResult.campaignIds.length}`,
+            `Novos jobs: ${queueResult.created}`,
+            `Ignorados: ${queueResult.skipped}`,
+            `Worker GitHub: ${triggered ? 'acionado' : 'nao acionado automaticamente'}`,
+        ].join('\n'),
+        [
+            [button('Ver Workers', 'menu:workers')],
+            [button('Menu', 'menu:home')],
+        ],
+    )
+}
+
+async function showBooks(context: BotCommandContext) {
+    const campaigns = await prisma.campaign.findMany({
+        where: { isArchived: false },
+        distinct: ['pi'],
+        orderBy: { client: 'asc' },
+        take: 12,
+        select: { pi: true, client: true },
+    })
+
+    const rows = ['<b>Books</b>', 'Selecione um PI para ver os ultimos prints.', '']
+    const buttons: TelegramInlineButton[][] = []
+
+    for (const campaign of campaigns) {
+        rows.push(`${html(campaign.client)} | PI <code>${html(campaign.pi)}</code>`)
+        buttons.push([button(`Book PI ${campaign.pi}`, `book:pi:${campaign.pi}`)])
+    }
+
+    if (campaigns.length === 0) rows.push('Nenhum PI encontrado.')
+
+    buttons.push([linkButton('Abrir Books no site', `${appUrl()}/books`)]);
+    buttons.push([button('Menu', 'menu:home')])
+    await respond(context, rows.join('\n'), buttons)
+}
+
+async function showBookPi(context: BotCommandContext, pi: string) {
+    const campaigns = await prisma.campaign.findMany({
+        where: { pi, isArchived: false },
+        orderBy: [{ client: 'asc' }, { format: 'asc' }],
+        take: 12,
+        select: {
+            id: true,
+            client: true,
+            format: true,
+            device: true,
+            captures: {
+                where: { status: 'SUCCESS' },
+                orderBy: { createdAt: 'desc' },
+                take: 1,
+                select: { screenshotPath: true, createdAt: true },
+            },
+        },
+    })
+
+    const formatMap = await getFormatLabelMap()
+    const rows = [`<b>Book PI ${html(pi)}</b>`, '']
+    const buttons: TelegramInlineButton[][] = []
+
+    for (const campaign of campaigns) {
+        const capture = campaign.captures[0]
+        rows.push(
+            `${capture ? 'OK' : '--'} ${html(resolveFormatLabel(formatMap, campaign.format))} / ${html(campaign.device)}`,
+            capture ? `Ultimo print: ${html(formatDate(capture.createdAt))}` : 'Sem print ainda',
+            '',
+        )
+        if (capture?.screenshotPath?.startsWith('http')) {
+            buttons.push([button(`Enviar ${resolveFormatLabel(formatMap, campaign.format)}`.slice(0, 60), `book:photo:${campaign.id}`)])
+        }
+    }
+
+    if (campaigns.length === 0) rows.push('Nenhuma campanha neste PI.')
+
+    buttons.push([
+        linkButton('Abrir book completo', `${appUrl()}/books/${encodeURIComponent(pi)}`),
+        linkButton('Baixar ZIP', `${appUrl()}/api/books/download?pi=${encodeURIComponent(pi)}`),
+    ])
+    buttons.push([button('Voltar', 'menu:books'), button('Menu', 'menu:home')])
+    await respond(context, rows.join('\n').trim(), buttons)
+}
+
+async function sendBookPhoto(context: BotCommandContext, campaignId: string) {
+    const campaign = await prisma.campaign.findUnique({
+        where: { id: campaignId },
+        select: {
+            client: true,
+            pi: true,
+            format: true,
+            device: true,
+            captures: {
+                where: { status: 'SUCCESS' },
+                orderBy: { createdAt: 'desc' },
+                take: 1,
+                select: { screenshotPath: true, createdAt: true },
+            },
+        },
+    })
+    const capture = campaign?.captures[0]
+    if (!campaign || !capture?.screenshotPath?.startsWith('http')) {
+        await respond(context, 'Print indisponivel para essa campanha.', [[button('Menu', 'menu:home')]])
+        return
+    }
+
+    const formatMap = await getFormatLabelMap()
+    await sendPhoto(
+        context.chatId,
+        capture.screenshotPath,
+        `<b>${html(campaign.client)}</b>\nPI ${html(campaign.pi)} | ${html(resolveFormatLabel(formatMap, campaign.format))} / ${html(campaign.device)}\n${html(formatDate(capture.createdAt))}`,
+    )
+}
+
+async function showLogs(context: BotCommandContext) {
+    const logs = await prisma.nexusLog.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 12,
+        select: { level: true, message: true, createdAt: true },
+    })
+
+    const rows = ['<b>Ultimos logs Nexus</b>', '']
+    for (const log of logs) {
+        rows.push(
+            `<b>${html(log.level)}</b> | ${html(formatTime(log.createdAt))}`,
+            html(truncate(log.message, 90)),
+            '',
+        )
+    }
+    if (logs.length === 0) rows.push('Sem logs recentes.')
+
+    await respond(context, rows.join('\n').trim(), [
+        [button('Atualizar', 'menu:logs')],
+        [button('Menu', 'menu:home')],
+    ])
+}
+
+async function showQuarantine(context: BotCommandContext) {
+    const campaigns = await prisma.campaign.findMany({
+        where: { isArchived: false, status: { in: ['FAILED', 'QUARANTINE'] } },
+        orderBy: { updatedAt: 'desc' },
+        take: 10,
+        select: { id: true, pi: true, client: true, format: true, status: true, lastWorkerError: true },
+    })
+    const formatMap = await getFormatLabelMap()
+    const rows = ['<b>Falhas e quarentena</b>', '']
+    const buttons: TelegramInlineButton[][] = []
+
+    for (const campaign of campaigns) {
+        rows.push(
+            `<b>${html(campaign.status)}</b> | ${html(campaign.client)} | PI ${html(campaign.pi)}`,
+            `${html(resolveFormatLabel(formatMap, campaign.format))}`,
+            campaign.lastWorkerError ? html(truncate(campaign.lastWorkerError, 80)) : '',
+            '',
+        )
+        buttons.push([button(`Reprocessar ${campaign.pi}`, `capture:campaign:${campaign.id}`)])
+    }
+
+    if (campaigns.length === 0) rows.push('Nenhuma falha ativa.')
+
+    buttons.push([button('Atualizar', 'menu:quarantine'), button('Menu', 'menu:home')])
+    await respond(context, rows.join('\n').trim(), buttons)
+}
+
+async function showAlerts(context: BotCommandContext) {
+    const [settings, reviewCount, authRequiredCount] = await Promise.all([
+        prisma.settings.findUnique({ where: { id: 1 }, select: { telegramAlertsEnabled: true, telegramLastAlertAt: true } }),
+        prisma.nexusLog.count({ where: { level: GAM_REVIEW_LEVEL } }),
+        prisma.nexusLog.count({ where: { level: GAM_AUTH_REQUIRED_LEVEL } }),
+    ])
+
+    await respond(
+        context,
+        [
+            '<b>Alertas</b>',
+            '',
+            `Alertas diarios: ${settings?.telegramAlertsEnabled === false ? 'silenciados' : 'ativos'}`,
+            `Ultimo alerta diario: ${settings?.telegramLastAlertAt ? html(formatDate(settings.telegramLastAlertAt)) : 'nunca'}`,
+            `Revisoes GAM pendentes: ${reviewCount}`,
+            `Login Google pendente: ${authRequiredCount}`,
+        ].join('\n'),
+        [
+            [button('Enviar lembretes de revisao', 'alerts:review-reminders')],
+            [button(settings?.telegramAlertsEnabled === false ? 'Ativar alertas diarios' : 'Silenciar alertas diarios', settings?.telegramAlertsEnabled === false ? 'alerts:toggle:on' : 'alerts:toggle:off')],
+            [button('Menu', 'menu:home')],
+        ],
+    )
+}
+
+async function toggleDailyAlerts(context: BotCommandContext, enabled: boolean) {
+    await prisma.settings.upsert({
+        where: { id: 1 },
+        update: { telegramAlertsEnabled: enabled },
+        create: { id: 1, telegramAlertsEnabled: enabled },
+    })
+    await showAlerts(context)
+}
+
+async function runReviewReminders(context: BotCommandContext) {
+    const result = await sendPendingGamReviewReminders()
+    await respond(
+        context,
+        [
+            '<b>Lembretes GAM</b>',
+            '',
+            `Verificados: ${result.checked}`,
+            `Enviados: ${result.sent}`,
+            `Intervalo: ${result.reminderMinutes} min`,
+        ].join('\n'),
+        [[button('GAM Orders', 'menu:gam'), button('Menu', 'menu:home')]],
+    )
+}
+
+async function submitGamOrder(context: BotCommandContext, orderUrl: string) {
+    if (!/^https:\/\/admanager\.google\.com\/.+order_id=\d+/i.test(orderUrl)) {
+        await respond(context, 'Link de Order GAM invalido.', [[button('Menu', 'menu:home')]])
+        return
+    }
+
+    const orderId = getOrderIdFromUrl(orderUrl) || 'Unknown'
+    const recentCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+    const recentJobs = await prisma.nexusLog.findMany({
+        where: {
+            level: { in: [GAM_PENDING_LEVEL, GAM_RUNNING_LEVEL, GAM_REVIEW_LEVEL, GAM_AUTH_REQUIRED_LEVEL] },
+            createdAt: { gte: recentCutoff },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 30,
+    })
+    const existingJob = recentJobs.find(job => {
+        const details = readDetails(job.details)
+        return details.orderId === orderId || details.orderUrl?.includes(`order_id=${orderId}`)
+    })
+
+    if (existingJob) {
+        const details = readDetails(existingJob.details)
+        const triggered = existingJob.level === GAM_PENDING_LEVEL
+            ? await triggerGamWorker(existingJob.id)
+            : false
+        const buttons: TelegramInlineButton[][] = [
+            [button('GAM Orders', 'menu:gam')],
+            [button('Menu', 'menu:home')],
+        ]
+        if (existingJob.level === GAM_REVIEW_LEVEL) {
+            buttons.unshift([linkButton('Abrir revisao', details.notifications?.reviewUrl || buildGamReviewUrl(existingJob.id))])
+        }
+        if (existingJob.level === GAM_AUTH_REQUIRED_LEVEL) {
+            const refreshUrl = githubWorkflowUrl('gam-session-refresh.yml')
+            if (refreshUrl) buttons.unshift([linkButton('Renovar login Google', refreshUrl)])
+        }
+
+        await respond(
+            context,
+            [
+                '<b>Order ja esta no Nexus</b>',
+                '',
+                `Order: <code>${html(orderId)}</code>`,
+                `Status: ${html(statusLabel(existingJob.level))}`,
+                `Worker reacionado: ${triggered ? 'sim' : 'nao'}`,
+            ].join('\n'),
+            buttons,
+        )
+        return
+    }
+
+    const job = await prisma.nexusLog.create({
+        data: {
+            level: GAM_PENDING_LEVEL,
+            message: `Nexus Telegram: Order ${orderId} recebida para cadastro automatico`,
+            details: JSON.stringify({
+                orderUrl,
+                orderId,
+                mode: 'AUTO_REGISTER',
+                source: 'telegram-bot',
+                executionLogs: [{
+                    at: new Date().toISOString(),
+                    message: `Order ${orderId} recebida pelo Telegram Bot`,
+                    tone: 'info',
+                }],
+            }),
+        },
+    })
+
+    const triggered = await triggerGamWorker(job.id)
+    await notifyGamOrderStarted(job.id)
+    await nexusLogStore.addLog(
+        `Bot Telegram: Order GAM ${orderId} enfileirada.`,
+        triggered ? 'SUCCESS' : 'INFO',
+        JSON.stringify({ jobId: job.id, orderId, triggered }),
+    )
+
+    await respond(
+        context,
+        [
+            '<b>Order GAM recebida</b>',
+            '',
+            `Order: <code>${html(orderId)}</code>`,
+            `Job: <code>${html(job.id)}</code>`,
+            `Worker GitHub: ${triggered ? 'acionado' : 'nao acionado automaticamente'}`,
+        ].join('\n'),
+        [
+            [button('Ver GAM Orders', 'menu:gam')],
+            [linkButton('Abrir Nexus', `${appUrl()}/nexus`)],
+            [button('Menu', 'menu:home')],
+        ],
+    )
+}
+
+function formatDate(value: Date) {
+    return value.toLocaleString('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+    })
+}
+
+function formatTime(value: Date) {
+    return value.toLocaleTimeString('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+    })
+}
+
+async function handleText(chatId: string, text: string) {
+    const context: BotCommandContext = { chatId, isNewMessage: true }
+    const orderUrl = extractGamOrderUrl(text)
+    if (orderUrl) return submitGamOrder(context, orderUrl)
+
+    const normalized = normalizeText(text)
+    const piMatch = normalized.match(/\b(?:capturar|print|prints|capture)\s+(?:pi\s*)?(\d{3,8})\b/)
+    if (piMatch) return queuePiCaptures(context, piMatch[1])
+
+    if (/^\/?(start|menu|ajuda|help)$/i.test(normalized)) return showHome(context)
+    if (/\bstatus\b/i.test(normalized)) return showStatus(context)
+    if (/\b(fila|worker|workers)\b/i.test(normalized)) return showWorkers(context)
+    if (/\b(gam|order|orders)\b/i.test(normalized)) return showGamOrders(context)
+    if (/\b(captura|capturas|print|prints)\b/i.test(normalized)) return showCaptures(context)
+    if (/\b(book|books|comprovante|comprovantes)\b/i.test(normalized)) return showBooks(context)
+    if (/\b(log|logs)\b/i.test(normalized)) return showLogs(context)
+    if (/\b(alerta|alertas)\b/i.test(normalized)) return showAlerts(context)
+
+    return showHome(context)
+}
+
+async function handleCallbackData(chatId: string, messageId: number, data: string) {
+    const context: BotCommandContext = { chatId, messageId }
+
+    if (data === 'menu:home') return showHome(context)
+    if (data === 'menu:status') return showStatus(context)
+    if (data === 'menu:workers') return showWorkers(context)
+    if (data === 'menu:gam') return showGamOrders(context)
+    if (data === 'menu:captures') return showCaptures(context)
+    if (data === 'menu:books') return showBooks(context)
+    if (data === 'menu:logs') return showLogs(context)
+    if (data === 'menu:alerts') return showAlerts(context)
+    if (data === 'menu:quarantine') return showQuarantine(context)
+
+    if (data === 'capture:all') return queueAllActiveCaptures(context)
+    if (data.startsWith('capture:pi:')) return queuePiCaptures(context, data.slice('capture:pi:'.length))
+    if (data.startsWith('capture:campaign:')) return queueCampaignCapture(context, data.slice('capture:campaign:'.length))
+
+    if (data.startsWith('book:pi:')) return showBookPi(context, data.slice('book:pi:'.length))
+    if (data.startsWith('book:photo:')) return sendBookPhoto(context, data.slice('book:photo:'.length))
+
+    if (data === 'alerts:review-reminders') return runReviewReminders(context)
+    if (data === 'alerts:toggle:on') return toggleDailyAlerts(context, true)
+    if (data === 'alerts:toggle:off') return toggleDailyAlerts(context, false)
+
+    return respond(context, 'Acao desconhecida.', [[button('Menu', 'menu:home')]])
+}
+
+export async function handleUpdate(update: any) {
+    if (!botToken()) {
+        console.warn('[TelegramBot] Update ignorado: NexusTelegram nao configurado.')
+        return
+    }
+
+    const callbackQuery = update?.callback_query
+    if (callbackQuery) {
+        const chatId = String(callbackQuery.message?.chat?.id || '')
+        const messageId = Number(callbackQuery.message?.message_id || 0)
+        const data = String(callbackQuery.data || '')
+
+        if (!await isAuthorized(chatId)) {
+            await ackCallback(callbackQuery.id, 'Acesso negado')
+            await sendMessage(chatId, `Acesso negado. Chat ID: <code>${html(chatId)}</code>`)
+            return
+        }
+
+        await ackCallback(callbackQuery.id)
+        try {
+            await handleCallbackData(chatId, messageId, data)
+        } catch (error) {
+            console.error('[TelegramBot] Callback error:', error)
+            await respond(
+                { chatId, messageId },
+                `Erro ao executar acao: <code>${html(error instanceof Error ? error.message : String(error))}</code>`,
+                [[button('Menu', 'menu:home')]],
+            )
+        }
+        return
+    }
+
     const message = update?.message
     if (!message?.text) return
 
-    const chatId = String(message.chat.id)
-    const text = message.text.trim()
+    const chatId = String(message.chat?.id || '')
+    const text = String(message.text || '').trim()
 
-    if (!isAuthorized(chatId)) {
-        await sendMessage(chatId, '🚫 <b>Acesso negado.</b>\nSeu Chat ID não está autorizado.')
+    if (!await isAuthorized(chatId)) {
+        await sendMessage(chatId, `Acesso negado. Chat ID: <code>${html(chatId)}</code>`)
         return
     }
 
     try {
-        console.log(`[TelegramBot] Recebido: ${text} de ${chatId}`)
-
-        // Map persistent buttons text to commands
-        const cmdText = text.toLowerCase()
-        if (text === '📊 Status') return await cbStatus(chatId, 0, true)
-        if (text === '⚙️ Gerenciar') return await cbGerenciar(chatId, 0, true)
-        if (text === '📚 Books') return await cbBooks(chatId, 0, true)
-        if (text === '🔄 Fila') return await cbFila(chatId, 0, true)
-        if (text === '📜 Logs') return await cbLogs(chatId, 0, true)
-        if (text === 'ℹ️ Ajuda' || cmdText === '/ajuda' || cmdText === '/start') return await showMainMenu(chatId)
-
-        // Default: show main menu (and send persistent buttons)
-        return await showMainMenu(chatId)
-    } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err)
-        console.error(`[TelegramBot] Erro:`, err)
-        await sendMessage(chatId, `❌ Erro: <code>${esc(errorMsg)}</code>`)
+        await handleText(chatId, text)
+    } catch (error) {
+        console.error('[TelegramBot] Message error:', error)
+        await sendMessage(
+            chatId,
+            `Erro ao processar mensagem: <code>${html(error instanceof Error ? error.message : String(error))}</code>`,
+            { reply_markup: keyboard([[button('Menu', 'menu:home')]]) },
+        )
     }
 }
 
-// =============================================================================
-// MAIN MENU — Entry point for everything
-// =============================================================================
-async function showMainMenu(chatId: string) {
-    const text = `
-🤖 <b>ADSNAP CLOUD</b>
-<i>Centro de Comando</i>
-
-Selecione uma opção no menu abaixo ou use os botões fixos:
-    `.trim()
-
-    await sendMessage(chatId, text, {
-        reply_markup: {
-            ...kb([
-                [btn('📊 Status do Sistema', 'menu:status')],
-                [btn('📋 Campanhas Ativas', 'menu:campanhas'), btn('🔄 Fila', 'menu:fila')],
-                [btn('⚙️ Gerenciar Campanhas', 'menu:gerenciar')],
-                [btn('📚 Books / Comprovantes', 'menu:books')],
-                [btn('⚠️ Quarentena', 'menu:quarentena'), btn('📜 Logs', 'menu:logs')],
-                [btn('🔌 Erros API', 'menu:api_errors'), btn('🔔 Alertas', 'menu:alerts')],
-                [btn('💾 Storage', 'menu:storage')],
-            ]),
-            ...getPersistentMenu() // Add both for first message
-        },
-    })
-}
-
-// Edit an existing message to show main menu
-async function editMainMenu(chatId: string, msgId: number) {
-    const text = `
-🤖 <b>ADSNAP CLOUD</b>
-<i>Centro de Comando</i>
-
-Selecione uma opção:
-    `.trim()
-
-    await editMsg(chatId, msgId, text, kb([
-        [btn('📊 Status do Sistema', 'menu:status')],
-        [btn('📋 Campanhas Ativas', 'menu:campanhas'), btn('🔄 Fila', 'menu:fila')],
-        [btn('⚙️ Gerenciar Campanhas', 'menu:gerenciar')],
-        [btn('📚 Books / Comprovantes', 'menu:books')],
-        [btn('⚠️ Quarentena', 'menu:quarentena'), btn('📜 Logs', 'menu:logs')],
-        [btn('🔌 Erros API', 'menu:api_errors'), btn('🔔 Alertas', 'menu:alerts')],
-        [btn('💾 Storage', 'menu:storage')],
-    ]))
-}
-
-// =============================================================================
-// CALLBACK ROUTER
-// =============================================================================
-async function handleCallback(query: any) {
-    const chatId = String(query.message.chat.id)
-    const msgId = query.message.message_id
-    const data = query.data as string
-
-    if (!isAuthorized(chatId)) {
-        await ackCallback(query.id, '🚫 Acesso negado')
-        return
-    }
-
-    await ackCallback(query.id)
-
-    try {
-        console.log(`[TelegramBot] Callback: ${data}`)
-
-        // --- Menu navigation ---
-        if (data === 'menu:main') return await editMainMenu(chatId, msgId)
-        if (data === 'menu:status') return await cbStatus(chatId, msgId)
-        if (data === 'menu:campanhas') return await cbCampanhas(chatId, msgId)
-        if (data === 'menu:fila') return await cbFila(chatId, msgId)
-        if (data === 'menu:quarentena') return await cbQuarentena(chatId, msgId)
-        if (data === 'menu:logs') return await cbLogs(chatId, msgId)
-        if (data === 'menu:api_errors') return await cbApiErrors(chatId, msgId)
-        if (data === 'menu:storage') return await cbStorage(chatId, msgId)
-        if (data === 'menu:gerenciar') return await cbGerenciar(chatId, msgId)
-        if (data === 'menu:books') return await cbBooks(chatId, msgId)
-        if (data === 'menu:alerts') return await cbAlerts(chatId, msgId)
-        if (data.startsWith('alerts:toggle:')) return await cbToggleAlerts(chatId, msgId, data.slice(14))
-
-        // --- Gerenciar: PI/Campaign actions ---
-        if (data.startsWith('pi:')) return await cbShowPI(chatId, msgId, data.slice(3))
-        if (data.startsWith('actions:')) return await cbActions(chatId, msgId, data.slice(8))
-
-        // --- Capture ---
-        if (data.startsWith('cap:')) return await cbCapture(chatId, msgId, data.slice(4))
-        if (data.startsWith('cap_go:')) return await cbCaptureGo(chatId, msgId, data.slice(7))
-        if (data.startsWith('cap_nophoto:')) return await cbCaptureNoPhoto(chatId, msgId, data.slice(12))
-        if (data.startsWith('cap_all:')) return await cbCaptureAll(chatId, msgId, data.slice(8))
-        if (data.startsWith('cap_all_go:')) return await cbCaptureAllGo(chatId, msgId, data.slice(11))
-
-        // --- Delete ---
-        if (data.startsWith('del:')) return await cbDelete(chatId, msgId, data.slice(4))
-        if (data.startsWith('del_yes:')) return await cbDeleteYes(chatId, msgId, data.slice(8))
-        if (data.startsWith('del_pi:')) return await cbDeletePI(chatId, msgId, data.slice(7))
-        if (data.startsWith('del_pi_yes:')) return await cbDeletePIYes(chatId, msgId, data.slice(11))
-
-        // --- Rename ---
-        if (data.startsWith('rename:')) return await cbRename(chatId, msgId, data.slice(7))
-        if (data.startsWith('rn:')) return await cbRenameSet(chatId, msgId, data.slice(3))
-        if (data.startsWith('rn_clr:')) return await cbRenameClear(chatId, msgId, data.slice(7))
-
-        // --- Schedule ---
-        if (data.startsWith('sched:')) return await cbShowSchedule(chatId, msgId, data.slice(6))
-
-        // --- Books ---
-        if (data.startsWith('book:')) return await cbBookDetail(chatId, msgId, data.slice(5))
-        if (data.startsWith('bookphoto:')) return await cbBookPhoto(chatId, msgId, data.slice(10))
-
-        await editMsg(chatId, msgId, '❓ Ação desconhecida.', kb([[btn('◀️ Menu', 'menu:main')]]))
-    } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err)
-        console.error(`[TelegramBot] Callback error:`, err)
-        await editMsg(chatId, msgId, `❌ Erro: <code>${esc(errorMsg)}</code>`, kb([[btn('◀️ Menu', 'menu:main')]]))
-    }
-}
-
-// =============================================================================
-// 📊 STATUS
-// =============================================================================
-async function cbStatus(chatId: string, msgId: number, isNewMsg: boolean = false) {
-    try {
-        const { data: campaigns, error } = await supabase
-            .from('Campaign')
-            .select('pi, status')
-            .eq('isArchived', false)
-            .not('status', 'in', '("EXPIRED","FINISHED")')
-
-        if (error) throw error
-        const all = campaigns || []
-
-        const piSet = new Set(all.map(c => c.pi))
-        const pisSucesso = [...piSet].filter(pi => all.filter(c => c.pi === pi).every(c => c.status === 'SUCCESS')).length
-        const pisComErro = new Set(all.filter(c => c.status === 'FAILED' || c.status === 'QUARANTINE').map(c => c.pi)).size
-        const successF = all.filter(c => c.status === 'SUCCESS').length
-        const failedF = all.filter(c => c.status === 'FAILED').length
-        const quarantineF = all.filter(c => c.status === 'QUARANTINE').length
-        const queuedF = all.filter(c => c.status === 'QUEUED').length
-        const processingF = all.filter(c => c.status === 'PROCESSING').length
-
-        const todayStr = new Date().toISOString().split('T')[0]
-        const { count: todayCount } = await supabase.from('Capture').select('*', { count: 'exact', head: true }).gte('createdAt', todayStr)
-
-        const text = `
-📊 <b>STATUS DO SISTEMA</b>
-
-📁 <b>Campanhas (PIs)</b>
-├ Total PIs: <b>${piSet.size}</b>
-├ 100% capturados: ✅ ${pisSucesso}
-└ Com erro: ❌ ${pisComErro}
-
-📐 <b>Formatos</b>
-├ Total: <b>${all.length}</b>
-├ Sucesso: ✅ ${successF}
-├ Falhas: ❌ ${failedF}
-└ Quarentena: ⚠️ ${quarantineF}
-
-🔄 <b>Fila</b>
-├ Na fila: ${queuedF}
-└ Processando: ${processingF}
-
-📸 <b>Capturas hoje:</b> ${todayCount || 0}
-    `.trim()
-
-        const markup = kb([[btn('🔄 Atualizar', 'menu:status'), btn('◀️ Menu', 'menu:main')]])
-        if (isNewMsg) {
-            await sendMessage(chatId, text, { reply_markup: markup })
-        } else {
-            await editMsg(chatId, msgId, text, markup)
-        }
-    } catch (e) {
-        console.error('[TelegramBot] Status error:', e)
-        const errTxt = `❌ Erro ao buscar status: ${esc(String(e))}`
-        if (isNewMsg) await sendMessage(chatId, errTxt)
-        else await editMsg(chatId, msgId, errTxt, kb([[btn('◀️ Menu', 'menu:main')]]))
-    }
-}
-
-// =============================================================================
-// 📋 CAMPANHAS
-// =============================================================================
-async function cbCampanhas(chatId: string, msgId: number) {
-    const fmtMap = await loadFormatMap()
-    const { data: campaigns, error } = await supabase
-        .from('Campaign')
-        .select('id, pi, client, format, status, device, lastCaptureAt')
-        .eq('isArchived', false)
-        .not('status', 'in', '("EXPIRED","FINISHED")')
-        .order('client', { ascending: true })
-
-    if (error) throw error
-    if (!campaigns || campaigns.length === 0) {
-        await editMsg(chatId, msgId, '📭 Nenhuma campanha ativa.', kb([[btn('◀️ Menu', 'menu:main')]]))
-        return
-    }
-
-    const piGroups = new Map<string, typeof campaigns>()
-    for (const c of campaigns) {
-        const key = c.pi || 'SEM_PI'
-        if (!piGroups.has(key)) piGroups.set(key, [])
-        piGroups.get(key)!.push(c)
-    }
-
-    const sIcon: Record<string, string> = { PENDING: '⏳', QUEUED: '🔄', PROCESSING: '⚙️', SUCCESS: '✅', FAILED: '❌', QUARANTINE: '⚠️' }
-
-    let text = `📋 <b>CAMPANHAS ATIVAS</b>\n${piGroups.size} PIs • ${campaigns.length} formatos\n\n`
-
-    let idx = 0
-    for (const [pi, formats] of piGroups) {
-        if (idx >= 10) { text += `\n<i>...e mais ${piGroups.size - 10} PIs</i>`; break }
-        const client = formats[0].client
-        const allOk = formats.every(f => f.status === 'SUCCESS')
-        const hasErr = formats.some(f => f.status === 'FAILED' || f.status === 'QUARANTINE')
-        text += `${allOk ? '✅' : hasErr ? '❌' : '🔄'} <b>${esc(client)}</b>\n`
-        text += `   PI: <code>${esc(pi)}</code>\n`
-        for (const f of formats) {
-            const last = f.lastCaptureAt ? new Date(f.lastCaptureAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' }) : '—'
-            text += `   ${sIcon[f.status] || '❓'} ${esc(fl(fmtMap, f.format))} (${f.device}) • ${last}\n`
-        }
-        text += '\n'
-        idx++
-    }
-
-    await editMsg(chatId, msgId, text, kb([[btn('🔄 Atualizar', 'menu:campanhas'), btn('◀️ Menu', 'menu:main')]]))
-}
-
-// =============================================================================
-// 🔄 FILA
-// =============================================================================
-async function cbFila(chatId: string, msgId: number, isNewMsg: boolean = false) {
-    try {
-        const fmtMap = await loadFormatMap()
-
-        const { data: inQueue } = await supabase.from('Campaign').select('id, pi, client, format, status, device').in('status', ['QUEUED', 'PROCESSING']).order('updatedAt', { ascending: true })
-        const { data: scheduled } = await supabase.from('Campaign').select('id, pi, client, format, device, scheduledTimes').eq('isScheduled', true).eq('isArchived', false).not('status', 'in', '("EXPIRED","FINISHED","QUEUED","PROCESSING")')
-
-        const queue = inQueue || []
-        const sched = scheduled || []
-
-        const markup = kb([[btn('🔄 Atualizar', 'menu:fila'), btn('◀️ Menu', 'menu:main')]])
-
-        if (queue.length === 0 && sched.length === 0) {
-            const emptyText = '✅ <b>Fila vazia!</b>'
-            if (isNewMsg) return await sendMessage(chatId, emptyText, { reply_markup: markup })
-            return await editMsg(chatId, msgId, emptyText, markup)
-        }
-
-        let text = ''
-        if (queue.length > 0) {
-            const groups = groupByPI(queue)
-            text += `🔄 <b>NA FILA</b> (${queue.length} formatos)\n\n`
-            for (const [pi, fmts] of groups) {
-                text += `📌 <b>${esc(fmts[0].client)}</b> — PI: <code>${esc(pi)}</code>\n`
-                for (const f of fmts) text += `   ${f.status === 'PROCESSING' ? '⚙️' : '🔄'} ${esc(fl(fmtMap, f.format))} (${f.device})\n`
-                text += '\n'
-            }
-        }
-        if (sched.length > 0) {
-            const groups = groupByPI(sched)
-            text += `📅 <b>AGENDADAS</b> (${sched.length})\n\n`
-            for (const [pi, fmts] of groups) {
-                let times = '—'
-                try { const p = JSON.parse(fmts[0].scheduledTimes || '[]') as string[]; times = p.length > 0 ? p.join(', ') : '—' } catch { times = '—' }
-                text += `📌 <b>${esc(fmts[0].client)}</b> — PI: <code>${esc(pi)}</code>\n   ⏰ ${times}\n`
-                for (const f of fmts) text += `   📐 ${esc(fl(fmtMap, f.format))} (${f.device})\n`
-                text += '\n'
-            }
-        }
-
-        if (isNewMsg) {
-            await sendMessage(chatId, text.trim(), { reply_markup: markup })
-        } else {
-            await editMsg(chatId, msgId, text.trim(), markup)
-        }
-    } catch (e) {
-        console.error('[TelegramBot] Fila error:', e)
-    }
-}
-
-// =============================================================================
-// ⚠️ QUARENTENA
-// =============================================================================
-async function cbQuarentena(chatId: string, msgId: number) {
-    const fmtMap = await loadFormatMap()
-    const { data: quarantined } = await supabase.from('Campaign').select('id, client, format, updatedAt').eq('status', 'QUARANTINE').eq('isArchived', false).order('updatedAt', { ascending: false }).limit(10)
-
-    if (!quarantined || quarantined.length === 0) {
-        await editMsg(chatId, msgId, '✅ <b>Sem quarentena!</b>', kb([[btn('◀️ Menu', 'menu:main')]]))
-        return
-    }
-
-    let text = `⚠️ <b>QUARENTENA</b> (${quarantined.length})\n\n`
-    for (const c of quarantined) {
-        const dt = new Date(c.updatedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-        text += `🔴 <b>${esc(c.client)}</b> • ${esc(fl(fmtMap, c.format))}\n   Desde: ${dt}\n\n`
-    }
-
-    await editMsg(chatId, msgId, text, kb([[btn('◀️ Menu', 'menu:main')]]))
-}
-
-// =============================================================================
-// 📜 LOGS
-// =============================================================================
-async function cbLogs(chatId: string, msgId: number, isNewMsg: boolean = false) {
-    const { data: logs } = await supabase.from('NexusLog').select('level, message, campaignId, createdAt').order('createdAt', { ascending: false }).limit(10)
-
-    const markup = kb([[btn('🔄 Atualizar', 'menu:logs'), btn('◀️ Menu', 'menu:main')]])
-
-    if (!logs || logs.length === 0) {
-        const emptyText = '📭 Nenhum log.'
-        if (isNewMsg) return await sendMessage(chatId, emptyText, { reply_markup: markup })
-        return await editMsg(chatId, msgId, emptyText, markup)
-    }
-
-    const fmtMap = await loadFormatMap()
-
-    // Map Campaign IDs to names
-    const campaignIdSet = new Set<string>()
-    for (const log of logs) {
-        if (log.campaignId) campaignIdSet.add(log.campaignId)
-    }
-
-    const campaignNamesMap = new Map<string, string>()
-    if (campaignIdSet.size > 0) {
-        const { data: camps } = await supabase.from('Campaign').select('id, client, format').in('id', [...campaignIdSet])
-        for (const c of (camps || [])) {
-            const label = fl(fmtMap, c.format)
-            campaignNamesMap.set(c.id, `${c.client} — ${label}`)
-        }
-    }
-
-    const icons: Record<string, string> = { INFO: 'ℹ️', SUCCESS: '✅', ERROR: '❌', SYSTEM: '⚙️' }
-    let text = `📜 <b>ÚLTIMOS LOGS</b>\n\n`
-    for (const log of logs.reverse()) {
-        const icon = icons[log.level] || '•'
-        const time = new Date(log.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-        
-        let resolvedMsg = log.message
-
-        // 1. Resolve exact campaign ID mentions
-        for (const [cid, name] of campaignNamesMap.entries()) {
-            resolvedMsg = resolvedMsg.replace(new RegExp(cid, 'g'), name)
-        }
-
-        // 2. Resolve format IDs in message
-        for (const [id, label] of Object.entries(fmtMap)) {
-            resolvedMsg = resolvedMsg.replace(new RegExp(id, 'g'), label)
-        }
-
-        text += `${icon} <code>${time}</code> ${esc(resolvedMsg.substring(0, 100))}\n`
-    }
-
-    if (isNewMsg) {
-        await sendMessage(chatId, text, { reply_markup: markup })
-    } else {
-        await editMsg(chatId, msgId, text, markup)
-    }
-}
-
-// =============================================================================
-// 🔌 API ERRORS — Erros da API 00px separados dos logs gerais
-// =============================================================================
-async function cbApiErrors(chatId: string, msgId: number, isNewMsg: boolean = false) {
-    const { data: logs } = await supabase
-        .from('NexusLog')
-        .select('level, message, details, campaignId, createdAt')
-        .eq('level', 'API_ERROR')
-        .order('createdAt', { ascending: false })
-        .limit(15)
-
-    const markup = kb([[btn('🔄 Atualizar', 'menu:api_errors'), btn('◀️ Menu', 'menu:main')]])
-
-    if (!logs || logs.length === 0) {
-        const emptyText = '✅ <b>Nenhum erro de API registrado!</b>\n\n<i>Todos os endpoints estão operando normalmente.</i>'
-        if (isNewMsg) return await sendMessage(chatId, emptyText, { reply_markup: markup })
-        return await editMsg(chatId, msgId, emptyText, markup)
-    }
-
-    // Resolve campaign IDs to names
-    const campaignIdSet = new Set<string>()
-    for (const log of logs) {
-        if (log.campaignId) campaignIdSet.add(log.campaignId)
-    }
-
-    const campaignNamesMap = new Map<string, string>()
-    if (campaignIdSet.size > 0) {
-        const { data: camps } = await supabase.from('Campaign').select('id, client, pi').in('id', [...campaignIdSet])
-        for (const c of (camps || [])) {
-            campaignNamesMap.set(c.id, `${c.client} (PI: ${c.pi})`)
-        }
-    }
-
-    // Count errors in last 24h
-    const now = Date.now()
-    const last24h = logs.filter(l => now - new Date(l.createdAt).getTime() < 24 * 60 * 60 * 1000).length
-    const lastHour = logs.filter(l => now - new Date(l.createdAt).getTime() < 60 * 60 * 1000).length
-
-    let text = `🔌 <b>ERROS DE API (00px)</b>\n`
-    text += `⏱ Última hora: <b>${lastHour}</b> | 24h: <b>${last24h}</b>\n\n`
-
-    for (const log of logs.slice(0, 10)) {
-        const time = new Date(log.createdAt).toLocaleString('pt-BR', { 
-            day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
-            timeZone: 'America/Sao_Paulo'
-        })
-        const campaign = log.campaignId ? campaignNamesMap.get(log.campaignId) || log.campaignId.substring(0, 8) : '—'
-        const msg = log.message.substring(0, 80)
-
-        text += `🔴 <code>${time}</code>\n`
-        text += `   📌 ${esc(campaign)}\n`
-        text += `   ${esc(msg)}\n`
-        if (log.details) {
-            text += `   <i>${esc(log.details.substring(0, 60))}${log.details.length > 60 ? '…' : ''}</i>\n`
-        }
-        text += '\n'
-    }
-
-    if (logs.length > 10) {
-        text += `<i>...e mais ${logs.length - 10} erros recentes</i>\n`
-    }
-
-    if (isNewMsg) {
-        await sendMessage(chatId, text, { reply_markup: markup })
-    } else {
-        await editMsg(chatId, msgId, text, markup)
-    }
-}
-
-// =============================================================================
-// 💾 STORAGE
-// =============================================================================
-async function cbStorage(chatId: string, msgId: number) {
-    try {
-        // 1. Supabase Storage (SQL for accuracy)
-        const storageResult = await (prisma as any).$queryRawUnsafe(
-            `SELECT SUM((metadata->>'size')::bigint) as total_size 
-             FROM storage.objects 
-             WHERE bucket_id = 'screenshots'`
-        ) as any[]
-        const storageBytes = Number(storageResult[0]?.total_size || 0)
-        const storageLimit = 1024 * 1024 * 1024 // 1GB
-        const storagePerc = (storageBytes / storageLimit) * 100
-
-        // 2. Database Size
-        const dbResult = await (prisma as any).$queryRawUnsafe(
-            `SELECT pg_database_size(current_database()) as total_size`
-        ) as any[]
-        const dbBytes = Number(dbResult[0]?.total_size || 0)
-        const dbLimit = 500 * 1024 * 1024 // 500MB Free Tier
-        const dbPerc = (dbBytes / dbLimit) * 100
-
-        const sMB = (storageBytes / (1024 * 1024)).toFixed(2)
-        const dMB = (dbBytes / (1024 * 1024)).toFixed(2)
-
-        // Warnings
-        const getStatusIcon = (perc: number) => {
-            if (perc >= 80) return '🔴'
-            if (perc >= 50) return '⚠️'
-            return '✅'
-        }
-
-        const text = `
-💾 <b>INFRAESTRUTURA & LIMITES</b>
-
-📦 <b>Storage (Prints)</b>
-├ Uso: <b>${sMB} MB</b> / 1 GB
-├ Status: ${getStatusIcon(storagePerc)} <b>${storagePerc.toFixed(1)}%</b>
-└ <i>Bucket: screenshots</i>
-
-🗄️ <b>Banco de Dados (Postgres)</b>
-├ Uso: <b>${dMB} MB</b> / 500 MB
-└ Status: ${getStatusIcon(dbPerc)} <b>${dbPerc.toFixed(1)}%</b>
-
-${(storagePerc > 50 || dbPerc > 50) ? `⚠️ <b>AVISO:</b> Ocupação acima de 50%! Considere uma limpeza em breve.` : '🟢 Sistema operando dentro dos limites.'}
-
-<i>Valores refletem exatamente o Painel Admin.</i>
-        `.trim()
-
-        await editMsg(chatId, msgId, text, kb([[btn('🔄 Atualizar', 'menu:storage'), btn('◀️ Menu', 'menu:main')]]))
-    } catch (e) {
-        console.error('[TelegramBot] Storage error:', e)
-        await editMsg(chatId, msgId, '❌ Erro ao buscar estatísticas de infraestrutura.', kb([[btn('◀️ Menu', 'menu:main')]]))
-    }
-}
-
-// =============================================================================
-// ⚙️ GERENCIAR — Lista PIs com botões
-// =============================================================================
-async function cbGerenciar(chatId: string, msgId: number, isNewMsg: boolean = false) {
-    const { data: campaigns } = await supabase
-        .from('Campaign')
-        .select('pi, client')
-        .eq('isArchived', false)
-        .not('status', 'in', '("EXPIRED","FINISHED")')
-        .order('client', { ascending: true })
-
-    const piMap = new Map<string, string>()
-    for (const c of (campaigns || [])) {
-        if (!piMap.has(c.pi)) piMap.set(c.pi, c.client)
-    }
-
-    const rows = [...piMap.entries()].slice(0, 15).map(([pi, client]) =>
-        [btn(`📁 ${client} — ${pi}`, `pi:${pi}`)]
-    )
-    rows.push([btn('◀️ Menu', 'menu:main')])
-
-    const markup = kb(rows)
-    const text = '⚙️ <b>GERENCIAR</b>\n\nSelecione um PI:'
-
-    if (piMap.size === 0) {
-        const emptyText = '📭 Nenhuma campanha para gerenciar.'
-        if (isNewMsg) return await sendMessage(chatId, emptyText, { reply_markup: markup })
-        return await editMsg(chatId, msgId, emptyText, markup)
-    }
-
-    if (isNewMsg) {
-        await sendMessage(chatId, text, { reply_markup: markup })
-    } else {
-        await editMsg(chatId, msgId, text, markup)
-    }
-}
-
-// =============================================================================
-// Gerenciar: Show PI formats
-// =============================================================================
-async function cbShowPI(chatId: string, msgId: number, pi: string) {
-    const fmtMap = await loadFormatMap()
-    const { data: campaigns } = await supabase
-        .from('Campaign')
-        .select('id, pi, client, campaignName, format, status, device')
-        .eq('pi', pi)
-        .eq('isArchived', false)
-        .not('status', 'in', '("EXPIRED","FINISHED")')
-
-    if (!campaigns || campaigns.length === 0) {
-        await editMsg(chatId, msgId, '📭 Nenhum formato.', kb([[btn('◀️ Voltar', 'menu:gerenciar')]]))
-        return
-    }
-
-    const sIcon: Record<string, string> = { PENDING: '⏳', QUEUED: '🔄', PROCESSING: '⚙️', SUCCESS: '✅', FAILED: '❌', QUARANTINE: '⚠️' }
-    const client = campaigns[0].client
-
-    let text = `📁 <b>${esc(client)}</b>\nPI: <code>${esc(pi)}</code>\n\n`
-    for (const c of campaigns) {
-        const name = c.campaignName ? ` • ${esc(c.campaignName)}` : ''
-        text += `${sIcon[c.status] || '❓'} ${esc(fl(fmtMap, c.format))} (${c.device})${name}\n`
-    }
-
-    const rows = campaigns.map(c => {
-        const label = fl(fmtMap, c.format)
-        const short = label.length > 18 ? label.substring(0, 16) + '…' : label
-        return [btn(`⚡ ${short}`, `actions:${c.id}`)]
-    })
-
-    if (campaigns.length > 1) {
-        rows.push([btn(`🚀 Capturar TODOS (${campaigns.length})`, `cap_all:${pi}`)])
-    }
-    rows.push([btn(`🗑️ Deletar PI Inteira`, `del_pi:${pi}`)])
-    rows.push([btn('◀️ Voltar', 'menu:gerenciar')])
-
-    await editMsg(chatId, msgId, text, kb(rows))
-}
-
-// =============================================================================
-// Gerenciar: Actions for a format
-// =============================================================================
-async function cbActions(chatId: string, msgId: number, id: string) {
-    const fmtMap = await loadFormatMap()
-    const { data: c } = await supabase.from('Campaign').select('id, pi, client, campaignName, format, status, device').eq('id', id).single()
-
-    if (!c) {
-        await editMsg(chatId, msgId, '❌ Não encontrado.', kb([[btn('◀️ Menu', 'menu:main')]]))
-        return
-    }
-
-    const sIcon: Record<string, string> = { PENDING: '⏳', QUEUED: '🔄', PROCESSING: '⚙️', SUCCESS: '✅', FAILED: '❌', QUARANTINE: '⚠️' }
-    const label = fl(fmtMap, c.format)
-    const name = c.campaignName ? `\n📝 Nome: ${esc(c.campaignName)}` : ''
-
-    const text = `
-${sIcon[c.status] || '❓'} <b>${esc(label)}</b> (${c.device})
-📁 ${esc(c.client)} — PI: <code>${esc(c.pi)}</code>${name}
-Status: ${c.status}
-
-<b>O que deseja fazer?</b>
-    `.trim()
-
-    await editMsg(chatId, msgId, text, kb([
-        [btn('📸 Capturar', `cap:${c.id}`)],
-        [btn('✏️ Editar Nome', `rename:${c.id}`)],
-        [btn('⏰ Ver Agendamento', `sched:${c.id}`)],
-        [btn('🗑️ Deletar', `del:${c.id}`)],
-        [btn(`◀️ Voltar`, `pi:${c.pi}`)],
-    ]))
-}
-
-// =============================================================================
-// 📸 CAPTURE — Single (with photo option)
-// =============================================================================
-async function cbCapture(chatId: string, msgId: number, id: string) {
-    const fmtMap = await loadFormatMap()
-    const { data: c } = await supabase.from('Campaign').select('id, client, format, pi').eq('id', id).single()
-    if (!c) return
-
-    const label = fl(fmtMap, c.format)
-
-    await editMsg(chatId, msgId,
-        `📸 <b>Captura Manual</b>\n\n${esc(c.client)} — ${esc(label)}\nPI: <code>${esc(c.pi)}</code>\n\n<b>Deseja ver a foto quando a captura terminar?</b>`,
-        kb([
-            [btn('📸 Sim, ver foto', `cap_go:${c.id}`)],
-            [btn('⚡ Capturar sem foto', `cap_nophoto:${c.id}`)],
-            [btn('❌ Cancelar', `actions:${c.id}`)],
-        ])
-    )
-}
-
-async function cbCaptureGo(chatId: string, msgId: number, id: string) {
-    // Set to QUEUED
-    const { error } = await supabase.from('Campaign').update({ status: 'QUEUED' }).eq('id', id)
-    if (error) {
-        await editMsg(chatId, msgId, `❌ Erro: ${esc(error.message)}`, kb([[btn('◀️ Menu', 'menu:main')]]))
-        return
-    }
-
-    try { await nexusLogStore.addLog(`Bot Telegram: Captura manual disparada para ${id}`, 'SYSTEM'); } catch (e) {}
-
-    await editMsg(chatId, msgId,
-        `⏳ <b>Captura em andamento...</b>\n\nA campanha foi enfileirada. Aguardando o Worker processar.\n\n<i>Quando a captura for concluída, a foto será enviada aqui.</i>`,
-        kb([[btn('◀️ Menu', 'menu:main')]])
-    )
-
-    // Poll for completion and send photo
-    await pollAndSendPhoto(chatId, id)
-}
-
-async function cbCaptureNoPhoto(chatId: string, msgId: number, id: string) {
-    const { error } = await supabase.from('Campaign').update({ status: 'QUEUED' }).eq('id', id)
-    if (error) {
-        await editMsg(chatId, msgId, `❌ Erro: ${esc(error.message)}`, kb([[btn('◀️ Menu', 'menu:main')]]))
-        return
-    }
-
-    try { await nexusLogStore.addLog(`Bot Telegram: Captura disparada (sem foto) para ${id}`, 'SYSTEM'); } catch (e) {}
-
-    await editMsg(chatId, msgId,
-        `✅ <b>Captura disparada!</b>\n\nA campanha foi colocada na fila.\nO Worker irá processá-la no próximo ciclo.`,
-        kb([[btn('◀️ Menu', 'menu:main')]])
-    )
-}
-
-// Poll for capture completion (up to ~2 minutes)
-async function pollAndSendPhoto(chatId: string, campaignId: string) {
-    const maxAttempts = 24 // 24 * 5s = 120s = 2 min
-    const delay = 5000
-
-    for (let i = 0; i < maxAttempts; i++) {
-        await new Promise(r => setTimeout(r, delay))
-
-        const { data: campaign } = await supabase
-            .from('Campaign')
-            .select('status, client, format')
-            .eq('id', campaignId)
-            .single()
-
-        if (!campaign) return
-
-        if (campaign.status === 'SUCCESS') {
-            // Get the latest capture
-            const { data: capture } = await supabase
-                .from('Capture')
-                .select('screenshotPath, createdAt')
-                .eq('campaignId', campaignId)
-                .eq('status', 'SUCCESS')
-                .order('createdAt', { ascending: false })
-                .limit(1)
-                .single()
-
-            if (capture?.screenshotPath?.startsWith('http')) {
-                const fmtMap = await loadFormatMap()
-                const label = fl(fmtMap, campaign.format)
-                await sendPhoto(chatId, capture.screenshotPath, `✅ <b>Captura concluída!</b>\n${esc(campaign.client)} — ${esc(label)}`)
-            } else {
-                await sendMessage(chatId, `✅ <b>Captura concluída!</b>\n${esc(campaign.client)}\n\n<i>Foto indisponível (arquivo local).</i>`)
-            }
-            return
-        }
-
-        if (campaign.status === 'FAILED' || campaign.status === 'QUARANTINE') {
-            await sendMessage(chatId, `❌ <b>Captura falhou.</b>\n${esc(campaign.client)}\nStatus: ${campaign.status}`)
-            return
-        }
-        // Still QUEUED or PROCESSING — keep polling
-    }
-
-    await sendMessage(chatId, '⏰ <b>Timeout</b>\nA captura ainda está processando. Verifique depois com /status.')
-}
-
-// =============================================================================
-// 📸 CAPTURE ALL — entire PI
-// =============================================================================
-async function cbCaptureAll(chatId: string, msgId: number, pi: string) {
-    const { data: campaigns } = await supabase.from('Campaign').select('id, client').eq('pi', pi).eq('isArchived', false).not('status', 'in', '("EXPIRED","FINISHED")')
-    const count = campaigns?.length || 0
-    const client = campaigns?.[0]?.client || pi
-
-    await editMsg(chatId, msgId,
-        `🚀 <b>Capturar TODOS?</b>\n\n${esc(client)} — PI: <code>${esc(pi)}</code>\n${count} formatos serão enfileirados.`,
-        kb([
-            [btn(`✅ Sim, capturar ${count}`, `cap_all_go:${pi}`), btn('❌ Cancelar', `pi:${pi}`)],
-        ])
-    )
-}
-
-async function cbCaptureAllGo(chatId: string, msgId: number, pi: string) {
-    const { error } = await supabase.from('Campaign').update({ status: 'QUEUED' }).eq('pi', pi).eq('isArchived', false).not('status', 'in', '("EXPIRED","FINISHED","PROCESSING")')
-    if (error) {
-        await editMsg(chatId, msgId, `❌ Erro: ${esc(error.message)}`, kb([[btn('◀️ Menu', 'menu:main')]]))
-        return
-    }
-
-    try { await nexusLogStore.addLog(`Bot Telegram: Captura em lote PI ${pi}`, 'SYSTEM'); } catch (e) {}
-
-    await editMsg(chatId, msgId,
-        `✅ <b>Captura em lote disparada!</b>\n\nTodos os formatos da PI <code>${esc(pi)}</code> foram enfileirados.`,
-        kb([[btn('◀️ Menu', 'menu:main')]])
-    )
-}
-
-// =============================================================================
-// 🗑️ DELETE
-// =============================================================================
-async function cbDelete(chatId: string, msgId: number, id: string) {
-    const fmtMap = await loadFormatMap()
-    const { data: c } = await supabase.from('Campaign').select('id, client, format, pi').eq('id', id).single()
-    if (!c) return
-
-    await editMsg(chatId, msgId,
-        `🗑️ <b>Confirmar EXCLUSÃO?</b>\n\n⚠️ <b>Ação irreversível!</b>\n\n${esc(c.client)} — ${esc(fl(fmtMap, c.format))}\nPI: <code>${esc(c.pi)}</code>`,
-        kb([[btn('🗑️ DELETAR', `del_yes:${c.id}`), btn('❌ Cancelar', `actions:${c.id}`)]])
-    )
-}
-
-async function cbDeleteYes(chatId: string, msgId: number, id: string) {
-    const { data: c } = await supabase.from('Campaign').select('pi').eq('id', id).single()
-    await supabase.from('Capture').delete().eq('campaignId', id)
-    const { error } = await supabase.from('Campaign').delete().eq('id', id)
-    if (error) {
-        await editMsg(chatId, msgId, `❌ Erro: ${esc(error.message)}`, kb([[btn('◀️ Menu', 'menu:main')]]))
-        return
-    }
-    try { await nexusLogStore.addLog(`Bot Telegram: Campanha deletada: ${id}`, 'SYSTEM'); } catch (e) {}
-    await editMsg(chatId, msgId, '✅ <b>Campanha deletada!</b>', kb([[btn('◀️ Menu', 'menu:main')]]))
-}
-
-async function cbDeletePI(chatId: string, msgId: number, pi: string) {
-    const { data: campaigns } = await supabase.from('Campaign').select('id, client').eq('pi', pi).eq('isArchived', false)
-    const count = campaigns?.length || 0
-    const client = campaigns?.[0]?.client || pi
-
-    await editMsg(chatId, msgId,
-        `🗑️ <b>Deletar PI INTEIRA?</b>\n\n⚠️ <b>Aviso:</b> Isso irá remover todos os <b>${count}</b> formatos e suas capturas.\n\n${esc(client)} — PI: <code>${esc(pi)}</code>\n\n<b>Confirmar exclusão em massa?</b>`,
-        kb([
-            [btn(`🗑️ SIM, DELETAR TUDO`, `del_pi_yes:${pi}`)],
-            [btn('❌ Cancelar', `pi:${pi}`)],
-        ])
-    )
-}
-
-async function cbDeletePIYes(chatId: string, msgId: number, pi: string) {
-    const { data: campaigns } = await supabase.from('Campaign').select('id').eq('pi', pi)
-    
-    if (campaigns && campaigns.length > 0) {
-        const ids = campaigns.map(c => c.id)
-        // Delete captures first
-        await supabase.from('Capture').delete().in('campaignId', ids)
-        // Delete campaigns
-        await supabase.from('Campaign').delete().in('id', ids)
-    }
-
-    try { await nexusLogStore.addLog(`Bot Telegram: PI Deletada em lote: ${pi}`, 'SYSTEM'); } catch (e) {}
-
-    await editMsg(chatId, msgId, `✅ <b>PI <code>${pi}</code> deletada com sucesso!</b>`, kb([[btn('◀️ Menu', 'menu:main')]]))
-}
-
-// =============================================================================
-// 📅 SCHEDULE
-// =============================================================================
-async function cbShowSchedule(chatId: string, msgId: number, id: string) {
-    const fmtMap = await loadFormatMap()
-    const { data: c } = await supabase.from('Campaign').select('client, format, isScheduled, scheduledTimes, pi').eq('id', id).single()
-
-    if (!c) return
-
-    let times = 'Sem horários agendados.'
-    try {
-        const parsed = JSON.parse(c.scheduledTimes || '[]') as string[]
-        if (parsed.length > 0) {
-            times = parsed.join(', ')
-        }
-    } catch { /* ignore */ }
-
-    const text = `
-📅 <b>AGENDAMENTO</b>
-
-🏢 <b>Cliente:</b> ${esc(c.client)}
-📐 <b>Formato:</b> ${esc(fl(fmtMap, c.format))}
-🔔 <b>Ativo:</b> ${c.isScheduled ? '✅ Sim' : '❌ Não'}
-
-⏰ <b>Horários:</b>
-<code>${times}</code>
-    `.trim()
-
-    await editMsg(chatId, msgId, text, kb([[btn('◀️ Voltar', `actions:${id}`)]]))
-}
-
-// =============================================================================
-// ✏️ RENAME
-// =============================================================================
-async function cbRename(chatId: string, msgId: number, id: string) {
-    const fmtMap = await loadFormatMap()
-    const { data: c } = await supabase.from('Campaign').select('id, client, campaignName, format, pi').eq('id', id).single()
-    if (!c) return
-
-    const label = fl(fmtMap, c.format)
-    const current = c.campaignName || '(sem nome)'
-
-    const suggestions = [...new Set([
-        `${c.client} - ${label}`,
-        `${c.client} - ${c.pi}`,
-        label,
-        c.client,
-        `${c.pi} - ${label}`,
-    ])].slice(0, 5)
-
-    const rows = suggestions.map(name => {
-        const safe = name.substring(0, 28)
-        return [btn(`📝 ${safe}`, `rn:${id}|${safe}`)]
-    })
-    rows.push([btn('🧹 Limpar Nome', `rn_clr:${id}`)])
-    rows.push([btn('◀️ Voltar', `actions:${id}`)])
-
-    await editMsg(chatId, msgId,
-        `✏️ <b>Editar Nome</b>\n\n${esc(c.client)} — ${esc(label)}\nAtual: <b>${esc(current)}</b>\n\nSelecione:`,
-        kb(rows)
-    )
-}
-
-async function cbRenameSet(chatId: string, msgId: number, payload: string) {
-    const [id, ...parts] = payload.split('|')
-    const newName = parts.join('|')
-    const { error } = await supabase.from('Campaign').update({ campaignName: newName }).eq('id', id)
-    if (error) {
-        await editMsg(chatId, msgId, `❌ Erro: ${esc(error.message)}`, kb([[btn('◀️ Menu', 'menu:main')]]))
-        return
-    }
-    try { await nexusLogStore.addLog(`Bot: Nome → "${newName}" (${id})`, 'SYSTEM'); } catch (e) {}
-    await editMsg(chatId, msgId, `✅ <b>Nome atualizado!</b>\nNovo: <b>${esc(newName)}</b>`, kb([[btn('◀️ Voltar', `actions:${id}`)], [btn('◀️ Menu', 'menu:main')]]))
-}
-
-async function cbRenameClear(chatId: string, msgId: number, id: string) {
-    await supabase.from('Campaign').update({ campaignName: '' }).eq('id', id)
-    await editMsg(chatId, msgId, '✅ <b>Nome removido!</b>', kb([[btn('◀️ Voltar', `actions:${id}`)], [btn('◀️ Menu', 'menu:main')]]))
-}
-
-// =============================================================================
-// 📚 BOOKS — Lista PIs com capturas
-// =============================================================================
-async function cbBooks(chatId: string, msgId: number, isNewMsg: boolean = false) {
-    // Get unique PIs that have captures
-    const { data: campaigns } = await supabase
-        .from('Campaign')
-        .select('pi, client')
-        .eq('isArchived', false)
-        .order('client', { ascending: true })
-
-    const piMap = new Map<string, string>()
-    for (const c of (campaigns || [])) {
-        if (!piMap.has(c.pi)) piMap.set(c.pi, c.client)
-    }
-
-    if (piMap.size === 0) {
-        const emptyText = '📭 Nenhum book disponível.'
-        const markup = kb([[btn('◀️ Menu', 'menu:main')]])
-        if (isNewMsg) return await sendMessage(chatId, emptyText, { reply_markup: markup })
-        return await editMsg(chatId, msgId, emptyText, markup)
-    }
-
-    // Count captures per PI
-    const rows: { text: string, callback_data: string }[][] = []
-    const entries = [...piMap.entries()].slice(0, 12)
-
-    for (const [pi, client] of entries) {
-        const short = client.length > 15 ? client.substring(0, 13) + '…' : client
-        rows.push([btn(`📚 ${short} — ${pi}`, `book:${pi}`)])
-    }
-
-    rows.push([btn('🌐 Abrir Books no Browser', 'menu:books_url')])
-    rows.push([btn('◀️ Menu', 'menu:main')])
-
-    const markup = kb(rows)
-    const text = `📚 <b>BOOKS</b>\n\nSelecione um PI para ver os comprovantes:`
-
-    if (isNewMsg) {
-        await sendMessage(chatId, text, { reply_markup: markup })
-    } else {
-        await editMsg(chatId, msgId, text, markup)
-    }
-}
-
-// Book: show last captures for a PI
-async function cbBookDetail(chatId: string, msgId: number, pi: string) {
-    const fmtMap = await loadFormatMap()
-
-    const { data: campaigns } = await supabase
-        .from('Campaign')
-        .select('id, client, format, device')
-        .eq('pi', pi)
-        .eq('isArchived', false)
-
-    if (!campaigns || campaigns.length === 0) {
-        await editMsg(chatId, msgId, '📭 Nenhuma campanha para este PI.', kb([[btn('◀️ Voltar', 'menu:books')]]))
-        return
-    }
-
-    const client = campaigns[0].client
-    let text = `📚 <b>${esc(client)}</b>\nPI: <code>${esc(pi)}</code>\n\n<b>Últimas capturas:</b>\n\n`
-
-    const rows: { text: string, callback_data: string }[][] = []
-
-    for (const camp of campaigns.slice(0, 8)) {
-        const label = fl(fmtMap, camp.format)
-
-        // Get latest capture
-        const { data: capture } = await supabase
-            .from('Capture')
-            .select('id, screenshotPath, createdAt')
-            .eq('campaignId', camp.id)
-            .eq('status', 'SUCCESS')
-            .order('createdAt', { ascending: false })
-            .limit(1)
-            .single()
-
-        if (capture?.screenshotPath) {
-            const time = new Date(capture.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
-            text += `✅ ${esc(label)} (${camp.device}) • ${time}\n`
-
-            if (capture.screenshotPath.startsWith('http')) {
-                const short = label.length > 18 ? label.substring(0, 16) + '…' : label
-                rows.push([btn(`📷 Ver: ${short}`, `bookphoto:${camp.id}`)])
-            }
-        } else {
-            text += `⏳ ${esc(label)} (${camp.device}) • sem captura\n`
-        }
-    }
-
-    const appUrl = APP_URL()
-    rows.push([btn('🌐 Abrir Book Completo', `menu:books`)])
-    rows.push([btn('◀️ Voltar', 'menu:books')])
-
-    await editMsg(chatId, msgId, text, kb(rows))
-
-    // Send a separate message with the web link
-    await sendMessage(chatId, `🔗 <b>Link direto:</b>\n${appUrl}/books/${encodeURIComponent(pi)}`)
-}
-
-// Book: send photo
-async function cbBookPhoto(chatId: string, msgId: number, campaignId: string) {
-    const fmtMap = await loadFormatMap()
-
-    const { data: campaign } = await supabase.from('Campaign').select('client, format, pi').eq('id', campaignId).single()
-    const { data: capture } = await supabase.from('Capture').select('screenshotPath').eq('campaignId', campaignId).eq('status', 'SUCCESS').order('createdAt', { ascending: false }).limit(1).single()
-
-    if (capture?.screenshotPath?.startsWith('http') && campaign) {
-        const label = fl(fmtMap, campaign.format)
-        await sendPhoto(chatId, capture.screenshotPath, `📷 <b>${esc(campaign.client)}</b>\n${esc(label)} — PI: ${esc(campaign.pi)}`)
-    } else {
-        await sendMessage(chatId, '❌ Foto indisponível.')
-    }
-}
-
-// =============================================================================
-// ALERT SETTINGS
-// =============================================================================
-async function cbAlerts(chatId: string, msgId: number) {
-    try {
-        const settings = await prisma.settings.findUnique({ where: { id: 1 } })
-        const enabled = settings?.telegramAlertsEnabled ?? true
-        const lastAlert = settings?.telegramLastAlertAt 
-            ? new Date(settings.telegramLastAlertAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) 
-            : 'Nunca'
-
-        const text = `
-🔔 <b>CONFIGURAÇÕES DE ALERTAS</b>
-
-As notificações diárias de performance (Under, Over e Crítico) automatizadas via Worker estão:
-
-Status: ${enabled ? '✅ <b>ATIVADO</b>' : '🔕 <b>SILENCIADO</b>'}
-Último alerta enviado: <code>${lastAlert}</code>
-
-<i>Quando silenciado, o Worker não enviará o resumo diário de performance para o Telegram.</i>
-        `.trim()
-
-        const markup = kb([
-            [btn(enabled ? '🔕 Silenciar Alertas' : '🔔 Ativar Alertas', `alerts:toggle:${enabled ? 'off' : 'on'}`)],
-            [btn('◀️ Menu', 'menu:main')]
-        ])
-
-        await editMsg(chatId, msgId, text, markup)
-    } catch (e) {
-        console.error('[TelegramBot] Alertas error:', e)
-        await editMsg(chatId, msgId, '❌ Erro ao buscar configurações de alerta.', kb([[btn('◀️ Menu', 'menu:main')]]))
-    }
-}
-
-async function cbToggleAlerts(chatId: string, msgId: number, state: string) {
-    try {
-        const enabled = state === 'on'
-        await prisma.settings.upsert({
-            where: { id: 1 },
-            update: { telegramAlertsEnabled: enabled },
-            create: { id: 1, telegramAlertsEnabled: enabled }
-        })
-
-        await cbAlerts(chatId, msgId)
-    } catch (e) {
-        console.error('[TelegramBot] Toggle error:', e)
-    }
-}
-
-// =============================================================================
-// Helper: Group campaigns by PI
-// =============================================================================
-function groupByPI<T extends { pi: string }>(items: T[]): Map<string, T[]> {
-    const map = new Map<string, T[]>()
-    for (const item of items) {
-        const key = item.pi || 'SEM_PI'
-        if (!map.has(key)) map.set(key, [])
-        map.get(key)!.push(item)
-    }
-    return map
+export function isTelegramWebhookSecretValid(headers: Headers) {
+    const secret = webhookSecret()
+    if (!secret) return true
+    return headers.get('x-telegram-bot-api-secret-token') === secret
 }
