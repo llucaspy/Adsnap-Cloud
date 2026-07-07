@@ -898,6 +898,7 @@ async function handleText(chatId: string, text: string) {
     if (/\b(book|books|comprovante|comprovantes)\b/i.test(normalized)) return showBooks(context)
     if (/\b(log|logs)\b/i.test(normalized)) return showLogs(context)
     if (/\b(alerta|alertas)\b/i.test(normalized)) return showAlerts(context)
+    if (/\b(quarentena|falha|falhas)\b/i.test(normalized)) return showQuarantine(context)
 
     return showHome(context)
 }
