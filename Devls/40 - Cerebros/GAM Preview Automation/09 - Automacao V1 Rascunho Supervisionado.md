@@ -1,6 +1,6 @@
 # Automacao V1 - Rascunho Supervisionado
 
-Atualizado em: 2026-06-17
+Atualizado em: 2026-07-08
 
 ## Decisao de arquitetura
 
@@ -23,13 +23,15 @@ Fluxo:
   - contem as regras GAM -> Adsnap;
   - escolhe PI;
   - limpa nome de campanha;
-  - infere agencia/segmentacao;
+  - infere agencia, mas nao infere segmentacao;
+  - usa `PRIVADO` como segmentacao padrao fixa;
   - mapeia dimensao para formato Adsnap;
   - duplica `300x250` para mobile;
   - forca `320x50` e `320x100` para `metropoles.com/saude`.
 
 - `src/lib/gamImportWriter.ts`
   - cria campanhas a partir de rascunho aprovado;
+  - normaliza segmentacao antes de salvar;
   - deduplica por `externalCampaignId`, formato, device e URL;
   - preserva `externalAuthUrl` com link da Order.
 
@@ -62,6 +64,22 @@ Fluxo:
 - `src/scripts/worker.ts`
   - job GAM agora gera `JOB_GAM_REVIEW`;
   - nao cria campanhas diretamente.
+
+## Segmentacao padrao
+
+Desde 2026-07-08, a segmentacao padrao de qualquer Order importada pelo GAM e `PRIVADO`.
+
+Motivo: a segmentacao define escopo de relatorios, frequencia de captura e paginas especiais como Gov Federal. Nao e seguro inferir `GOV_FEDERAL` ou `GOV_ESTADUAL` pelo nome da Order ou agencia, porque isso pode colocar uma campanha privada no fluxo operacional errado.
+
+Fluxos cobertos:
+
+- importacao pelo Novo Setup;
+- cadastro automatico pelo Nexus Chat;
+- cadastro automatico pelo bot do Telegram;
+- script supervisionado `src/scripts/gam-import-supervised.ts`;
+- writer final que cria ou atualiza `Campaign`.
+
+Excecao: o usuario pode escolher explicitamente outra segmentacao na UI/revisao. Nesse caso o worker respeita `requestedSegmentation` e ajusta `captureCadence` pelas regras de `normalizeCaptureCadence`.
 
 ## Credenciais
 

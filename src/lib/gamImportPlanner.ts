@@ -88,6 +88,22 @@ interface ImportRule {
 }
 
 const DEFAULT_SCHEDULED_TIMES = JSON.stringify(['08:00', '18:00'])
+export const DEFAULT_GAM_SEGMENTATION = 'PRIVADO'
+export const STANDARD_GAM_SEGMENTATIONS = ['GOV_FEDERAL', 'GOV_ESTADUAL', DEFAULT_GAM_SEGMENTATION] as const
+
+export function normalizeGamRequestedSegmentation(value?: string | null) {
+    const trimmed = value?.trim()
+    if (!trimmed) return DEFAULT_GAM_SEGMENTATION
+
+    const standard = STANDARD_GAM_SEGMENTATIONS.find(segmentation => segmentation === trimmed.toUpperCase())
+    return standard || trimmed
+}
+
+export function isValidGamRequestedSegmentation(value: string) {
+    const normalized = normalizeGamRequestedSegmentation(value)
+    return STANDARD_GAM_SEGMENTATIONS.includes(normalized as typeof STANDARD_GAM_SEGMENTATIONS[number])
+        || /^OUTRO:\s*\S.+$/i.test(normalized)
+}
 
 const FORMAT_RULES: ImportRule[] = [
     {
@@ -174,14 +190,6 @@ function inferAgency(order: GamOrderImport) {
     if (source.includes('federal') || /\bministerio (?:da|das|de|do|dos)\b/.test(source)) return 'FEDERAL'
     if (source.includes('interno')) return 'INTERNO'
     return order.agencyName && !/desconhecid/i.test(order.agencyName) ? order.agencyName : 'PRIVADO'
-}
-
-function inferSegmentation(agency: string) {
-    const normalized = normalizeText(agency)
-    if (normalized.includes('estadual')) return 'GOV_ESTADUAL'
-    if (normalized.includes('federal')) return 'GOV_FEDERAL'
-    if (normalized.includes('interno')) return 'INTERNO'
-    return 'PRIVADO'
 }
 
 function advertiserTokens(clientName: string) {
@@ -298,7 +306,7 @@ export function buildGamImportDraft(order: GamOrderImport, bannerFormats: Banner
     const mediaEntries: GamImportMediaEntry[] = []
 
     const agency = inferAgency(order)
-    const segmentation = inferSegmentation(agency)
+    const segmentation = DEFAULT_GAM_SEGMENTATION
     const pi = pickPi(order)
 
     const lineItemDates = order.lineItems.find(item => item.flightStart || item.flightEnd)
@@ -365,7 +373,7 @@ export function buildGamImportDraft(order: GamOrderImport, bannerFormats: Banner
         campaignName: cleanCampaignName(order),
         pi,
         segmentation,
-        captureCadence: segmentation === 'GOV_FEDERAL' ? 'BOUNDARY' : 'DAILY',
+        captureCadence: 'DAILY',
         flightStart,
         flightEnd,
         isScheduled: true,

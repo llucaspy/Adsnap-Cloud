@@ -3,7 +3,7 @@
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { nexusLogStore } from '@/lib/nexusLogStore'
-import type { GamImportDraft } from '@/lib/gamImportPlanner'
+import { isValidGamRequestedSegmentation, normalizeGamRequestedSegmentation, type GamImportDraft } from '@/lib/gamImportPlanner'
 import { createCampaignsFromGamDraft as writeCampaignsFromGamDraft } from '@/lib/gamImportWriter'
 import { normalizeCaptureCadence, type CaptureCadence } from '@/lib/governmentReportScope'
 import { normalizeCaptureDelaySeconds } from '@/lib/captureTiming'
@@ -293,7 +293,7 @@ export async function requestGamImportDraft(input: {
 }) {
     const url = input.orderUrl.trim()
     const requestedPi = input.pi.trim()
-    const requestedSegmentation = input.segmentation.trim()
+    const requestedSegmentation = normalizeGamRequestedSegmentation(input.segmentation)
     const requestedCaptureCadence = normalizeCaptureCadence(requestedSegmentation, input.captureCadence)
 
     if (!/^https:\/\/admanager\.google\.com\/.+order_id=\d+/i.test(url)) {
@@ -303,9 +303,7 @@ export async function requestGamImportDraft(input: {
         throw new Error('Informe um PI valido com 3 a 8 numeros.')
     }
 
-    const standardSegmentations = ['GOV_FEDERAL', 'GOV_ESTADUAL', 'PRIVADO']
-    const isCustomSegmentation = /^OUTRO:\s*\S.+$/i.test(requestedSegmentation)
-    if (!standardSegmentations.includes(requestedSegmentation) && !isCustomSegmentation) {
+    if (!isValidGamRequestedSegmentation(requestedSegmentation)) {
         throw new Error('Selecione uma segmentacao ou descreva a opcao Outro.')
     }
 

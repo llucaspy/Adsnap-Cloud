@@ -11,6 +11,7 @@ import {
     GAM_REVIEW_LEVEL,
     GAM_RUNNING_LEVEL,
 } from './gamJobStatus'
+import { DEFAULT_GAM_SEGMENTATION } from './gamImportPlanner'
 
 type TelegramInlineButton = {
     text: string
@@ -828,9 +829,11 @@ async function submitGamOrder(context: BotCommandContext, orderUrl: string) {
                 orderId,
                 mode: 'AUTO_REGISTER',
                 source: 'telegram-bot',
+                requestedSegmentation: DEFAULT_GAM_SEGMENTATION,
+                requestedCaptureCadence: 'DAILY',
                 executionLogs: [{
                     at: new Date().toISOString(),
-                    message: `Order ${orderId} recebida pelo Telegram Bot`,
+                    message: `Order ${orderId} recebida pelo Telegram Bot com segmentacao padrao Privado`,
                     tone: 'info',
                 }],
             }),

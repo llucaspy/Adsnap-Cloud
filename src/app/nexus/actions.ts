@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import prisma from '@/lib/prisma'
 import { nexusLogStore } from '@/lib/nexusLogStore'
-import type { GamImportDraft } from '@/lib/gamImportPlanner'
+import { DEFAULT_GAM_SEGMENTATION, type GamImportDraft } from '@/lib/gamImportPlanner'
 import type { GamImportWriteResult } from '@/lib/gamImportWriter'
 import { triggerGamWorker, triggerNexusWorker } from '@/app/actions'
 import { enqueueCaptureJobs } from '@/lib/workerJobs'
@@ -16,6 +16,8 @@ type NexusOrderDetails = Partial<GamImportDraft> & {
     orderId?: string
     mode?: string
     source?: string
+    requestedSegmentation?: string
+    requestedCaptureCadence?: string
     autoRegisterResult?: GamImportWriteResult
     notifications?: {
         reviewUrl?: string
@@ -168,9 +170,11 @@ export async function submitNexusOrderLink(orderUrl: string) {
                 orderId,
                 mode: 'AUTO_REGISTER',
                 source: 'nexus-v2-order-link',
+                requestedSegmentation: DEFAULT_GAM_SEGMENTATION,
+                requestedCaptureCadence: 'DAILY',
                 executionLogs: [{
                     at: new Date().toISOString(),
-                    message: `Order ${orderId} recebida pelo Nexus V2`,
+                    message: `Order ${orderId} recebida pelo Nexus V2 com segmentacao padrao Privado`,
                     tone: 'info',
                 }],
             } satisfies NexusOrderDetails),

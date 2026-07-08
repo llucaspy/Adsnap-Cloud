@@ -1,6 +1,6 @@
 import prisma from './prisma'
 import { gamCrawler } from './gamCrawlerService'
-import { buildGamImportDraft, type GamImportDraft } from './gamImportPlanner'
+import { buildGamImportDraft, normalizeGamRequestedSegmentation, type GamImportDraft } from './gamImportPlanner'
 import { createCampaignsFromGamDraft, type GamImportWriteResult } from './gamImportWriter'
 import { sendGamOrderReviewEmail } from './gamOrderReviewEmail'
 import { sendTelegramAlert } from './telegram'
@@ -209,12 +209,13 @@ export async function processPendingGamJobs(limit = 5, targetJobId?: string) {
             const settings = await prisma.settings.findUnique({ where: { id: 1 } })
             const bannerFormats = JSON.parse(settings?.bannerFormats || '[]')
             const inferredDraft = buildGamImportDraft(data, bannerFormats)
+            const requestedSegmentation = normalizeGamRequestedSegmentation(initialDetails.requestedSegmentation)
             const draft: GamImportDraft = {
                 ...inferredDraft,
                 pi: initialDetails.requestedPi || inferredDraft.pi,
-                segmentation: initialDetails.requestedSegmentation || inferredDraft.segmentation,
+                segmentation: requestedSegmentation,
                 captureCadence: normalizeCaptureCadence(
-                    initialDetails.requestedSegmentation || inferredDraft.segmentation,
+                    requestedSegmentation,
                     initialDetails.requestedCaptureCadence || inferredDraft.captureCadence,
                 ),
             }
@@ -240,7 +241,7 @@ export async function processPendingGamJobs(limit = 5, targetJobId?: string) {
                 {
                     ...draft,
                     requestedPi: initialDetails.requestedPi || draft.pi,
-                    requestedSegmentation: initialDetails.requestedSegmentation || draft.segmentation,
+                    requestedSegmentation,
                     requestedCaptureCadence: initialDetails.requestedCaptureCadence || draft.captureCadence,
                     autoRegisterResult: writeResult,
                     executionLogs: readDetails(current.details).executionLogs,

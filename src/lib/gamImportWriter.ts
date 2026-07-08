@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from '@prisma/client'
-import type { GamImportDraft, GamImportMediaEntry } from './gamImportPlanner'
+import { normalizeGamRequestedSegmentation, type GamImportDraft, type GamImportMediaEntry } from './gamImportPlanner'
 import { DEFAULT_CAPTURE_DELAY_SECONDS } from './captureTiming'
+import { normalizeCaptureCadence } from './governmentReportScope'
 
 export interface GamImportWriteResult {
     created: number
@@ -39,6 +40,9 @@ export async function createCampaignsFromGamDraft(
         throw new Error('Rascunho GAM sem agencia, cliente ou PI.')
     }
 
+    const segmentation = normalizeGamRequestedSegmentation(draft.segmentation)
+    const captureCadence = normalizeCaptureCadence(segmentation, draft.captureCadence)
+
     for (const entry of draft.mediaEntries) {
         if (!isReady(entry)) {
             blocked++
@@ -61,8 +65,8 @@ export async function createCampaignsFromGamDraft(
             await prisma.campaign.update({
                 where: { id: existing.id },
                 data: {
-                    segmentation: draft.segmentation,
-                    captureCadence: draft.captureCadence,
+                    segmentation,
+                    captureCadence,
                     ...(compositionBox ? { compositionBox } : {}),
                 },
             })
@@ -77,8 +81,8 @@ export async function createCampaignsFromGamDraft(
                 client: draft.client,
                 campaignName: draft.campaignName,
                 pi: draft.pi,
-                segmentation: draft.segmentation,
-                captureCadence: draft.captureCadence,
+                segmentation,
+                captureCadence,
                 captureDelaySeconds: DEFAULT_CAPTURE_DELAY_SECONDS,
                 flightStart: draft.flightStart ? new Date(`${draft.flightStart}T00:00:00-03:00`) : null,
                 flightEnd: draft.flightEnd ? new Date(`${draft.flightEnd}T23:59:59-03:00`) : null,
