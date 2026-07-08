@@ -303,22 +303,15 @@ function groupCampaigns(campaigns: AssistantCampaign[], formatLabelMap = new Map
     return Array.from(groups.values())
 }
 
-function getBrtTodayStart(now = new Date()) {
-    const brtNowStr = now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' })
-    const brtNow = new Date(brtNowStr)
-    return new Date(Date.UTC(brtNow.getFullYear(), brtNow.getMonth(), brtNow.getDate()))
-}
-
 function activeCaptureWhere(now = new Date()) {
-    const today = getBrtTodayStart(now)
-
     return {
         isArchived: false,
+        pi: { not: '000' },
         status: { notIn: CAPTURE_BLOCKED_STATUSES },
         adOpsStatus: { notIn: CAPTURE_BLOCKED_ADOPS_STATUSES },
         AND: [
-            { OR: [{ flightStart: null }, { flightStart: { lte: today } }] },
-            { OR: [{ flightEnd: null }, { flightEnd: { gte: today } }] },
+            { flightStart: { not: null, lte: now } },
+            { flightEnd: { not: null, gte: now } },
         ],
     }
 }
@@ -516,14 +509,14 @@ export async function submitNexusAssistantMessage(message: string): Promise<Nexu
         if (groups.length === 0) {
             return {
                 tone: 'warning',
-                text: 'Nao encontrei campanha ativa e elegivel para captura com esse termo. Me mande o PI ou um nome mais especifico.',
+                text: 'Nao encontrei campanha em veiculacao agora e elegivel para captura com esse termo. Me mande outro PI ou um nome mais especifico.',
                 actions: [{ label: 'Exemplo', command: 'capturar PI 402716' }],
             }
         }
         if (!selectedPi && (!hasSpecificSearch || groups.length > 1)) {
             return {
                 tone: 'info',
-                text: `Encontrei ${groups.length} PI(s) ativo(s) para captura. Escolha qual devo capturar.`,
+                text: `Encontrei ${groups.length} PI(s) em veiculacao agora para captura. Escolha qual devo capturar.`,
                 cards: campaignCards(groups, 'capture'),
             }
         }

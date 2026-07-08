@@ -1,6 +1,6 @@
 # Runbook e Consultas
 
-Atualizado em: 2026-06-23
+Atualizado em: 2026-07-08
 
 ## Arquivos principais
 
@@ -39,6 +39,26 @@ Leitura rapida:
 - `quar` nos ciclos: captura falhou de forma controlada e foi para quarentena, nao deve ser contada como sucesso.
 - Em producao, `NEXUS_WORKER_DRAIN_QUEUE` fica ligado por padrao: o worker reclama lotes de ate 20 itens repetidamente ate esvaziar a janela capturada no inicio da etapa de captura.
 - `NEXUS_WORKER_MAX_RUNTIME_MS` e um freio opcional. Sem configurar, a regra padrao e drenar a janela inteira.
+
+## Captura manual pelo Nexus
+
+O comando `Capturar PI` no Nexus Chat e no bot do Telegram so deve listar campanhas em veiculacao agora.
+
+Regra de elegibilidade:
+
+- `isArchived=false`;
+- `pi != "000"` para nao oferecer o template tecnico `Modelo de prints`;
+- `status` fora de `EXPIRED`, `FINISHED`, `PROCESSING`, `QUEUED`, `FAILED`, `QUARANTINE` e `AUTOCONFIG`;
+- `adOpsStatus` fora de `CONCLUIDA`, `PAUSADA`, `CANCELADA` e `ENCERRADA`;
+- `flightStart` precisa existir e ser menor ou igual ao horario atual;
+- `flightEnd` precisa existir e ser maior ou igual ao horario atual.
+
+Importante: campanhas antigas com `flightEnd=null` nao entram mais como ativas. Esse era o motivo de PIs antigos, como campanhas Caixa 2024, aparecerem no menu de captura.
+
+Arquivos da regra:
+
+- `src/app/nexus/actions.ts`;
+- `src/lib/telegramBot.ts`.
 
 ## Checklist quando campanhas travarem
 

@@ -269,15 +269,14 @@ function getBrtTodayStart(now = new Date()) {
 }
 
 function activeCaptureWhere(now = new Date()) {
-    const today = getBrtTodayStart(now)
-
     return {
         isArchived: false,
+        pi: { not: '000' },
         status: { notIn: CAPTURE_BLOCKED_STATUSES },
         adOpsStatus: { notIn: CAPTURE_BLOCKED_ADOPS_STATUSES },
         AND: [
-            { OR: [{ flightStart: null }, { flightStart: { lte: today } }] },
-            { OR: [{ flightEnd: null }, { flightEnd: { gte: today } }] },
+            { flightStart: { not: null, lte: now } },
+            { flightEnd: { not: null, gte: now } },
         ],
     }
 }
@@ -499,7 +498,7 @@ async function showCaptures(context: BotCommandContext) {
         groups.get(key)!.push(campaign)
     }
 
-    const rows = ['<b>Capturas</b>', `${groups.size} PI(s) ativos para captura.`, '']
+    const rows = ['<b>Capturas</b>', `${groups.size} PI(s) em veiculacao agora para captura.`, '']
     const buttons: TelegramInlineButton[][] = [[button('Capturar tudo ativo', 'capture:all')]]
 
     for (const [pi, items] of Array.from(groups.entries()).slice(0, 8)) {
@@ -508,7 +507,7 @@ async function showCaptures(context: BotCommandContext) {
         buttons.push([button(`Capturar PI ${pi}`, `capture:pi:${pi}`)])
     }
 
-    if (groups.size === 0) rows.push('Nenhuma campanha ativa elegivel agora.')
+    if (groups.size === 0) rows.push('Nenhuma campanha em veiculacao elegivel agora.')
 
     buttons.push([button('Atualizar', 'menu:captures'), button('Menu', 'menu:home')])
     await respond(context, rows.join('\n'), buttons)
