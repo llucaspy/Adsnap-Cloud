@@ -17,7 +17,6 @@ import {
     PlusCircle,
     ServerCog,
     ShieldCheck,
-    Sparkles,
     TimerReset,
     type LucideIcon,
 } from 'lucide-react'
@@ -139,6 +138,25 @@ function printStatusMeta(status: string) {
     return { label: status, tone: C.slate }
 }
 
+function getGreetingLabel(isoDate: string) {
+    const hourPart = new Intl.DateTimeFormat('pt-BR', {
+        hour: '2-digit',
+        hour12: false,
+        timeZone: 'America/Sao_Paulo',
+    }).formatToParts(new Date(isoDate)).find(part => part.type === 'hour')
+    const hour = Number(hourPart?.value ?? new Date(isoDate).getHours())
+
+    if (hour < 12) return 'Bom dia'
+    if (hour < 18) return 'Boa tarde'
+    return 'Boa noite'
+}
+
+function getFirstName(name?: string | null) {
+    const cleanName = name?.trim()
+    if (!cleanName) return 'time'
+    return cleanName.split(/\s+/)[0]
+}
+
 export function HomeView({
     generatedAt,
     stats,
@@ -146,6 +164,7 @@ export function HomeView({
     recentLogs,
     activePrintTotal,
     activePrintCampaigns,
+    currentUserName,
 }: {
     generatedAt: string
     stats: HomeStats
@@ -153,10 +172,12 @@ export function HomeView({
     recentLogs: RecentLog[]
     activePrintTotal: number
     activePrintCampaigns: ActivePrintCampaign[]
+    currentUserName?: string | null
 }) {
     const hasAttention = stats.failedToday > 0 || stats.quarantined > 0 || stats.failedJobs > 0
-    const operationLabel = hasAttention ? 'Atencao operacional' : 'Operacao estavel'
     const operationTone = hasAttention ? C.warning : C.success
+    const greetingLabel = getGreetingLabel(generatedAt)
+    const displayName = getFirstName(currentUserName)
 
     const kpis = [
         { label: 'Capturas hoje', value: stats.totalCapturesToday, hint: `${stats.failedToday} falhas hoje`, icon: Camera, tone: C.ink },
@@ -206,9 +227,8 @@ export function HomeView({
                 >
                     <motion.div variants={item} style={{ minHeight: 360, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 32 }}>
                         <div>
-                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 6, background: C.glass, border: `1px solid ${C.hairline}`, color: C.ink, fontSize: 11, fontWeight: 700, marginBottom: 20 }}>
-                                <Sparkles size={14} />
-                                {operationLabel}
+                            <div style={{ color: C.charcoal, fontSize: 15, lineHeight: 1.5, fontWeight: 600, marginBottom: 16 }}>
+                                <span style={{ color: C.ink }}>{greetingLabel}, {displayName}.</span>
                             </div>
                             <h1 style={{ margin: 0, maxWidth: 760, color: C.inkDeep, fontFamily: 'var(--font-display)', fontSize: 'clamp(40px, 6vw, 76px)', lineHeight: 1.04, fontWeight: 700, letterSpacing: '-1px' }}>
                                 Controle de capturas, fila e evidencias.

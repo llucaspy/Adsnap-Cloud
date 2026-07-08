@@ -2,6 +2,7 @@ import prisma from '@/lib/prisma'
 import { HomeView } from '@/components/HomeView'
 import type { Prisma } from '@prisma/client'
 import { getFormatLabelMap, resolveFormatLabel } from '@/lib/formatLabels'
+import { getSession } from '@/lib/auth'
 
 export const revalidate = 30
 
@@ -119,6 +120,7 @@ function groupActivePrintCampaigns(campaigns: ActivePrintSource[], formatLabelMa
 }
 
 export default async function HomePage() {
+  const session = await getSession()
   const brtStart = getBrazilDayStart()
   const brtDateAnchor = getBrazilDateAnchor()
   const activePrintCampaignWhere: Prisma.CampaignWhereInput = {
@@ -149,6 +151,7 @@ export default async function HomePage() {
     queuedCampaigns,
     processingCampaigns,
     activePrintCampaigns,
+    currentUser,
   ] = await Promise.all([
     getFormatLabelMap(),
     prisma.capture.count({ where: { createdAt: { gte: brtStart }, status: 'SUCCESS' } }).catch(() => 0),
@@ -184,6 +187,12 @@ export default async function HomePage() {
         updatedAt: true,
       },
     }).catch(() => []),
+    session?.userId
+      ? prisma.user.findUnique({
+        where: { id: session.userId },
+        select: { name: true, email: true },
+      }).catch(() => null)
+      : Promise.resolve(null),
   ])
 
   const distinctPis = new Set(campaigns.map(campaign => campaign.pi)).size
@@ -229,6 +238,7 @@ export default async function HomePage() {
       }))}
       activePrintTotal={activePrintCampaignGroups.length}
       activePrintCampaigns={activePrintCampaignGroups.slice(0, 20)}
+      currentUserName={currentUser?.name || currentUser?.email || session?.email}
     />
   )
 }
