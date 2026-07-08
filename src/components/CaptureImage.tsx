@@ -14,6 +14,7 @@ interface CaptureImageProps {
 
 export function CaptureImage({ src, alt, className, sizes, priority = false }: CaptureImageProps) {
     const [hasError, setHasError] = useState(false)
+    const usesAuthenticatedProxy = src.startsWith('/api/captures/')
 
     if (hasError) {
         return (
@@ -32,6 +33,7 @@ export function CaptureImage({ src, alt, className, sizes, priority = false }: C
             alt={alt}
             fill
             quality={72}
+            unoptimized={usesAuthenticatedProxy}
             sizes={sizes ?? '(max-width: 768px) 50vw, (max-width: 1280px) 33vw, 320px'}
             className={className}
             loading={priority ? 'eager' : 'lazy'}
