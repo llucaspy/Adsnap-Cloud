@@ -3,6 +3,7 @@
 import React from 'react'
 import { Folder, ChevronRight, ImageIcon } from 'lucide-react'
 import Link from 'next/link'
+import { CaptureImage } from '@/components/CaptureImage'
 
 interface PIFolderCardProps {
     pi: string
@@ -10,12 +11,11 @@ interface PIFolderCardProps {
     campaignName: string
     captureCount: number
     thumbnailId: string
-    thumbnailUrl?: string
     date: string
     accentColor?: string
 }
 
-export function PIFolderCard({ pi, client, campaignName, captureCount, thumbnailId, thumbnailUrl, date }: PIFolderCardProps) {
+export function PIFolderCard({ pi, client, campaignName, captureCount, thumbnailId, date }: PIFolderCardProps) {
     return (
         <Link
             href={`/books/${pi}?date=${date}`}
@@ -23,16 +23,11 @@ export function PIFolderCard({ pi, client, campaignName, captureCount, thumbnail
         >
             {/* Thumbnail */}
             <div className="relative aspect-video overflow-hidden bg-white/[0.02]">
-                <img
-                    src={thumbnailUrl && thumbnailUrl.startsWith('http') 
-                        ? `${thumbnailUrl}?width=300&quality=60` 
-                        : `/api/captures/${thumbnailId}`}
+                <CaptureImage
+                    src={`/api/captures/${thumbnailId}`}
                     alt={client}
-                    loading="lazy"
-                    className="w-full h-full object-cover opacity-50 group-hover:opacity-80 transition-opacity duration-500 group-hover:scale-105 transform transition-transform"
-                    onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = 'none'
-                    }}
+                    sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, (max-width: 1536px) 20vw, 240px"
+                    className="object-cover opacity-50 group-hover:opacity-80 duration-500 group-hover:scale-105 transform transition-transform"
                 />
 
                 {/* Fallback icon if no image */}

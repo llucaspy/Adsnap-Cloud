@@ -78,6 +78,9 @@ export function ImageLightbox({ src, alt, isOpen, onClose, date }: ImageLightbox
                 <img
                     src={src}
                     alt={alt}
+                    loading="eager"
+                    decoding="async"
+                    fetchPriority="high"
                     className="max-w-[90vw] max-h-[90vh] object-contain rounded-md"
                 />
 

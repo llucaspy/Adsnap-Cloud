@@ -2,7 +2,32 @@ import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 import fs from 'fs'
+
+const CACHE_HEADER = 'public, max-age=31536000, immutable'
+
+function getLocalContentType(path: string) {
+    const normalized = path.split('?')[0].toLowerCase()
+    if (normalized.endsWith('.jpg') || normalized.endsWith('.jpeg')) return 'image/jpeg'
+    if (normalized.endsWith('.webp')) return 'image/webp'
+    if (normalized.endsWith('.avif')) return 'image/avif'
+    return 'image/png'
+}
+
+function imageHeaders(contentType: string, contentLength?: string | number | null) {
+    const headers = new Headers({
+        'Content-Type': contentType,
+        'Cache-Control': CACHE_HEADER,
+        'X-Content-Type-Options': 'nosniff',
+    })
+
+    if (contentLength) {
+        headers.set('Content-Length', String(contentLength))
+    }
+
+    return headers
+}
 
 export async function GET(
     request: NextRequest,
@@ -12,7 +37,8 @@ export async function GET(
         const { id } = await params
 
         const capture = await prisma.capture.findUnique({
-            where: { id }
+            where: { id },
+            select: { screenshotPath: true }
         })
 
         if (!capture || !capture.screenshotPath) {
@@ -26,12 +52,12 @@ export async function GET(
                 console.error(`[API] Failed to fetch from Supabase: ${capture.screenshotPath}`)
                 return new NextResponse('Error fetching from storage', { status: response.status })
             }
-            const blob = await response.blob()
-            return new NextResponse(blob, {
-                headers: {
-                    'Content-Type': response.headers.get('Content-Type') || 'image/png',
-                    'Cache-Control': 'public, max-age=31536000, immutable',
-                },
+            const arrayBuffer = await response.arrayBuffer()
+            return new NextResponse(arrayBuffer, {
+                headers: imageHeaders(
+                    response.headers.get('Content-Type') || 'image/png',
+                    response.headers.get('Content-Length')
+                ),
             })
         }
 
@@ -43,11 +69,8 @@ export async function GET(
 
         const fileBuffer = fs.readFileSync(capture.screenshotPath)
 
-        return new NextResponse(fileBuffer, {
-            headers: {
-                'Content-Type': 'image/png',
-                'Cache-Control': 'public, max-age=31536000, immutable',
-            },
+        return new NextResponse(new Uint8Array(fileBuffer), {
+            headers: imageHeaders(getLocalContentType(capture.screenshotPath), fileBuffer.byteLength),
         })
     } catch (error) {
         console.error('[API] Error serving capture:', error)

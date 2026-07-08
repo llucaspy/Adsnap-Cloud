@@ -121,10 +121,9 @@ export function BookCampaignList({ campaigns }: { campaigns: Campaign[] }) {
                                         style={{ color: 'var(--text-muted)' }}
                                     >
                                         <CaptureImage
-                                            src={capture.screenshotPath.startsWith('http') 
-                                                ? `${capture.screenshotPath}?width=400&quality=80` 
-                                                : `/api/captures/${capture.id}`}
+                                            src={`/api/captures/${capture.id}`}
                                             alt={`Capture ${capture.id}`}
+                                            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, (max-width: 1536px) 25vw, 320px"
                                             className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
                                         />
                                     </div>

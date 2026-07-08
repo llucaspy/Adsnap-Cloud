@@ -254,7 +254,6 @@ export default async function BooksPage() {
                                         campaignName={piGroup.campaignName}
                                         captureCount={piGroup.captures.length}
                                         thumbnailId={piGroup.captures[0].id}
-                                        thumbnailUrl={piGroup.captures[0].screenshotPath}
                                         date={group.dateKey}
                                     />
                                 ))}

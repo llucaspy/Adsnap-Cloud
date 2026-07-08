@@ -224,7 +224,6 @@ export default async function FederalBooksPage() {
                                         campaignName={piGroup.campaignName}
                                         captureCount={piGroup.captures.length}
                                         thumbnailId={piGroup.captures[0].id}
-                                        thumbnailUrl={piGroup.captures[0].screenshotPath}
                                         date={day.dateKey}
                                     />
                                 ))}
