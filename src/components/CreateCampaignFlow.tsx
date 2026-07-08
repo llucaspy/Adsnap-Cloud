@@ -14,10 +14,10 @@ import { useTransition, useState, useEffect, useCallback } from 'react'
 import {
     Plus, Globe, Smartphone, Monitor, Calendar,
     Clock, ChevronRight, ChevronLeft, Check,
-    Building2, User2, Hash, Layers, Sparkles,
+    Building2, User2, Hash, Layers,
     CalendarRange, Landmark, Building, Users,
-    ChevronDown, Trash2, X, Wand2, RefreshCw, FileCheck2,
-    Loader2, CircleCheck, CircleX, RotateCcw, Terminal, Square, ExternalLink
+    ChevronDown, Trash2, X, RefreshCw, FileCheck2,
+    Loader2, CircleCheck, CircleX, RotateCcw, Clock3, Square, ExternalLink
 } from 'lucide-react'
 import { MultiTimePicker } from './MultiTimePicker'
 import {
@@ -79,9 +79,9 @@ const SEGMENTATIONS = [
 ]
 
 const GAM_SEGMENTATIONS = [
+    { value: 'PRIVADO', label: 'Privado', icon: Building2 },
     { value: 'GOV_FEDERAL', label: 'Governo Federal', icon: Landmark },
     { value: 'GOV_ESTADUAL', label: 'Governo Estadual', icon: Building },
-    { value: 'PRIVADO', label: 'Privado', icon: Building2 },
     { value: 'OUTRO', label: 'Outro', icon: Users },
 ]
 
@@ -210,7 +210,7 @@ export function CreateCampaignFlow({
             externalAuthUrl: draft.orderUrl || '',
             creativeAssetUrl: entry.creativeAssetUrl,
         })))
-        setGamStatus(`Rascunho carregado: ${draft.mediaEntries.length} formato(s).`)
+        setGamStatus(`Order carregada para revisao: ${draft.mediaEntries.length} formato(s).`)
         setStep(4)
         setSetupMode('manual')
     }
@@ -218,7 +218,7 @@ export function CreateCampaignFlow({
     function requestGamDraft(url: string, pi: string, segmentation: string, captureCadence: CaptureCadence) {
         startGamTransition(async () => {
             try {
-                setGamStatus('Solicitando rascunho...')
+                setGamStatus('Enviando Order para validacao...')
                 const result = await requestGamImportDraft({ orderUrl: url, pi, segmentation, captureCadence })
                 setSelectedGamJobId(result.jobId)
                 setGamStatus(result.existing
@@ -261,12 +261,12 @@ export function CreateCampaignFlow({
     }
 
     async function handleDeleteGamDraft(jobId: string) {
-        if (!window.confirm('Excluir este rascunho e o historico de execucao?')) return
+        if (!window.confirm('Excluir esta Order e o historico de execucao?')) return
         try {
             await deleteGamImportDraft(jobId)
             if (selectedGamJobId === jobId) setSelectedGamJobId(null)
             if (loadedGamJobId === jobId) setLoadedGamJobId(null)
-            setGamStatus('Rascunho excluido.')
+            setGamStatus('Order excluida.')
             await refreshGamDrafts()
         } catch (error) {
             setGamStatus((error as Error).message)
@@ -277,7 +277,7 @@ export function CreateCampaignFlow({
         if (!window.confirm('Encerrar esta execucao do GAM agora?')) return
         try {
             await cancelGamImportJob(jobId)
-            setGamStatus('Worker encerrado. O rascunho pode ser excluido.')
+            setGamStatus('Worker encerrado. A Order pode ser excluida.')
             await refreshGamDrafts()
         } catch (error) {
             setGamStatus((error as Error).message)
@@ -328,7 +328,7 @@ export function CreateCampaignFlow({
         <div className="space-y-6">
             <div
                 className="inline-flex p-1"
-                style={{ background: '#e9e7e2', border: '1px solid rgba(23,23,23,0.08)', borderRadius: '8px' }}
+                style={{ background: '#141414', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', boxShadow: 'rgba(0,0,0,0.20) 0px 2px 8px 0px' }}
                 aria-label="Modo de cadastro"
             >
                 <button
@@ -336,19 +336,19 @@ export function CreateCampaignFlow({
                     onClick={() => setSetupMode('gam')}
                     className="h-9 px-4 flex items-center gap-2 text-sm font-semibold transition-colors"
                     style={{
-                        color: setupMode === 'gam' ? '#0f0f0f' : '#525252',
+                        color: setupMode === 'gam' ? '#0f0f0f' : '#a3a3a3',
                         background: setupMode === 'gam' ? '#e5e5e5' : 'transparent',
                         borderRadius: '6px',
                     }}
                 >
-                    <Wand2 size={15} /> Importar do GAM
+                    <FileCheck2 size={15} /> Importar Order
                 </button>
                 <button
                     type="button"
                     onClick={() => setSetupMode('manual')}
                     className="h-9 px-4 flex items-center gap-2 text-sm font-semibold transition-colors"
                     style={{
-                        color: setupMode === 'manual' ? '#0f0f0f' : '#525252',
+                        color: setupMode === 'manual' ? '#0f0f0f' : '#a3a3a3',
                         background: setupMode === 'manual' ? '#e5e5e5' : 'transparent',
                         borderRadius: '6px',
                     }}
@@ -527,16 +527,21 @@ function GamImportPanel({
     return (
         <section
             className="overflow-hidden"
-            style={{ background: '#141414', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px' }}
+            style={{
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '12px',
+                boxShadow: 'rgba(0,0,0,0.30) 0px 8px 24px 0px',
+            }}
         >
             <div className="px-5 py-4 flex items-center justify-between gap-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
                 <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-9 h-9 flex items-center justify-center shrink-0" style={{ background: 'rgba(255,255,255,0.12)', color: '#f5f5f5', borderRadius: '8px' }}>
-                        <Wand2 size={17} />
+                    <div className="w-9 h-9 flex items-center justify-center shrink-0" style={{ background: '#1a1a1a', color: '#e5e5e5', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px' }}>
+                        <FileCheck2 size={17} />
                     </div>
                     <div className="min-w-0">
-                        <h2 className="text-base font-semibold" style={{ color: '#ffffff' }}>Importar Order do GAM</h2>
-                        <p className="text-xs truncate" style={{ color: '#737373' }}>Defina o contexto, gere o rascunho e acompanhe o worker.</p>
+                        <h2 className="text-base font-semibold" style={{ color: '#ffffff' }}>Importacao GAM</h2>
+                        <p className="text-xs truncate" style={{ color: '#737373' }}>Informe PI, segmentacao e link da Order para preparar a revisao.</p>
                     </div>
                 </div>
                 <button
@@ -544,7 +549,7 @@ function GamImportPanel({
                     disabled={isRefreshing}
                     className="w-9 h-9 flex items-center justify-center transition-colors disabled:opacity-40"
                     style={{ color: '#a3a3a3', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px' }}
-                    title="Atualizar execucoes"
+                    title="Atualizar status"
                 >
                     <RefreshCw size={15} className={isRefreshing ? 'animate-spin' : ''} />
                 </button>
@@ -666,7 +671,7 @@ function GamImportPanel({
                             {status ? (
                                 <p className="text-xs" style={{ color: /erro|valido|informe/i.test(status) ? '#f59e0b' : '#a3a3a3' }}>{status}</p>
                             ) : (
-                                <p className="text-xs" style={{ color: '#737373' }}>O worker usa o PI e a segmentacao definidos aqui na campanha final.</p>
+                                <p className="text-xs" style={{ color: '#737373' }}>Privado e a segmentacao padrao. Altere somente quando houver regra operacional.</p>
                             )}
                         </div>
                         <button
@@ -676,7 +681,7 @@ function GamImportPanel({
                             style={{ background: '#e5e5e5', color: '#0f0f0f', borderRadius: '8px' }}
                         >
                             {isPending ? <Loader2 size={16} className="animate-spin" /> : <FileCheck2 size={16} />}
-                            {isPending ? 'Enviando...' : 'Gerar rascunho'}
+                            {isPending ? 'Enviando...' : 'Preparar revisao'}
                         </button>
                     </div>
                 </div>
@@ -685,9 +690,9 @@ function GamImportPanel({
                     <GamJobDebugger job={selectedJob} onStop={onStop} onDelete={onDelete} presentation={debuggerPresentation(selectedJob)} />
                 ) : (
                     <div className="min-h-[290px] flex flex-col items-center justify-center text-center px-8" style={{ background: '#0f0f0f', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px' }}>
-                        <Terminal size={22} style={{ color: '#737373' }} />
-                        <p className="mt-3 text-sm font-semibold" style={{ color: '#e5e5e5' }}>Execucao em tempo real</p>
-                        <p className="mt-1 text-xs leading-5" style={{ color: '#737373' }}>Os passos do worker aparecem aqui assim que o rascunho entra na fila.</p>
+                        <Clock3 size={22} style={{ color: '#737373' }} />
+                        <p className="mt-3 text-sm font-semibold" style={{ color: '#e5e5e5' }}>Nenhuma Order em processamento</p>
+                        <p className="mt-1 text-xs leading-5" style={{ color: '#737373' }}>O status da importacao aparecera aqui quando a Order entrar na fila.</p>
                     </div>
                 )}
             </div>
@@ -695,7 +700,7 @@ function GamImportPanel({
             {visibleJobs.length > 0 && (
                 <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
                     <div className="px-5 py-3 flex items-center justify-between">
-                        <p className="text-xs font-semibold" style={{ color: '#a3a3a3' }}>Rascunhos recentes</p>
+                        <p className="text-xs font-semibold" style={{ color: '#a3a3a3' }}>Orders recentes</p>
                         <span className="text-[11px]" style={{ color: '#737373' }}>{visibleJobs.length} execucao(oes)</span>
                     </div>
                     {visibleJobs.map(job => {
@@ -738,7 +743,7 @@ function GamImportPanel({
                                         </a>
                                     )}
                                     {canDelete && (
-                                        <button onClick={() => onDelete(job.id)} className="w-9 h-9 flex items-center justify-center" style={{ color: '#ef4444', border: '1px solid rgba(239,68,68,0.28)', borderRadius: '8px' }} title="Excluir rascunho">
+                                        <button onClick={() => onDelete(job.id)} className="w-9 h-9 flex items-center justify-center" style={{ color: '#ef4444', border: '1px solid rgba(239,68,68,0.28)', borderRadius: '8px' }} title="Excluir Order">
                                             <Trash2 size={14} />
                                         </button>
                                     )}
@@ -774,10 +779,10 @@ function GamJobDebugger({ job, onStop, onDelete, presentation }: {
             <div className="px-4 py-3 pr-14 sm:pr-4 flex items-center justify-between gap-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
                 <div className="flex items-center gap-3 min-w-0">
                     <div className="w-9 h-9 flex items-center justify-center shrink-0" style={{ color: '#e5e5e5', background: 'rgba(255,255,255,0.12)', borderRadius: '8px' }}>
-                        <Terminal size={17} />
+                        <FileCheck2 size={17} />
                     </div>
                     <div className="min-w-0">
-                        <p className="text-sm font-semibold" style={{ color: '#e5e5e5' }}>Depurador GAM</p>
+                        <p className="text-sm font-semibold" style={{ color: '#e5e5e5' }}>Andamento da Order</p>
                         <p className="text-xs truncate" style={{ color: '#737373' }}>Order {job.orderId || 'GAM'}</p>
                     </div>
                 </div>
@@ -831,7 +836,7 @@ function GamJobDebugger({ job, onStop, onDelete, presentation }: {
                         className="px-3 py-2 flex items-center gap-2 text-xs font-semibold transition-colors"
                         style={{ color: '#ef4444', border: '1px solid rgba(239,68,68,0.28)', borderRadius: '8px' }}
                     >
-                        <Trash2 size={14} /> Excluir rascunho
+                        <Trash2 size={14} /> Excluir Order
                     </button>
                 )}
             </div>
@@ -1201,7 +1206,7 @@ function StepSegmentation({ formData, updateFields, next, back }: StepProps) {
                         className="text-xs flex items-center gap-2"
                         style={{ color: 'var(--text-muted)' }}
                     >
-                        <Sparkles size={12} style={{ color: 'var(--accent)' }} />
+                        <Clock size={12} style={{ color: 'var(--accent)' }} />
                         Capturas automáticas só ocorrerão dentro do período de veiculação.
                     </p>
                 </div>
@@ -1599,7 +1604,7 @@ function StepAutomation({ formData, updateFields, onSubmit, back, isPending, med
                 >
                     {isPending ? 'Ativando...' : (
                         <>
-                            <Sparkles size={20} />
+                            <CircleCheck size={20} />
                             Ativar {mediaEntries.length} Campanha{mediaEntries.length !== 1 ? 's' : ''}
                         </>
                     )}
