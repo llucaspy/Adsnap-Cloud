@@ -186,6 +186,7 @@ export async function updateGovernmentReportSettings(data: {
         `Destinatarios: ${recipients.join(', ')}`,
     )
     revalidatePath('/admin')
+    revalidatePath('/books/governo')
     return { success: true, recipients }
 }
 

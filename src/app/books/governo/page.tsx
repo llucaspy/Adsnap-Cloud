@@ -1,13 +1,19 @@
 import prisma from '@/lib/prisma'
 import type { Prisma } from '@prisma/client'
-import { Calendar, FolderOpen, Landmark, Library } from 'lucide-react'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
-import Link from 'next/link'
-import { BackToTopButton } from '@/components/BackToTopButton'
-import { PIFolderCard } from '@/components/PIFolderCard'
+import { FederalBooksWorkspace, type FederalBooksWorkspaceData } from '@/components/FederalBooksWorkspace'
+import { getFormatLabelMap, resolveFormatLabel } from '@/lib/formatLabels'
+import { getSession } from '@/lib/auth'
 
 export const revalidate = 30
+
+const FEDERAL_SEGMENTATION = 'GOV_FEDERAL'
+const DEFAULT_RECIPIENTS = [
+    'opec.gov@metropoles.com',
+    'karoliny.sousa@metropoles.com',
+]
+const ACTIVE_STATUS_BLOCKLIST = ['EXPIRED', 'FINISHED', 'FAILED', 'QUARANTINE']
 
 type BookCapture = Prisma.CaptureGetPayload<{
     select: {
@@ -24,54 +30,51 @@ type BookCapture = Prisma.CaptureGetPayload<{
     }
 }>
 
-type PiCaptureGroup = {
-    pi: string
-    client: string
-    campaignName: string
-    captures: BookCapture[]
-}
-
 type TimelineDayDraft = {
     date: Date
     dateKey: string
     weekDay: string
     fullDate: string
-    piGroups: Record<string, PiCaptureGroup>
+    dayNumber: string
+    monthLabel: string
+    piGroups: Record<string, {
+        pi: string
+        client: string
+        campaignName: string
+        captureCount: number
+        thumbnailId: string
+    }>
 }
 
-type TimelineDay = TimelineDayDraft & {
-    sortedPiGroups: PiCaptureGroup[]
+type ActiveCampaignRow = {
+    id: string
+    pi: string
+    client: string
+    agency: string
+    campaignName: string
+    format: string
+    device: string
+    status: string
+    flightStart: Date | null
+    flightEnd: Date | null
 }
 
-export default async function FederalBooksPage() {
-    const sixtyDaysAgo = new Date()
-    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60)
+function parseRecipients(value: string | null | undefined) {
+    try {
+        const parsed = JSON.parse(value || '[]')
+        return Array.isArray(parsed)
+            ? parsed.filter(item => typeof item === 'string' && item.trim())
+            : DEFAULT_RECIPIENTS
+    } catch {
+        return DEFAULT_RECIPIENTS
+    }
+}
 
-    const captures = await prisma.capture.findMany({
-        where: {
-            status: 'SUCCESS',
-            screenshotPath: { not: '' },
-            createdAt: { gte: sixtyDaysAgo },
-            campaign: {
-                isArchived: false,
-                segmentation: 'GOV_FEDERAL',
-            },
-        },
-        select: {
-            id: true,
-            createdAt: true,
-            screenshotPath: true,
-            campaign: {
-                select: {
-                    pi: true,
-                    client: true,
-                    campaignName: true,
-                },
-            },
-        },
-        orderBy: { createdAt: 'desc' },
-    })
+function dispatchKey(pi: string, flightEnd: Date | null) {
+    return flightEnd ? `${pi}|${flightEnd.toISOString()}` : ''
+}
 
+function groupTimeline(captures: BookCapture[]) {
     const groupedCaptures = captures.reduce<Record<string, TimelineDayDraft>>((acc, capture) => {
         const brtTime = new Date(capture.createdAt.getTime() - (3 * 60 * 60 * 1000))
         const dateKey = brtTime.toISOString().split('T')[0]
@@ -82,6 +85,8 @@ export default async function FederalBooksPage() {
                 dateKey,
                 weekDay: format(brtTime, 'EEEE', { locale: ptBR }),
                 fullDate: `${brtTime.getUTCDate().toString().padStart(2, '0')}/${(brtTime.getUTCMonth() + 1).toString().padStart(2, '0')}/${brtTime.getUTCFullYear()}`,
+                dayNumber: brtTime.getUTCDate().toString().padStart(2, '0'),
+                monthLabel: format(brtTime, 'MMM', { locale: ptBR }),
                 piGroups: {},
             }
         }
@@ -92,148 +97,269 @@ export default async function FederalBooksPage() {
                 pi,
                 client: capture.campaign.client,
                 campaignName: capture.campaign.campaignName,
-                captures: [],
+                captureCount: 0,
+                thumbnailId: capture.id,
             }
         }
 
-        acc[dateKey].piGroups[pi].captures.push(capture)
+        acc[dateKey].piGroups[pi].captureCount += 1
         return acc
     }, {})
 
-    const timeline = Object.values(groupedCaptures)
+    return Object.values(groupedCaptures)
         .sort((a, b) => b.date.getTime() - a.date.getTime())
-        .map((day): TimelineDay => ({
-            ...day,
+        .map(day => ({
+            dateKey: day.dateKey,
+            weekDay: day.weekDay,
+            fullDate: day.fullDate,
+            dayNumber: day.dayNumber,
+            monthLabel: day.monthLabel,
             sortedPiGroups: Object.values(day.piGroups).sort((a, b) => a.pi.localeCompare(b.pi)),
         }))
+}
 
+function groupActiveCampaigns({
+    rows,
+    formatLabelMap,
+    captureCountsByCampaign,
+    dispatchesByKey,
+}: {
+    rows: ActiveCampaignRow[]
+    formatLabelMap: Map<string, string>
+    captureCountsByCampaign: Map<string, number>
+    dispatchesByKey: Map<string, {
+        id: string
+        status: string
+        triggerMode: string
+        lastSentAt: Date | null
+        errorMessage: string | null
+        attachmentCount: number
+        attachmentBytes: number
+        attempts: number
+    }>
+}) {
+    const groups = new Map<string, {
+        pi: string
+        client: string
+        agency: string
+        campaignName: string
+        flightStart: Date | null
+        flightEnd: Date | null
+        formats: Set<string>
+        devices: Set<string>
+        statuses: Set<string>
+        printCount: number
+    }>()
+
+    for (const row of rows) {
+        const current = groups.get(row.pi) || {
+            pi: row.pi,
+            client: row.client,
+            agency: row.agency,
+            campaignName: row.campaignName,
+            flightStart: row.flightStart,
+            flightEnd: row.flightEnd,
+            formats: new Set<string>(),
+            devices: new Set<string>(),
+            statuses: new Set<string>(),
+            printCount: 0,
+        }
+
+        if (row.flightStart && (!current.flightStart || row.flightStart < current.flightStart)) {
+            current.flightStart = row.flightStart
+        }
+        if (row.flightEnd && (!current.flightEnd || row.flightEnd > current.flightEnd)) {
+            current.flightEnd = row.flightEnd
+        }
+
+        current.formats.add(resolveFormatLabel(formatLabelMap, row.format))
+        current.devices.add(row.device || 'desktop')
+        current.statuses.add(row.status)
+        current.printCount += captureCountsByCampaign.get(row.id) || 0
+        groups.set(row.pi, current)
+    }
+
+    return Array.from(groups.values())
+        .map(group => {
+            const dispatch = dispatchesByKey.get(dispatchKey(group.pi, group.flightEnd)) || null
+            return {
+                pi: group.pi,
+                client: group.client,
+                agency: group.agency,
+                campaignName: group.campaignName,
+                flightStart: group.flightStart?.toISOString() || null,
+                flightEnd: group.flightEnd?.toISOString() || null,
+                formats: Array.from(group.formats).sort((a, b) => a.localeCompare(b)),
+                devices: Array.from(group.devices).sort((a, b) => a.localeCompare(b)),
+                statuses: Array.from(group.statuses).sort((a, b) => a.localeCompare(b)),
+                printCount: group.printCount,
+                dispatch: dispatch ? {
+                    id: dispatch.id,
+                    status: dispatch.status,
+                    triggerMode: dispatch.triggerMode,
+                    lastSentAt: dispatch.lastSentAt?.toISOString() || null,
+                    errorMessage: dispatch.errorMessage,
+                    attachmentCount: dispatch.attachmentCount,
+                    attachmentBytes: dispatch.attachmentBytes,
+                    attempts: dispatch.attempts,
+                } : null,
+            }
+        })
+        .sort((a, b) => (a.flightEnd || '').localeCompare(b.flightEnd || '') || a.client.localeCompare(b.client))
+}
+
+export default async function FederalBooksPage() {
+    const session = await getSession()
+    const canManageReports = session?.role === 'admin'
+    const sixtyDaysAgo = new Date()
+    sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60)
+    const now = new Date()
+
+    const [formatLabelMap, settings, captures, allGovCampaignRows, activeCampaignRows] = await Promise.all([
+        getFormatLabelMap(),
+        prisma.settings.upsert({
+            where: { id: 1 },
+            create: { id: 1 },
+            update: {},
+        }),
+        prisma.capture.findMany({
+            where: {
+                status: 'SUCCESS',
+                screenshotPath: { not: '' },
+                createdAt: { gte: sixtyDaysAgo },
+                campaign: {
+                    isArchived: false,
+                    segmentation: FEDERAL_SEGMENTATION,
+                },
+            },
+            select: {
+                id: true,
+                createdAt: true,
+                screenshotPath: true,
+                campaign: {
+                    select: {
+                        pi: true,
+                        client: true,
+                        campaignName: true,
+                    },
+                },
+            },
+            orderBy: { createdAt: 'desc' },
+        }),
+        prisma.campaign.findMany({
+            where: {
+                segmentation: FEDERAL_SEGMENTATION,
+                isArchived: false,
+            },
+            select: {
+                pi: true,
+                campaignName: true,
+            },
+        }),
+        prisma.campaign.findMany({
+            where: {
+                segmentation: FEDERAL_SEGMENTATION,
+                isArchived: false,
+                status: { notIn: ACTIVE_STATUS_BLOCKLIST },
+                flightStart: { lte: now },
+                flightEnd: { gte: now },
+            },
+            select: {
+                id: true,
+                pi: true,
+                client: true,
+                agency: true,
+                campaignName: true,
+                format: true,
+                device: true,
+                status: true,
+                flightStart: true,
+                flightEnd: true,
+            },
+            orderBy: [
+                { flightEnd: 'asc' },
+                { client: 'asc' },
+            ],
+        }),
+    ])
+
+    const activeCampaignIds = activeCampaignRows.map(campaign => campaign.id)
+    const activePiValues = Array.from(new Set(activeCampaignRows.map(campaign => campaign.pi)))
+    const [captureCounts, dispatches] = await Promise.all([
+        activeCampaignIds.length > 0
+            ? prisma.capture.groupBy({
+                by: ['campaignId'],
+                where: {
+                    campaignId: { in: activeCampaignIds },
+                    status: 'SUCCESS',
+                    screenshotPath: { not: '' },
+                },
+                _count: { id: true },
+            })
+            : Promise.resolve([]),
+        activePiValues.length > 0
+            ? prisma.emailDispatch.findMany({
+                where: {
+                    pi: { in: activePiValues },
+                    flightEnd: { not: null },
+                    reportScope: 'CAMPAIGN',
+                },
+                orderBy: { updatedAt: 'desc' },
+                select: {
+                    id: true,
+                    pi: true,
+                    flightEnd: true,
+                    status: true,
+                    triggerMode: true,
+                    lastSentAt: true,
+                    errorMessage: true,
+                    attachmentCount: true,
+                    attachmentBytes: true,
+                    attempts: true,
+                },
+            })
+            : Promise.resolve([]),
+    ])
+
+    const timeline = groupTimeline(captures)
     const totalFolders = timeline.reduce((sum, day) => sum + day.sortedPiGroups.length, 0)
     const totalPis = new Set(captures.map(capture => capture.campaign.pi)).size
+    const registeredCampaigns = new Set(allGovCampaignRows.map(campaign => `${campaign.pi}|${campaign.campaignName}`)).size
+    const captureCountsByCampaign = new Map(captureCounts.map(item => [item.campaignId, item._count.id]))
+    const dispatchesByKey = new Map<string, (typeof dispatches)[number]>()
 
-    return (
-        <div className="pb-24 page-enter">
-            <header className="mb-10 flex flex-col gap-6 border-b border-white/8 pb-8 lg:flex-row lg:items-end lg:justify-between">
-                <div>
-                    <Link
-                        href="/books"
-                        className="mb-5 inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-white/55 transition-[background,border-color,color,transform] duration-200 hover:-translate-y-px hover:border-white/20 hover:bg-white/[0.07] hover:text-white"
-                    >
-                        <Library size={14} />
-                        Books
-                    </Link>
-                    <p className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.4em] text-white/30">
-                        <Landmark size={13} />
-                        Governo Federal
-                    </p>
-                    <h1
-                        className="text-4xl font-black leading-none tracking-tighter text-white md:text-5xl"
-                        style={{ fontFamily: 'var(--font-display)' }}
-                    >
-                        BOOKS<span className="mx-2 text-white/25">/</span>GOV
-                    </h1>
-                </div>
+    for (const dispatch of dispatches) {
+        const key = dispatchKey(dispatch.pi, dispatch.flightEnd)
+        if (key && !dispatchesByKey.has(key)) dispatchesByKey.set(key, dispatch)
+    }
 
-                <div className="flex flex-wrap items-center gap-3">
-                    <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/[0.04] px-4 py-2">
-                        <Library size={13} className="text-white/40" />
-                        <span className="text-xs font-bold text-white/60">{captures.length} prints</span>
-                    </div>
-                    <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/[0.04] px-4 py-2">
-                        <FolderOpen size={13} className="text-white/40" />
-                        <span className="text-xs font-bold text-white/60">{totalFolders} pastas</span>
-                    </div>
-                    <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/[0.04] px-4 py-2">
-                        <Landmark size={13} className="text-white/40" />
-                        <span className="text-xs font-bold text-white/60">{totalPis} PIs</span>
-                    </div>
-                    <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/[0.04] px-4 py-2">
-                        <Calendar size={13} className="text-white/40" />
-                        <span className="text-xs font-bold text-white/60">{timeline.length} dias</span>
-                    </div>
-                </div>
-            </header>
+    const activeCampaigns = groupActiveCampaigns({
+        rows: activeCampaignRows,
+        formatLabelMap,
+        captureCountsByCampaign,
+        dispatchesByKey,
+    })
 
-            {timeline.length > 1 && (
-                <nav className="sticky top-3 z-50 mb-8 hidden md:flex">
-                    <div className="flex items-center gap-1 rounded-xl border border-white/8 bg-black/70 px-3 py-2 shadow-2xl backdrop-blur-xl">
-                        <span className="border-r border-white/8 pr-3 text-[9px] font-black uppercase tracking-widest text-white/25">
-                            Ir para
-                        </span>
-                        <div className="flex items-center gap-0.5 pl-2">
-                            {timeline.slice(0, 12).map(day => (
-                                <a
-                                    key={day.fullDate}
-                                    href={`#day-${day.dateKey}`}
-                                    className="rounded-lg px-3 py-1.5 text-[10px] font-bold text-white/35 transition-all hover:bg-white/8 hover:text-white"
-                                >
-                                    {day.fullDate.split('/')[0]}/{day.fullDate.split('/')[1]}
-                                </a>
-                            ))}
-                        </div>
-                    </div>
-                </nav>
-            )}
+    const data: FederalBooksWorkspaceData = {
+        timeline,
+        stats: {
+            prints: captures.length,
+            folders: totalFolders,
+            pis: totalPis,
+            days: timeline.length,
+            registeredCampaigns,
+            activeCampaigns: activeCampaigns.length,
+        },
+        organization: {
+            canManageReports,
+            settings: {
+                recipients: parseRecipients(settings.governmentReportRecipients),
+                autoSend: Boolean(settings.governmentReportAutoSend),
+                dispatchTime: settings.governmentReportTime || '09:00',
+            },
+            activeCampaigns,
+        },
+    }
 
-            {timeline.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-white/8 bg-white/[0.015] px-6 py-28 text-center">
-                    <Landmark size={44} className="mx-auto mb-5 text-white/10" />
-                    <h2 className="mb-2 text-xl font-black text-white/45">Nenhum print de Governo Federal</h2>
-                    <p className="text-xs font-bold uppercase tracking-widest text-white/20">
-                        Os prints GOV_FEDERAL aparecem aqui quando forem capturados.
-                    </p>
-                </div>
-            ) : (
-                <div className="space-y-16">
-                    {timeline.map(day => (
-                        <section key={day.dateKey} id={`day-${day.dateKey}`} className="scroll-mt-24">
-                            <div className="mb-6 flex items-center justify-between border-b border-white/6 pb-4">
-                                <div className="flex items-center gap-5">
-                                    <div className="w-12 shrink-0 text-center">
-                                        <p className="text-3xl font-black leading-none text-white">
-                                            {day.fullDate.split('/')[0]}
-                                        </p>
-                                        <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-white/30">
-                                            {format(day.date, 'MMM', { locale: ptBR })}
-                                        </p>
-                                    </div>
-
-                                    <div className="h-10 w-px bg-white/10" />
-
-                                    <div>
-                                        <h2
-                                            className="text-lg font-black capitalize text-white"
-                                            style={{ fontFamily: 'var(--font-display)' }}
-                                        >
-                                            {day.weekDay}
-                                        </h2>
-                                        <p className="font-mono text-[11px] text-white/30">{day.fullDate}</p>
-                                    </div>
-
-                                    <span className="ml-2 rounded-full border border-white/8 bg-white/5 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-widest text-white/35">
-                                        {day.sortedPiGroups.length} pasta{day.sortedPiGroups.length > 1 ? 's' : ''}
-                                    </span>
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-                                {day.sortedPiGroups.map(piGroup => (
-                                    <PIFolderCard
-                                        key={`${day.dateKey}-${piGroup.pi}`}
-                                        pi={piGroup.pi}
-                                        client={piGroup.client}
-                                        campaignName={piGroup.campaignName}
-                                        captureCount={piGroup.captures.length}
-                                        thumbnailId={piGroup.captures[0].id}
-                                        date={day.dateKey}
-                                    />
-                                ))}
-                            </div>
-                        </section>
-                    ))}
-                </div>
-            )}
-
-            <BackToTopButton />
-        </div>
-    )
+    return <FederalBooksWorkspace data={data} />
 }
