@@ -456,6 +456,78 @@ async function injectCreativeAsset(locator: Locator, assetUrl: string, width: nu
     });
 }
 
+function getLayeredCreativeDocumentUrl(assetUrl: string) {
+    try {
+        const url = new URL(assetUrl)
+        if (!/(^|\.)00px\.net$/i.test(url.hostname)) return undefined
+        const match = url.pathname.match(/^\/rocket\/([^/]+)\/(?:resources\/)?[^/]+\.(?:png|jpe?g|webp)$/i)
+        if (!match) return undefined
+
+        return `${url.origin}/rocket/${match[1]}/index.html`
+    } catch {
+        return undefined
+    }
+}
+
+async function renderLayeredCreativeAsset(
+    browser: ChromiumBrowser,
+    creativeDocumentUrl: string,
+    width: number,
+    height: number,
+    captureDelaySeconds: number,
+    signal: AbortSignal | undefined,
+    campaignId: string,
+) {
+    throwIfCaptureAborted(signal)
+    const page = await browser.newPage()
+
+    try {
+        await nexusLogStore.addLog(
+            'Nexus: Renderizando pacote HTML5 do criativo',
+            'SYSTEM',
+            `${creativeDocumentUrl} | ${width}x${height}`,
+            campaignId,
+        )
+
+        await page.setViewportSize({ width, height })
+        await page.goto(creativeDocumentUrl, {
+            waitUntil: 'domcontentloaded',
+            timeout: FAST_CAPTURE_NAVIGATION_TIMEOUT_MS,
+        })
+        await page.waitForFunction(
+            () => Array.from(document.images).every((img) => img.complete && img.naturalWidth > 0),
+            null,
+            { timeout: FAST_SELECTOR_VISIBLE_TIMEOUT_MS },
+        ).catch(() => null)
+        await page.addStyleTag({
+            content: `
+                html, body {
+                    width: ${width}px !important;
+                    height: ${height}px !important;
+                    margin: 0 !important;
+                    overflow: hidden !important;
+                    background: transparent !important;
+                }
+            `,
+        }).catch(() => null)
+
+        const delayMs = normalizeCaptureDelaySeconds(captureDelaySeconds) * 1000
+        if (delayMs > 0) {
+            await abortableDelay(delayMs, signal)
+        }
+
+        throwIfCaptureAborted(signal)
+        return await page.screenshot({
+            type: 'png',
+            clip: { x: 0, y: 0, width, height },
+            animations: 'allow',
+            timeout: FAST_SCREENSHOT_TIMEOUT_MS,
+        })
+    } finally {
+        await page.close().catch(() => null)
+    }
+}
+
 function isStandaloneCreativeAsset(assetUrl: string) {
     try {
         const url = new URL(assetUrl)
@@ -531,8 +603,18 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
     const standaloneCreativeAssetUrl = creativeAssetUrl && isStandaloneCreativeAsset(creativeAssetUrl)
         ? creativeAssetUrl
         : undefined;
+    const layeredCreativeDocumentUrl = creativeAssetUrl
+        ? getLayeredCreativeDocumentUrl(creativeAssetUrl)
+        : undefined;
 
-    if (creativeAssetUrl && !standaloneCreativeAssetUrl) {
+    if (layeredCreativeDocumentUrl) {
+        await nexusLogStore.addLog(
+            'Nexus: Pacote HTML5 do criativo detectado',
+            'INFO',
+            layeredCreativeDocumentUrl,
+            campaignId
+        );
+    } else if (creativeAssetUrl && !standaloneCreativeAssetUrl) {
         await nexusLogStore.addLog(
             'Nexus: Asset em camadas detectado; usando renderizacao real do preview',
             'INFO',
@@ -784,9 +866,40 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                             await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
                         }
 
-                        const screenshotBuffer = standaloneCreativeAssetUrl
-                            ? await captureScreenshotAfterConfiguredDelay(page, campaignId, campaign.captureDelaySeconds, options.signal, 'disabled', selectorDimensionWaitMs)
-                            : await captureScreenshotAfterConfiguredDelay(page, campaignId, campaign.captureDelaySeconds, options.signal, 'allow', selectorDimensionWaitMs);
+                        let captureDelaySeconds = campaign.captureDelaySeconds;
+                        let screenshotAnimations: 'allow' | 'disabled' = standaloneCreativeAssetUrl ? 'disabled' : 'allow';
+
+                        if (layeredCreativeDocumentUrl && !standaloneCreativeAssetUrl) {
+                            const renderedCreative = await renderLayeredCreativeAsset(
+                                browser,
+                                layeredCreativeDocumentUrl,
+                                targetW,
+                                targetH,
+                                campaign.captureDelaySeconds,
+                                options.signal,
+                                campaignId,
+                            );
+                            const renderedDataUrl = `data:image/png;base64,${renderedCreative.toString('base64')}`;
+                            await injectCreativeAsset(locator, renderedDataUrl, targetW, targetH);
+                            await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
+                            await nexusLogStore.addLog(
+                                'Nexus: Criativo HTML5 renderizado e fixado no slot',
+                                'SUCCESS',
+                                `${targetW}x${targetH}`,
+                                campaignId,
+                            );
+                            captureDelaySeconds = 0;
+                            screenshotAnimations = 'disabled';
+                        }
+
+                        const screenshotBuffer = await captureScreenshotAfterConfiguredDelay(
+                            page,
+                            campaignId,
+                            captureDelaySeconds,
+                            options.signal,
+                            screenshotAnimations,
+                            selectorDimensionWaitMs,
+                        );
                         const finalImage = await prepareFinalCaptureImage(screenshotBuffer, campaign.url, isMobile, browser, options.signal);
                         await browser.close();
                         return await saveCapture(campaign, finalImage, campaignId, options);
