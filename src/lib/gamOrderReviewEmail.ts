@@ -5,7 +5,7 @@ import type { GamImportWriteResult } from './gamImportWriter'
 import { getSmtpConfig } from './emailService'
 import { nexusLogStore } from './nexusLogStore'
 
-const DEFAULT_GAM_ORDER_REVIEW_RECIPIENTS = ['opec.gov@gmail.com']
+const DEFAULT_GAM_ORDER_REVIEW_RECIPIENTS = ['opec.gov@metropoles.com']
 const GAM_ORDER_REVIEW_SECRET_KEYS = [
     'GAM_ORDER_REVIEW_RECIPIENTS',
     'GAM_REVIEW_RECIPIENTS',
@@ -92,19 +92,19 @@ function brDate(value: string | null | undefined) {
 
 function buildSubject(draft: GamImportDraft) {
     const client = draft.client || 'Cliente'
-    return `[Adsnap] Order GAM pronta para revisao - ${client} - PI ${draft.pi}`
+    return `[Adsnap] Order GAM pronta para revisão - ${client} - PI ${draft.pi}`
 }
 
 function buildText(options: SendGamOrderReviewEmailOptions) {
     const { draft, reviewUrl, writeResult } = options
     const rows = [
-        'Order GAM pronta para revisao.',
+        'Order GAM pronta para revisão.',
         '',
         `Cliente: ${draft.client}`,
         `Campanha: ${draft.campaignName || '-'}`,
         `PI: ${draft.pi}`,
         `Order: ${draft.orderId}`,
-        `Periodo: ${brDate(draft.flightStart)} ate ${brDate(draft.flightEnd)}`,
+        `Período: ${brDate(draft.flightStart)} até ${brDate(draft.flightEnd)}`,
         `Formatos identificados: ${draft.mediaEntries.length}`,
         `Itens bloqueados: ${draft.blockedItems.length}`,
     ]
@@ -112,7 +112,7 @@ function buildText(options: SendGamOrderReviewEmailOptions) {
     if (writeResult) {
         rows.push(
             `Campanhas criadas: ${writeResult.created}`,
-            `Campanhas ja existentes: ${writeResult.skipped}`,
+            `Campanhas já existentes: ${writeResult.skipped}`,
             `Itens pendentes/bloqueados: ${writeResult.blocked}`,
         )
     }
@@ -131,18 +131,21 @@ function buildHtml(options: SendGamOrderReviewEmailOptions) {
         { label: 'Criadas', value: created },
         { label: 'Existentes', value: skipped },
         { label: 'Formatos', value: draft.mediaEntries.length },
-        { label: 'Pendencias', value: blocked },
+        { label: 'Pendências', value: blocked },
     ]
 
     return `<!doctype html>
 <html>
+<head>
+  <meta charset="utf-8">
+</head>
 <body style="margin:0;background:#f4f4f5;padding:24px;font-family:Arial,Helvetica,sans-serif;color:#18181b;">
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:680px;margin:0 auto;background:#ffffff;border:1px solid #e4e4e7;border-radius:12px;overflow:hidden;">
     <tr>
       <td style="padding:28px 28px 18px;border-bottom:1px solid #e4e4e7;">
         <div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;color:#71717a;">Adsnap Cloud</div>
-        <h1 style="margin:10px 0 0;font-size:24px;line-height:1.2;color:#18181b;">Order pronta para revisao</h1>
-        <p style="margin:10px 0 0;font-size:14px;line-height:1.6;color:#52525b;">O Nexus cadastrou a order do GAM e deixou a revisao pronta para conferencia operacional.</p>
+        <h1 style="margin:10px 0 0;font-size:24px;line-height:1.2;color:#18181b;">Order pronta para revisão</h1>
+        <p style="margin:10px 0 0;font-size:14px;line-height:1.6;color:#52525b;">O Nexus cadastrou a order do GAM e deixou a revisão pronta para conferência operacional.</p>
       </td>
     </tr>
     <tr>
@@ -163,11 +166,11 @@ function buildHtml(options: SendGamOrderReviewEmailOptions) {
           <p style="margin:0 0 8px;font-size:13px;color:#71717a;font-weight:700;text-transform:uppercase;letter-spacing:.08em;">Resumo da order</p>
           <p style="margin:0;font-size:15px;font-weight:700;color:#18181b;">${escapeHtml(draft.client)}</p>
           <p style="margin:6px 0 0;font-size:14px;color:#52525b;">${escapeHtml(draft.campaignName || '-')}</p>
-          <p style="margin:12px 0 0;font-size:13px;color:#52525b;">PI ${escapeHtml(draft.pi)} | Order ${escapeHtml(draft.orderId)} | ${escapeHtml(brDate(draft.flightStart))} ate ${escapeHtml(brDate(draft.flightEnd))}</p>
+          <p style="margin:12px 0 0;font-size:13px;color:#52525b;">PI ${escapeHtml(draft.pi)} | Order ${escapeHtml(draft.orderId)} | ${escapeHtml(brDate(draft.flightStart))} até ${escapeHtml(brDate(draft.flightEnd))}</p>
         </div>
 
         <div style="margin-top:22px;">
-          <a href="${escapeHtml(reviewUrl)}" style="display:inline-block;background:#18181b;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 18px;border-radius:8px;">Abrir revisao da order</a>
+          <a href="${escapeHtml(reviewUrl)}" style="display:inline-block;background:#18181b;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 18px;border-radius:8px;">Abrir revisão da order</a>
         </div>
       </td>
     </tr>
@@ -181,7 +184,7 @@ export async function sendGamOrderReviewEmail(options: SendGamOrderReviewEmailOp
         const recipients = await getReviewRecipients()
         if (recipients.length === 0) {
             await nexusLogStore.addLog(
-                'Nexus GAM: email de revisao nao enviado; nenhum destinatario configurado.',
+                'Nexus GAM: e-mail de revisão não enviado; nenhum destinatário configurado.',
                 'INFO',
                 JSON.stringify({ jobId: options.jobId, orderId: options.draft.orderId }),
             )
@@ -205,11 +208,11 @@ export async function sendGamOrderReviewEmail(options: SendGamOrderReviewEmailOp
         })
 
         if (!info.accepted.length) {
-            throw new Error('Servidor SMTP recusou todos os destinatarios.')
+            throw new Error('Servidor SMTP recusou todos os destinatários.')
         }
 
         await nexusLogStore.addLog(
-            `Nexus GAM: email de revisao enviado para ${recipients.length} destinatario(s).`,
+            `Nexus GAM: e-mail de revisão enviado para ${recipients.length} destinatário(s).`,
             'SUCCESS',
             JSON.stringify({ jobId: options.jobId, orderId: options.draft.orderId, messageId: info.messageId }),
         )
@@ -217,7 +220,7 @@ export async function sendGamOrderReviewEmail(options: SendGamOrderReviewEmailOp
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         await nexusLogStore.addLog(
-            `Nexus GAM: email de revisao nao enviado: ${message}`,
+            `Nexus GAM: e-mail de revisão não enviado: ${message}`,
             'ERROR',
             JSON.stringify({ jobId: options.jobId, orderId: options.draft.orderId }),
         )
