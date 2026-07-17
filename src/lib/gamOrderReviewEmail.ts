@@ -5,6 +5,13 @@ import type { GamImportWriteResult } from './gamImportWriter'
 import { getSmtpConfig } from './emailService'
 import { nexusLogStore } from './nexusLogStore'
 
+const DEFAULT_GAM_ORDER_REVIEW_RECIPIENTS = ['opec.gov@gmail.com']
+const GAM_ORDER_REVIEW_SECRET_KEYS = [
+    'GAM_ORDER_REVIEW_RECIPIENTS',
+    'GAM_REVIEW_RECIPIENTS',
+]
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 interface SendGamOrderReviewEmailOptions {
     draft: GamImportDraft
     jobId: string
@@ -32,20 +39,39 @@ function parseRecipients(value: string | null | undefined) {
         .filter(Boolean)
 }
 
+function normalizeRecipients(recipients: string[]) {
+    const unique = new Map<string, string>()
+
+    for (const recipient of recipients) {
+        const clean = recipient.trim()
+        if (!clean || !EMAIL_PATTERN.test(clean)) continue
+        unique.set(clean.toLowerCase(), clean)
+    }
+
+    return Array.from(unique.values())
+}
+
 async function getReviewRecipients() {
     const envRecipients = parseRecipients(
         process.env.GAM_ORDER_REVIEW_RECIPIENTS
-        || process.env.GAM_REVIEW_RECIPIENTS
-        || process.env.GOVERNMENT_REPORT_RECIPIENTS,
+        || process.env.GAM_REVIEW_RECIPIENTS,
     )
-    if (envRecipients.length > 0) return envRecipients
+    const normalizedEnvRecipients = normalizeRecipients(envRecipients)
+    if (normalizedEnvRecipients.length > 0) return normalizedEnvRecipients
 
-    const settings = await prisma.settings.findUnique({
-        where: { id: 1 },
-        select: { governmentReportRecipients: true },
+    const secretRows = await prisma.nexusSecrets.findMany({
+        where: { name: { in: GAM_ORDER_REVIEW_SECRET_KEYS } },
+        select: { name: true, value: true },
     }).catch(() => null)
 
-    return parseRecipients(settings?.governmentReportRecipients)
+    for (const key of GAM_ORDER_REVIEW_SECRET_KEYS) {
+        const secretRecipients = normalizeRecipients(parseRecipients(
+            secretRows?.find(secret => secret.name === key)?.value,
+        ))
+        if (secretRecipients.length > 0) return secretRecipients
+    }
+
+    return DEFAULT_GAM_ORDER_REVIEW_RECIPIENTS
 }
 
 function escapeHtml(value: string | number | null | undefined) {
