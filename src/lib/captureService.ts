@@ -462,7 +462,7 @@ function isStandaloneCreativeAsset(assetUrl: string) {
         const isAdfLayer = url.hostname === 'creatives.adftech.com.br'
             && /\/\d{2}\.(?:png|jpe?g|webp)$/i.test(url.pathname)
         const isRocketLayer = /(^|\.)00px\.net$/i.test(url.hostname)
-            && /\/rocket\/[^/]+\/(?:resources\/)?\d{2}\.(?:png|jpe?g|webp)$/i.test(url.pathname)
+            && /\/rocket\/[^/]+\/(?:resources\/)?[^/]+\.(?:png|jpe?g|webp)$/i.test(url.pathname)
 
         return !isAdfLayer && !isRocketLayer && /\.(?:png|jpe?g|webp)(?:$|\?)/i.test(url.toString())
     } catch {
@@ -476,27 +476,26 @@ async function captureScreenshotAfterConfiguredDelay(
     captureDelaySeconds: number,
     signal?: AbortSignal,
     animations: 'allow' | 'disabled' = 'allow',
-    alreadyWaitedMs = 0,
+    _alreadyWaitedMs = 0,
 ) {
     throwIfCaptureAborted(signal)
     const configuredDelayMs = normalizeCaptureDelaySeconds(captureDelaySeconds) * 1000
-    const remainingDelayMs = Math.max(0, configuredDelayMs - Math.max(0, Math.floor(alreadyWaitedMs)))
 
     await page.waitForLoadState('domcontentloaded', { timeout: FAST_SCROLL_SETTLE_MS }).catch(() => null)
-    if (remainingDelayMs > 0) {
-        const remainingSeconds = Number((remainingDelayMs / 1000).toFixed(1))
+    if (configuredDelayMs > 0) {
+        const remainingSeconds = Number((configuredDelayMs / 1000).toFixed(1))
         await nexusLogStore.addLog(
-            `Nexus: Aguardando ${remainingSeconds}s antes do print`,
+            `Nexus: Aguardando ${remainingSeconds}s apos o criativo ficar pronto`,
             'SYSTEM',
-            'Captura por tempo configurado; selecao automatica de frame desativada',
+            'Delay configurado aplicado apos validacao do slot/formato; selecao automatica de frame desativada',
             campaignId,
         )
-        await abortableDelay(remainingDelayMs, signal)
+        await abortableDelay(configuredDelayMs, signal)
     } else {
         await nexusLogStore.addLog(
-            'Nexus: Delay configurado ja cumprido antes do print',
+            'Nexus: Captura sem delay adicional apos slot pronto',
             'SYSTEM',
-            'Tempo consumido durante a validacao do slot multi-size',
+            'Delay configurado igual a 0s',
             campaignId,
         )
     }
