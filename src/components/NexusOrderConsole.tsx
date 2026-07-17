@@ -41,6 +41,7 @@ const quickActions = [
     { label: 'Cadastrar order', command: 'Cadastrar order GAM: ' },
     { label: 'Prints geral', command: 'Disparar prints geral' },
     { label: 'Capturar PI', command: 'Capturar PI' },
+    { label: 'Formato PI', command: 'Capturar PI ' },
     { label: 'Baixar prints', command: 'Baixar prints PI ' },
 ]
 
@@ -62,7 +63,7 @@ function buildWelcome(): ChatMessage {
         id: 'welcome',
         role: 'assistant',
         tone: 'info',
-        text: 'Sou o Nexus. Pode falar comigo em linguagem natural: eu cadastro orders do GAM, disparo capturas, encontro campanhas e preparo downloads de prints.',
+        text: 'Sou o Nexus. Pode falar comigo em linguagem natural: eu cadastro orders do GAM, disparo capturas, capturo formatos específicos por PI, encontro campanhas e preparo downloads de prints.',
         actions: quickActions,
     }
 }

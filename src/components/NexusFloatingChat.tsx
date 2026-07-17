@@ -30,6 +30,7 @@ const quickActions = [
     { label: 'Order GAM', command: 'Cadastrar order GAM: ' },
     { label: 'Prints geral', command: 'Disparar prints geral' },
     { label: 'Capturar PI', command: 'Capturar PI' },
+    { label: 'Formato PI', command: 'Capturar PI ' },
     { label: 'Baixar ZIP', command: 'Baixar prints PI ' },
 ]
 
@@ -42,7 +43,7 @@ function initialMessage(): FloatingMessage {
         id: 'mission-start',
         role: 'assistant',
         tone: 'info',
-        text: 'Nexus pronto. Envie uma acao: cadastrar order, disparar prints, capturar um PI ou preparar download.',
+        text: 'Nexus pronto. Envie uma acao: cadastrar order, disparar prints, capturar um PI, capturar um formato especifico ou preparar download.',
         actions: quickActions,
     }
 }

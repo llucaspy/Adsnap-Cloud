@@ -62,6 +62,13 @@ type AssistantCampaign = {
     flightEnd: Date | null
 }
 
+type AssistantFormatDefinition = {
+    id?: string | null
+    label?: string | null
+    width?: number | string | null
+    height?: number | string | null
+}
+
 type CampaignGroup = {
     pi: string
     client: string
@@ -242,6 +249,18 @@ function normalizeText(value: string) {
         .toLowerCase()
 }
 
+function normalizeLoose(value: string | null | undefined) {
+    return normalizeText(String(value || ''))
+        .replace(/[^\p{L}\p{N}]+/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+}
+
+function normalizeDimension(value: string | null | undefined) {
+    const match = String(value || '').match(/\b(\d{2,4})\s*(?:x|×|por)\s*(\d{2,4})\b/i)
+    return match ? `${Number(match[1])}x${Number(match[2])}` : null
+}
+
 function extractGamOrderUrl(message: string) {
     return message.match(/https:\/\/admanager\.google\.com\/\S*order_id=\d+\S*/i)?.[0]?.replace(/[),.;]+$/, '') || null
 }
@@ -250,9 +269,41 @@ function extractPi(message: string) {
     return message.match(/\b(?:pi\s*)?([0-9]{3,8})\b/i)?.[1] || null
 }
 
+function extractFormatQuery(message: string) {
+    const dimension = normalizeDimension(message)
+    if (dimension) return dimension
+
+    const match = message.match(/\b(?:formato|format|banner)\s+(.+)$/i)
+    if (!match) return null
+
+    const cleaned = normalizeLoose(match[1])
+        .replace(/\b(?:pi|capturar|capture|print|prints|screenshot|tirar|do|da|de|para|por|o|a|os|as)\b/g, ' ')
+        .replace(/\b\d{3,8}\b/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+
+    return cleaned.length >= 2 ? cleaned : null
+}
+
+function extractDeviceQuery(message: string) {
+    const normalized = normalizeText(message)
+    if (/\b(desktop|desk)\b/i.test(normalized)) return 'desktop'
+    if (/\b(mobile|mob)\b/i.test(normalized)) return 'mobile'
+    return null
+}
+
 function wantsCapture(message: string) {
     const normalized = normalizeText(message)
     return /\b(captur|print|screenshot|tirar)\w*/i.test(normalized)
+}
+
+function wantsSpecificFormatCapture(message: string) {
+    const normalized = normalizeText(message)
+    return wantsCapture(message)
+        && (
+            /\b(formato|format|banner)\b/i.test(normalized)
+            || /\b\d{2,4}\s*(?:x|×|por)\s*\d{2,4}\b/i.test(message)
+        )
 }
 
 function wantsGeneralCapture(message: string) {
@@ -275,10 +326,75 @@ function wantsOrderRegistration(message: string) {
 function cleanupSearchText(message: string) {
     return normalizeText(message)
         .replace(/https?:\/\/\S+/g, ' ')
-        .replace(/\b(?:disparar|rodar|fazer|tirar|capturar|capture|prints?|screenshot|campanha|especifica|especifico|baixar|download|zip|book|comprovantes?|todos?|todas?|geral|pi|da|de|do|para|por|os|as|o|a)\b/g, ' ')
+        .replace(/\b(?:disparar|rodar|fazer|tirar|capturar|capture|prints?|screenshot|campanha|formato|format|banner|especifica|especifico|baixar|download|zip|book|comprovantes?|todos?|todas?|geral|pi|da|de|do|para|por|os|as|o|a)\b/g, ' ')
         .replace(/[^\p{L}\p{N}\s]/gu, ' ')
         .replace(/\s+/g, ' ')
         .trim()
+}
+
+async function getFormatDefinitions() {
+    const settings = await prisma.settings.findUnique({
+        where: { id: 1 },
+        select: { bannerFormats: true },
+    })
+
+    try {
+        const formats = JSON.parse(settings?.bannerFormats || '[]') as AssistantFormatDefinition[]
+        return new Map(
+            formats
+                .filter(format => format.id)
+                .map(format => [String(format.id).trim().toLowerCase(), format])
+        )
+    } catch {
+        return new Map<string, AssistantFormatDefinition>()
+    }
+}
+
+function getFormatDimensions(format?: AssistantFormatDefinition) {
+    if (!format?.width || !format?.height) return null
+    return `${Number(format.width)}x${Number(format.height)}`
+}
+
+function describeFormat(
+    campaign: Pick<AssistantCampaign, 'format' | 'device'>,
+    formatLabelMap: Map<string, string>,
+    formatDefinitions: Map<string, AssistantFormatDefinition>,
+) {
+    const definition = formatDefinitions.get(String(campaign.format || '').trim().toLowerCase())
+    const label = resolveFormatLabel(formatLabelMap, campaign.format)
+    const dimensions = getFormatDimensions(definition)
+    return {
+        label,
+        dimensions,
+        text: `${label}${dimensions ? ` ${dimensions}` : ''}${campaign.device ? `/${campaign.device}` : ''}`,
+        commandQuery: dimensions || label,
+    }
+}
+
+function matchesRequestedFormat(
+    campaign: Pick<AssistantCampaign, 'format' | 'device'>,
+    query: string,
+    formatLabelMap: Map<string, string>,
+    formatDefinitions: Map<string, AssistantFormatDefinition>,
+    requestedDevice?: string | null,
+) {
+    const definition = formatDefinitions.get(String(campaign.format || '').trim().toLowerCase())
+    const label = resolveFormatLabel(formatLabelMap, campaign.format)
+    const dimensions = getFormatDimensions(definition)
+    const requestedDimension = normalizeDimension(query)
+    const normalizedQuery = normalizeLoose(query)
+    const normalizedLabel = normalizeLoose(label)
+    const normalizedDevice = normalizeLoose(campaign.device)
+    const normalizedId = normalizeLoose(campaign.format)
+
+    if (requestedDevice && normalizedDevice !== requestedDevice) return false
+    if (requestedDimension && dimensions === requestedDimension) return true
+    if (normalizedQuery.length < 2) return false
+
+    return normalizedLabel.includes(normalizedQuery)
+        || normalizedQuery.includes(normalizedLabel)
+        || normalizedId === normalizedQuery
+        || normalizedDevice === normalizedQuery
 }
 
 function groupCampaigns(campaigns: AssistantCampaign[], formatLabelMap = new Map<string, string>()): CampaignGroup[] {
@@ -387,6 +503,23 @@ function campaignCards(groups: CampaignGroup[], action: 'capture' | 'download'):
     }))
 }
 
+async function formatCardsForCampaigns(campaigns: AssistantCampaign[]): Promise<NexusAssistantCard[]> {
+    const [formatLabelMap, formatDefinitions] = await Promise.all([
+        getFormatLabelMap(),
+        getFormatDefinitions(),
+    ])
+
+    return campaigns.slice(0, 10).map(campaign => {
+        const format = describeFormat(campaign, formatLabelMap, formatDefinitions)
+        return {
+            title: format.label,
+            description: `${campaign.client} | PI ${campaign.pi}`,
+            meta: `${format.dimensions || 'dimensão personalizada'} | ${campaign.device}`,
+            command: `capturar PI ${campaign.pi} formato ${format.commandQuery}${campaign.device ? ` ${campaign.device}` : ''}`,
+        }
+    })
+}
+
 async function queueCampaignGroup(group: CampaignGroup, source: string) {
     const queueResult = await enqueueCaptureJobs(group.campaignIds, {
         source,
@@ -399,6 +532,26 @@ async function queueCampaignGroup(group: CampaignGroup, source: string) {
         `Nexus Assistant: ${queueResult.campaignIds.length} campanha(s) enfileirada(s) para PI ${group.pi}.`,
         triggered ? 'SUCCESS' : 'ERROR',
         JSON.stringify({ queueResult, triggered }),
+    )
+
+    return { queueResult, triggered }
+}
+
+async function queueSpecificCampaigns(campaigns: AssistantCampaign[], source: string, requestedFormat: string) {
+    const ids = campaigns.map(campaign => campaign.id)
+    const queueResult = await enqueueCaptureJobs(ids, {
+        source,
+        priority: 35,
+        allowTerminalStatuses: true,
+        payload: { requestedFormat },
+    })
+    const triggered = await triggerNexusWorker(queueResult.campaignIds)
+    const pi = campaigns[0]?.pi || ''
+
+    await nexusLogStore.addLog(
+        `Nexus Assistant: formato especifico enfileirado para PI ${pi}.`,
+        triggered ? 'SUCCESS' : 'ERROR',
+        JSON.stringify({ queueResult, triggered, requestedFormat, campaignIds: ids }),
     )
 
     return { queueResult, triggered }
@@ -426,11 +579,12 @@ async function queueAllActiveCampaigns() {
 function capabilityResponse(): NexusAssistantResponse {
     return {
         tone: 'info',
-        text: 'Posso operar o Nexus por linguagem natural. Me mande uma order do GAM, peça prints gerais, peça captura de uma campanha/PI especifico ou solicite download dos prints.',
+        text: 'Posso operar o Nexus por linguagem natural. Me mande uma order do GAM, peça prints gerais, peça captura de uma campanha/PI, capture um formato específico ou solicite download dos prints.',
         actions: [
             { label: 'Cadastrar order GAM', command: 'Cadastrar order GAM' },
             { label: 'Disparar prints geral', command: 'Disparar prints geral', variant: 'primary' },
-            { label: 'Capturar PI especifico', command: 'Capturar PI' },
+            { label: 'Capturar PI específico', command: 'Capturar PI' },
+            { label: 'Capturar formato', command: 'Capturar PI ' },
             { label: 'Baixar prints por PI', command: 'Baixar prints PI ' },
         ],
     }
@@ -505,18 +659,99 @@ export async function submitNexusAssistantMessage(message: string): Promise<Nexu
     if (wantsCapture(input)) {
         const selectedPi = extractPi(input)
         const hasSpecificSearch = cleanupSearchText(input).length >= 2
+        const specificFormatCapture = wantsSpecificFormatCapture(input)
+        const requestedFormat = extractFormatQuery(input)
+        const requestedDevice = extractDeviceQuery(input)
+
+        if (specificFormatCapture) {
+            if (!selectedPi) {
+                return {
+                    tone: 'info',
+                    text: 'Para capturar um formato específico, me informe o PI e o formato. Exemplo: capturar PI 138939 formato 320x100.',
+                    actions: [{ label: 'Informar PI e formato', command: 'capturar PI ' }],
+                }
+            }
+
+            const campaigns = await prisma.campaign.findMany({
+                where: {
+                    ...activeCaptureWhere(),
+                    pi: selectedPi,
+                },
+                select: {
+                    id: true,
+                    pi: true,
+                    client: true,
+                    campaignName: true,
+                    format: true,
+                    device: true,
+                    status: true,
+                    flightStart: true,
+                    flightEnd: true,
+                },
+                orderBy: [{ device: 'asc' }, { format: 'asc' }],
+            })
+
+            if (campaigns.length === 0) {
+                return {
+                    tone: 'warning',
+                    text: `Não encontrei formatos ativos e elegíveis para captura no PI ${selectedPi}.`,
+                    actions: [{ label: 'Ver monitoramento', href: '/monitoring' }],
+                }
+            }
+
+            if (!requestedFormat) {
+                return {
+                    tone: 'info',
+                    text: `Encontrei ${campaigns.length} formato(s) ativo(s) no PI ${selectedPi}. Escolha exatamente qual devo capturar.`,
+                    cards: await formatCardsForCampaigns(campaigns),
+                }
+            }
+
+            const [formatLabelMap, formatDefinitions] = await Promise.all([
+                getFormatLabelMap(),
+                getFormatDefinitions(),
+            ])
+            const matchingCampaigns = campaigns.filter(campaign =>
+                matchesRequestedFormat(campaign, requestedFormat, formatLabelMap, formatDefinitions, requestedDevice)
+            )
+
+            if (matchingCampaigns.length === 0) {
+                return {
+                    tone: 'warning',
+                    text: `Não encontrei o formato "${requestedFormat}" entre os formatos ativos do PI ${selectedPi}. Escolha uma das opções abaixo.`,
+                    cards: await formatCardsForCampaigns(campaigns),
+                }
+            }
+
+            const result = await queueSpecificCampaigns(matchingCampaigns, 'nexus-assistant-format-specific', requestedFormat)
+            const formatText = matchingCampaigns
+                .map(campaign => describeFormat(campaign, formatLabelMap, formatDefinitions).text)
+                .join(', ')
+
+            return {
+                tone: result.queueResult.campaignIds.length > 0 ? 'success' : 'warning',
+                text: result.queueResult.campaignIds.length > 0
+                    ? `Enfileirei ${result.queueResult.campaignIds.length} captura(s) do PI ${selectedPi} somente para: ${formatText}. Worker ${result.triggered ? 'acionado' : 'não acionado automaticamente; a fila ficou pronta'}.`
+                    : `O formato ${requestedFormat} do PI ${selectedPi} já estava na fila ou não ficou elegível agora.`,
+                actions: [
+                    { label: 'Abrir Workers', href: '/workers' },
+                    { label: 'Abrir book', href: `/books/${encodeURIComponent(selectedPi)}` },
+                ],
+            }
+        }
+
         const groups = await findCampaignGroups(input, true)
         if (groups.length === 0) {
             return {
                 tone: 'warning',
-                text: 'Nao encontrei campanha em veiculacao agora e elegivel para captura com esse termo. Me mande outro PI ou um nome mais especifico.',
+                text: 'Não encontrei campanha em veiculação agora e elegível para captura com esse termo. Me mande outro PI ou um nome mais específico.',
                 actions: [{ label: 'Exemplo', command: 'capturar PI 402716' }],
             }
         }
         if (!selectedPi && (!hasSpecificSearch || groups.length > 1)) {
             return {
                 tone: 'info',
-                text: `Encontrei ${groups.length} PI(s) em veiculacao agora para captura. Escolha qual devo capturar.`,
+                text: `Encontrei ${groups.length} PI(s) em veiculação agora para captura. Escolha qual devo capturar.`,
                 cards: campaignCards(groups, 'capture'),
             }
         }
@@ -530,6 +765,7 @@ export async function submitNexusAssistantMessage(message: string): Promise<Nexu
                 : `A campanha ${group.client} | PI ${group.pi} nao tem formatos elegiveis para captura agora.`,
             actions: [
                 { label: 'Abrir Workers', href: '/workers' },
+                { label: 'Capturar formato específico', command: `capturar PI ${group.pi} formato ` },
                 { label: 'Baixar prints desse PI', href: `/api/books/download?pi=${encodeURIComponent(group.pi)}` },
             ],
         }
