@@ -425,6 +425,35 @@ async function waitForExpectedDimensionInSlot(
     }
 }
 
+async function primeConfiguredSlotForLazyLoad(
+    page: import('playwright').Page,
+    locator: Locator,
+    signal: AbortSignal | undefined,
+    campaignId: string,
+) {
+    throwIfCaptureAborted(signal);
+
+    await nexusLogStore.addLog(
+        'Nexus: Posicionando seletor na viewport para ativar lazy-load',
+        'SYSTEM',
+        undefined,
+        campaignId,
+    );
+
+    await locator.scrollIntoViewIfNeeded({ timeout: FAST_SELECTOR_VISIBLE_TIMEOUT_MS }).catch(() => null);
+    await abortableDelay(FAST_SCROLL_SETTLE_MS, signal);
+
+    const targetScrollY = await locator.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return Math.max(0, rect.top + window.scrollY + (rect.height / 2) - (window.innerHeight / 2));
+    }).catch(() => null);
+
+    if (typeof targetScrollY === 'number') {
+        await page.evaluate((y) => window.scrollTo(0, y), targetScrollY);
+        await abortableDelay(FAST_SCROLL_SETTLE_MS, signal);
+    }
+}
+
 async function injectCreativeAsset(locator: Locator, assetUrl: string, width: number, height: number) {
     await locator.evaluate((element, creative) => {
         const image = document.createElement('img');
@@ -796,6 +825,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                     const locator = page.locator(selector).first();
 
                     await locator.waitFor({ state: 'attached', timeout: FAST_SELECTOR_ATTACHED_TIMEOUT_MS });
+                    await primeConfiguredSlotForLazyLoad(page, locator, options.signal, campaignId);
     
                     if (!await locator.isVisible()) {
                         console.log('[Nexus] Seletor existe mas não está visível. Tentando scroll...');
