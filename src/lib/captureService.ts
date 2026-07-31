@@ -389,6 +389,27 @@ function describeMeasuredBoxes(boxes: MeasuredAdBox[]) {
         .join(', ') || 'sem boxes visiveis';
 }
 
+async function getLocatorDocumentBox(locator: Locator): Promise<MeasuredAdBox | null> {
+    return await locator.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        const isVisible = rect.width > 0
+            && rect.height > 0
+            && style.display !== 'none'
+            && style.visibility !== 'hidden';
+
+        if (!isVisible) return null;
+
+        return {
+            source: 'selector',
+            x: rect.x + window.scrollX,
+            y: rect.y + window.scrollY,
+            width: rect.width,
+            height: rect.height,
+        };
+    }).catch(() => null);
+}
+
 async function waitForExpectedDimensionInSlot(
     locator: Locator,
     targetW: number,
@@ -858,13 +879,13 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                     if (!matchingBox) {
                         const initialMeasured = describeMeasuredBoxes(measuredBoxes);
                         const configuredDelayMs = normalizeCaptureDelaySeconds(campaign.captureDelaySeconds) * 1000;
-                        const maxSlotWaitMs = Math.max(MULTI_SIZE_SLOT_TIMEOUT_MS, configuredDelayMs);
+                        const maxSlotWaitMs = Math.min(MULTI_SIZE_SLOT_TIMEOUT_MS, Math.max(configuredDelayMs, 1_500));
 
                         console.log(`[Nexus] Slot multi-size ainda nao exibiu ${targetW}x${targetH}. Medido: ${initialMeasured}`);
                         await nexusLogStore.addLog(
-                            'Nexus: Slot multi-size aguardando formato esperado',
+                            'Nexus: Conferindo dimensao do slot configurado',
                             'INFO',
-                            `Esperado ${targetW}x${targetH}; medido agora: ${initialMeasured}; espera maxima: ${maxSlotWaitMs / 1000}s`,
+                            `Esperado ${targetW}x${targetH}; medido agora: ${initialMeasured}; janela: ${maxSlotWaitMs / 1000}s`,
                             campaignId,
                         );
 
@@ -881,65 +902,74 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                         selectorDimensionWaitMs = waitedMeasurement.waitedMs;
                     }
     
+                    const captureAnchorBox = matchingBox || await getLocatorDocumentBox(locator);
+
+                    if (!captureAnchorBox) {
+                        throw new Error('Seletor configurado sem area visivel para captura');
+                    }
+
                     if (matchingBox) {
                         console.log(`[Nexus] Seletor validado! ${matchingBox.source} (${Math.round(matchingBox.width)}x${Math.round(matchingBox.height)})`);
                         await nexusLogStore.addLog('Nexus: Seletor validado com dimensao correta', 'SUCCESS', `Dim: ${Math.round(matchingBox.width)}x${Math.round(matchingBox.height)} | Esperado: ${targetW}x${targetH}`, campaignId);
-    
-                        const viewportHeight = isMobile ? 722 : 928;
-                        const targetScrollY = Math.max(0, matchingBox.y + (matchingBox.height / 2) - (viewportHeight / 2));
-    
-                        await page.evaluate((y) => window.scrollTo(0, y), targetScrollY);
-                        await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
-    
-                        if (standaloneCreativeAssetUrl) {
-                            await injectCreativeAsset(locator, standaloneCreativeAssetUrl, targetW, targetH);
-                            await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
-                        }
-
-                        let captureDelaySeconds = campaign.captureDelaySeconds;
-                        let screenshotAnimations: 'allow' | 'disabled' = standaloneCreativeAssetUrl ? 'disabled' : 'allow';
-
-                        if (layeredCreativeDocumentUrl && !standaloneCreativeAssetUrl) {
-                            const renderedCreative = await renderLayeredCreativeAsset(
-                                browser,
-                                layeredCreativeDocumentUrl,
-                                targetW,
-                                targetH,
-                                campaign.captureDelaySeconds,
-                                options.signal,
-                                campaignId,
-                            );
-                            const renderedDataUrl = `data:image/png;base64,${renderedCreative.toString('base64')}`;
-                            await injectCreativeAsset(locator, renderedDataUrl, targetW, targetH);
-                            await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
-                            await nexusLogStore.addLog(
-                                'Nexus: Criativo HTML5 renderizado e fixado no slot',
-                                'SUCCESS',
-                                `${targetW}x${targetH}`,
-                                campaignId,
-                            );
-                            captureDelaySeconds = 0;
-                            screenshotAnimations = 'disabled';
-                        }
-
-                        const screenshotBuffer = await captureScreenshotAfterConfiguredDelay(
-                            page,
-                            campaignId,
-                            captureDelaySeconds,
-                            options.signal,
-                            screenshotAnimations,
-                            selectorDimensionWaitMs,
-                        );
-                        const finalImage = await prepareFinalCaptureImage(screenshotBuffer, campaign.url, isMobile, browser, options.signal);
-                        await browser.close();
-                        return await saveCapture(campaign, finalImage, campaignId, options);
                     } else {
                         const measured = describeMeasuredBoxes(measuredBoxes);
-                        console.log(`[Nexus] Slot multi-size nao exibiu o formato esperado. Esperado ${targetW}x${targetH}; medido: ${measured}`);
-                        await nexusLogStore.addLog('Nexus: Slot multi-size nao exibiu formato esperado', 'INFO', `Esperado ${targetW}x${targetH}; medido apos espera: ${measured}`, campaignId);
-                        selectorMismatchError = `Slot multi-size sem criativo ${targetW}x${targetH} apos espera (${measured})`;
-                        throw new Error(selectorMismatchError);
+                        console.log(`[Nexus] Dimensao nao confirmou ${targetW}x${targetH}; seguindo pelo XPath configurado. Medido: ${measured}`);
+                        await nexusLogStore.addLog(
+                            'Nexus: Dimensao nao confirmou; seguindo pelo XPath configurado',
+                            'INFO',
+                            `Esperado ${targetW}x${targetH}; medido apos espera: ${measured}`,
+                            campaignId,
+                        );
                     }
+
+                    const viewportHeight = isMobile ? 722 : 928;
+                    const targetScrollY = Math.max(0, captureAnchorBox.y + (captureAnchorBox.height / 2) - (viewportHeight / 2));
+
+                    await page.evaluate((y) => window.scrollTo(0, y), targetScrollY);
+                    await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
+
+                    if (standaloneCreativeAssetUrl) {
+                        await injectCreativeAsset(locator, standaloneCreativeAssetUrl, targetW, targetH);
+                        await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
+                    }
+
+                    let captureDelaySeconds = campaign.captureDelaySeconds;
+                    let screenshotAnimations: 'allow' | 'disabled' = standaloneCreativeAssetUrl ? 'disabled' : 'allow';
+
+                    if (layeredCreativeDocumentUrl && !standaloneCreativeAssetUrl) {
+                        const renderedCreative = await renderLayeredCreativeAsset(
+                            browser,
+                            layeredCreativeDocumentUrl,
+                            targetW,
+                            targetH,
+                            campaign.captureDelaySeconds,
+                            options.signal,
+                            campaignId,
+                        );
+                        const renderedDataUrl = `data:image/png;base64,${renderedCreative.toString('base64')}`;
+                        await injectCreativeAsset(locator, renderedDataUrl, targetW, targetH);
+                        await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
+                        await nexusLogStore.addLog(
+                            'Nexus: Criativo HTML5 renderizado e fixado no slot',
+                            'SUCCESS',
+                            `${targetW}x${targetH}`,
+                            campaignId,
+                        );
+                        captureDelaySeconds = 0;
+                        screenshotAnimations = 'disabled';
+                    }
+
+                    const screenshotBuffer = await captureScreenshotAfterConfiguredDelay(
+                        page,
+                        campaignId,
+                        captureDelaySeconds,
+                        options.signal,
+                        screenshotAnimations,
+                        selectorDimensionWaitMs,
+                    );
+                    const finalImage = await prepareFinalCaptureImage(screenshotBuffer, campaign.url, isMobile, browser, options.signal);
+                    await browser.close();
+                    return await saveCapture(campaign, finalImage, campaignId, options);
                 } catch (selError) {
                     const msg = selError instanceof Error ? selError.message : String(selError);
                     console.warn('[Nexus] Falha no seletor:', msg);

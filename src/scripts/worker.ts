@@ -6,7 +6,12 @@ import { getGmailClient, fetchRecentEmails } from '../lib/gmail'
 import { classifyEmail } from '../lib/gemini'
 import { processPendingGamJobs } from '../lib/gamJobProcessor'
 import { processGovernmentReportQueue } from '../lib/governmentReportAutomation'
-import { isFederalCampaignBoundaryToday, shouldQueueScheduledCampaign } from '../lib/campaignSchedule'
+import {
+    getBrasiliaDayRangeFor,
+    isCampaignFinalDayToday,
+    isFederalCampaignBoundaryToday,
+    shouldQueueScheduledCampaign,
+} from '../lib/campaignSchedule'
 import {
     enqueueCaptureJobs,
     isWorkerJobStorageMissing,
@@ -23,8 +28,8 @@ const DEFAULT_CAPTURE_BATCH_SIZE = 5
 const MAX_CAPTURE_BATCH_SIZE = 20
 const DEFAULT_CAPTURE_CONCURRENCY = 2
 const MAX_CAPTURE_CONCURRENCY = 4
-const DEFAULT_CAPTURE_OVERHEAD_MS = 20 * 1000
-const MAX_DERIVED_CAPTURE_TIMEOUT_MS = 60 * 1000
+const DEFAULT_CAPTURE_OVERHEAD_MS = 40 * 1000
+const MAX_DERIVED_CAPTURE_TIMEOUT_MS = 90 * 1000
 const DEFAULT_CAPTURE_LEASE_MINUTES = 15
 const MAX_WORKER_RUNTIME_MS = 6 * 60 * 60 * 1000
 
@@ -503,6 +508,66 @@ async function backfillQueuedCaptureJobs(now: Date, targetedCampaignIds: string[
     }
 }
 
+async function queueFinalDayRecoveryCaptures(now: Date) {
+    const range = getBrasiliaDayRangeFor(now)
+    const candidates = await prisma.campaign.findMany({
+        where: {
+            isArchived: false,
+            flightEnd: { not: null },
+            status: { notIn: ['EXPIRED', 'FINISHED', 'PROCESSING', 'QUEUED'] },
+            NOT: {
+                captures: {
+                    some: {
+                        status: 'SUCCESS',
+                        createdAt: {
+                            gte: range.start,
+                            lt: range.end,
+                        },
+                    },
+                },
+            },
+        },
+        select: {
+            id: true,
+            pi: true,
+            client: true,
+            segmentation: true,
+            captureCadence: true,
+            flightStart: true,
+            flightEnd: true,
+            scheduledTimes: true,
+            lastCaptureAt: true,
+            status: true,
+        },
+        take: 250,
+    })
+
+    const recoveryIds = candidates
+        .filter(campaign => isCampaignFinalDayToday(campaign, now))
+        .map(campaign => campaign.id)
+
+    if (recoveryIds.length === 0) return
+
+    const queueResult = await enqueueCaptureJobs(recoveryIds, {
+        source: 'worker-final-day-recovery',
+        priority: 20,
+        allowTerminalStatuses: true,
+        maxAttempts: 3,
+        timeoutMs: 45_000,
+    })
+
+    await nexusLogStore.addLog(
+        `Nexus Worker: recuperação de fechamento enfileirou ${queueResult.campaignIds.length} formato(s) sem print do dia`,
+        queueResult.campaignIds.length > 0 ? 'SYSTEM' : 'INFO',
+        JSON.stringify({
+            rangeStart: range.start.toISOString(),
+            rangeEnd: range.end.toISOString(),
+            requested: recoveryIds.length,
+            queueResult,
+        })
+    )
+}
+
 type CaptureSummary = {
     claimed: number
     success: number
@@ -771,6 +836,18 @@ async function runWorkerCycle(options: WorkerCycleOptions = {}) {
         await backfillQueuedCaptureJobs(now, targetedCampaignIds)
     } catch (err) {
         console.error('[Nexus Worker] Erro ao converter fila legada em WorkerJob:', err)
+    }
+
+    if (targetedCampaignIds.length === 0) {
+        try {
+            await queueFinalDayRecoveryCaptures(now)
+        } catch (err) {
+            console.error('[Nexus Worker] Erro na recuperacao de fechamento:', err)
+            await nexusLogStore.addLog(
+                `Nexus Worker: falha ao recuperar prints de fechamento: ${err instanceof Error ? err.message : String(err)}`,
+                'ERROR'
+            )
+        }
     }
 
     // 4. Government campaign final reports

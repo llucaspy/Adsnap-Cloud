@@ -16,7 +16,7 @@ type BrasiliaClock = {
     minuteOfDay: number
 }
 
-function getBrasiliaClock(date: Date): BrasiliaClock {
+export function getBrasiliaClock(date: Date): BrasiliaClock {
     const parts = new Intl.DateTimeFormat('en-US', {
         timeZone: BRASILIA_TIME_ZONE,
         year: 'numeric',
@@ -39,6 +39,15 @@ function getBrasiliaClock(date: Date): BrasiliaClock {
     }
 }
 
+export function getBrasiliaDayRangeFor(date: Date) {
+    const [year, month, day] = getBrasiliaClock(date).dateKey.split('-').map(Number)
+    const start = new Date(Date.UTC(year, month - 1, day, 3, 0, 0, 0))
+    return {
+        start,
+        end: new Date(start.getTime() + 24 * 60 * 60 * 1000),
+    }
+}
+
 export function getCampaignDateKey(date: Date) {
     const isLegacyUtcDate = date.getUTCHours() === 0
         && date.getUTCMinutes() === 0
@@ -48,6 +57,28 @@ export function getCampaignDateKey(date: Date) {
     // Older records stored date-only values at UTC midnight. Converting those
     // to Brasilia would incorrectly move them to the previous calendar day.
     return isLegacyUtcDate ? date.toISOString().slice(0, 10) : getBrasiliaClock(date).dateKey
+}
+
+function isTimestampInBrasiliaDay(date: Date | null, now: Date) {
+    if (!date) return false
+    const range = getBrasiliaDayRangeFor(now)
+    return date >= range.start && date < range.end
+}
+
+export function isCampaignFinalDayToday(campaign: ScheduledCampaign, now = new Date()) {
+    if (!campaign.flightEnd) return false
+    const todayKey = getBrasiliaClock(now).dateKey
+    const endKey = getCampaignDateKey(campaign.flightEnd)
+
+    return endKey === todayKey || isTimestampInBrasiliaDay(campaign.flightEnd, now)
+}
+
+export function isCampaignStartDayToday(campaign: ScheduledCampaign, now = new Date()) {
+    if (!campaign.flightStart) return false
+    const todayKey = getBrasiliaClock(now).dateKey
+    const startKey = getCampaignDateKey(campaign.flightStart)
+
+    return startKey === todayKey || isTimestampInBrasiliaDay(campaign.flightStart, now)
 }
 
 function readScheduledMinutes(raw: string | null) {
@@ -100,5 +131,14 @@ export function isFederalCampaignBoundaryToday(campaign: ScheduledCampaign, now 
     const todayKey = getBrasiliaClock(now).dateKey
     const startKey = campaign.flightStart ? getCampaignDateKey(campaign.flightStart) : null
     const endKey = campaign.flightEnd ? getCampaignDateKey(campaign.flightEnd) : null
-    return Boolean(startKey && endKey && (todayKey === startKey || todayKey === endKey))
+    return Boolean(
+        startKey
+        && endKey
+        && (
+            todayKey === startKey
+            || todayKey === endKey
+            || isCampaignStartDayToday(campaign, now)
+            || isCampaignFinalDayToday(campaign, now)
+        )
+    )
 }
