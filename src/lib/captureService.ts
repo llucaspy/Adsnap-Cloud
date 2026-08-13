@@ -592,6 +592,190 @@ function isStandaloneCreativeAsset(assetUrl: string) {
     }
 }
 
+async function suppressBlockingOverlaysBeforeScreenshot(
+    page: import('playwright').Page,
+    campaignId: string,
+    signal?: AbortSignal,
+) {
+    throwIfCaptureAborted(signal)
+
+    const result = await page.evaluate(() => {
+        const overlayHints = [
+            'control your privacy',
+            'privacy policy',
+            'terms of use',
+            'cookie',
+            'cookies',
+            'consent',
+            'privacy',
+            'privacidade',
+            'lgpd',
+            'gdpr',
+            'onetrust',
+            'didomi',
+            'quantcast',
+            'trustarc',
+            'cmp',
+            'intercom',
+            'zendesk',
+            'crisp',
+            'tawk',
+            'jivo',
+            'hubspot',
+            'whatsapp',
+            'messenger',
+            'chat',
+            'chat-widget',
+            'chat widget',
+        ]
+        const forcedSelectors = [
+            '#onetrust-consent-sdk',
+            '.onetrust-pc-dark-filter',
+            '#didomi-host',
+            '#qc-cmp2-container',
+            '[id*="cookie" i]',
+            '[class*="cookie" i]',
+            '[id*="consent" i]',
+            '[class*="consent" i]',
+            '[id*="privacy" i]',
+            '[class*="privacy" i]',
+            '[aria-label*="cookie" i]',
+            '[aria-label*="privacy" i]',
+            '[id*="intercom" i]',
+            '[class*="intercom" i]',
+            '[id*="crisp" i]',
+            '[class*="crisp" i]',
+            '[id*="tawk" i]',
+            '[class*="tawk" i]',
+            '[id*="jivo" i]',
+            '[class*="jivo" i]',
+            '[id*="zendesk" i]',
+            '[class*="zendesk" i]',
+            '[id*="hubspot" i]',
+            '[class*="hubspot" i]',
+            '[id*="whatsapp" i]',
+            '[class*="whatsapp" i]',
+        ]
+        const adNodePattern = /(google_ads|googletag|gpt-ad|div-gpt|dfp|adsbygoogle|pubmatic|doubleclick|adservice|publicidade|advertising|advertisement|ad-unit|adunit)/i
+        const acceptTextPattern = /^(accept|accept all|aceitar|aceitar todos|aceito|concordo|permitir|ok|entendi|continuar|agree|i agree|got it)$/i
+        const acceptDescriptorPattern = /(accept|aceitar|agree|allow|permitir|consent|cookie|privacy|privacidade|lgpd|gdpr)/i
+
+        const attr = (element: Element, name: string) => element.getAttribute(name) || ''
+        const elementText = (element: Element) => (element.textContent || '').replace(/\s+/g, ' ').trim()
+        const descriptor = (element: Element) => [
+            attr(element, 'id'),
+            attr(element, 'class'),
+            attr(element, 'role'),
+            attr(element, 'aria-label'),
+            attr(element, 'name'),
+            attr(element, 'src'),
+            attr(element, 'href'),
+            elementText(element).slice(0, 1000),
+        ].join(' ').toLowerCase()
+
+        const isProtectedAdNode = (element: Element) => {
+            const identity = [
+                attr(element, 'id'),
+                attr(element, 'class'),
+                attr(element, 'name'),
+                attr(element, 'src'),
+                attr(element, 'data-ad-slot'),
+                attr(element, 'data-adunit'),
+                attr(element, 'data-google-query-id'),
+            ].join(' ')
+
+            return adNodePattern.test(identity)
+                || Boolean(element.closest('[data-google-query-id], ins.adsbygoogle, [id^="google_ads"], [id*="div-gpt"], [id*="gpt-ad"], iframe[name^="google_ads"]'))
+        }
+
+        const isVisible = (element: Element) => {
+            const htmlElement = element as HTMLElement
+            const rect = htmlElement.getBoundingClientRect()
+            const style = window.getComputedStyle(htmlElement)
+            return rect.width >= 20
+                && rect.height >= 20
+                && style.display !== 'none'
+                && style.visibility !== 'hidden'
+                && style.opacity !== '0'
+        }
+
+        let clicked = 0
+        for (const element of Array.from(document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"], a'))) {
+            if (clicked >= 4 || isProtectedAdNode(element) || !isVisible(element)) continue
+            const text = elementText(element)
+            const details = descriptor(element)
+            const shouldClick = acceptTextPattern.test(text) || (
+                acceptDescriptorPattern.test(details)
+                && /(cookie|privacy|privacidade|consent|lgpd|gdpr)/i.test(details)
+            )
+
+            if (shouldClick) {
+                ;(element as HTMLElement).click()
+                clicked += 1
+            }
+        }
+
+        const hiddenElements = new Set<Element>()
+        const hideElement = (element: Element) => {
+            if (hiddenElements.has(element) || isProtectedAdNode(element) || !isVisible(element)) return
+            const htmlElement = element as HTMLElement
+            htmlElement.style.setProperty('display', 'none', 'important')
+            htmlElement.style.setProperty('visibility', 'hidden', 'important')
+            htmlElement.style.setProperty('opacity', '0', 'important')
+            hiddenElements.add(element)
+        }
+
+        for (const selector of forcedSelectors) {
+            try {
+                for (const element of Array.from(document.querySelectorAll(selector))) {
+                    const details = descriptor(element)
+                    if (overlayHints.some((hint) => details.includes(hint))) hideElement(element)
+                }
+            } catch {
+                // Some publisher pages can reject selector variants; continue with generic cleanup.
+            }
+        }
+
+        const viewportWidth = window.innerWidth
+        const viewportHeight = window.innerHeight
+        for (const element of Array.from(document.body.querySelectorAll('*')).reverse()) {
+            if (hiddenElements.size >= 16 || isProtectedAdNode(element) || !isVisible(element)) continue
+
+            const htmlElement = element as HTMLElement
+            const rect = htmlElement.getBoundingClientRect()
+            const style = window.getComputedStyle(htmlElement)
+            const zIndex = Number.parseInt(style.zIndex || '0', 10)
+            const fixedOrSticky = style.position === 'fixed' || style.position === 'sticky'
+            const dialogLike = attr(element, 'role').toLowerCase() === 'dialog' || attr(element, 'aria-modal') === 'true'
+            const edgeOverlay = rect.bottom >= viewportHeight - 180
+                || rect.right >= viewportWidth - 180
+                || rect.top <= 130
+                || rect.left <= 20
+            const largeEnoughToBlock = rect.width >= 90 && rect.height >= 45
+            const details = descriptor(element)
+            const matchesOverlay = overlayHints.some((hint) => details.includes(hint))
+            const likelyBlockingLayer = fixedOrSticky || dialogLike || (Number.isFinite(zIndex) && zIndex >= 10)
+
+            if (matchesOverlay && likelyBlockingLayer && edgeOverlay && largeEnoughToBlock) {
+                hideElement(element)
+            }
+        }
+
+        document.documentElement.style.setProperty('scroll-behavior', 'auto', 'important')
+        return { clicked, hidden: hiddenElements.size }
+    })
+
+    if (result.clicked > 0 || result.hidden > 0) {
+        await nexusLogStore.addLog(
+            'Nexus: Pop-ups removidos antes do print',
+            'SYSTEM',
+            `Consentimento/chat: ${result.clicked} clique(s), ${result.hidden} camada(s) ocultada(s)`,
+            campaignId,
+        )
+        await abortableDelay(150, signal)
+    }
+}
+
 async function captureScreenshotAfterConfiguredDelay(
     page: import('playwright').Page,
     campaignId: string,
@@ -621,6 +805,8 @@ async function captureScreenshotAfterConfiguredDelay(
             campaignId,
         )
     }
+    throwIfCaptureAborted(signal)
+    await suppressBlockingOverlaysBeforeScreenshot(page, campaignId, signal)
     throwIfCaptureAborted(signal)
     return page.screenshot({ type: 'png', animations, timeout: FAST_SCREENSHOT_TIMEOUT_MS })
 }
