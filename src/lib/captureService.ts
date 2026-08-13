@@ -83,7 +83,7 @@ async function prepareFinalCaptureImage(
     browser: ChromiumBrowser,
     signal?: AbortSignal,
 ) {
-    return compositeStudioImage(screenshot, url, isMobile, signal, browser)
+    return compositeEvidenceFrameImage(screenshot, url, isMobile, signal, browser)
 }
 
 // ============================================================================
@@ -1192,6 +1192,349 @@ async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: strin
 // ============================================================================
 // STUDIO COMPOSITION - Premium device frames
 // ============================================================================
+
+async function compositeEvidenceFrameImage(
+    screenshot: Buffer,
+    url: string,
+    isMobile: boolean,
+    signal?: AbortSignal,
+    existingBrowser?: ChromiumBrowser,
+): Promise<Buffer> {
+    throwIfCaptureAborted(signal)
+    const ownsBrowser = !existingBrowser
+    const studioBrowser = existingBrowser || await chromium.launch({
+        headless: true,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-extensions',
+            '--disable-background-networking',
+            '--disable-sync',
+            '--mute-audio',
+            '--no-first-run',
+        ]
+    });
+    let closeStudioOnAbort: (() => void) | undefined;
+    let studioPage: import('playwright').Page | undefined;
+    let compositionTimeout: ReturnType<typeof setTimeout> | undefined;
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        compositionTimeout = setTimeout(() => reject(new Error('Studio Composition Timeout')), FAST_FRAME_TIMEOUT_MS)
+    });
+
+    try {
+        closeStudioOnAbort = () => studioBrowser.close().catch(() => {})
+        signal?.addEventListener('abort', closeStudioOnAbort, { once: true })
+        studioPage = await studioBrowser.newPage();
+        await studioPage.setViewportSize({ width: 1920, height: 1080 });
+
+        const base64 = screenshot.toString('base64');
+        const time = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
+        const date = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'America/Sao_Paulo' });
+        const domain = new URL(url).hostname;
+        const safeDomain = domain.replace(/^www\./, '');
+        const safeUrl = `https://${safeDomain}`;
+
+        const html = `
+            <html>
+            <head>
+                <style>
+                    * { box-sizing: border-box; }
+                    html, body {
+                        margin: 0;
+                        width: 1920px;
+                        height: 1080px;
+                        overflow: hidden;
+                        background: transparent;
+                        font-family: Inter, Arial, system-ui, sans-serif;
+                    }
+                    body { color: #ffffff; }
+                    .stage {
+                        position: relative;
+                        width: 1920px;
+                        height: 1080px;
+                        overflow: hidden;
+                        background:
+                            radial-gradient(circle at 50% 46%, rgba(255,255,255,.12), transparent 36%),
+                            linear-gradient(135deg, #0f0f0f 0%, #151515 52%, #0b0b0b 100%);
+                    }
+                    .stage::before {
+                        content: "";
+                        position: absolute;
+                        inset: 0;
+                        background-image:
+                            linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+                            linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+                        background-size: 44px 44px;
+                        opacity: .24;
+                    }
+                    .desktop-shell {
+                        position: absolute;
+                        inset: 28px;
+                        overflow: hidden;
+                        border: 1px solid rgba(255,255,255,.10);
+                        border-radius: 14px;
+                        background: #ffffff;
+                        box-shadow: 0 42px 120px rgba(0,0,0,.48);
+                    }
+                    .browser-bar {
+                        height: 58px;
+                        display: grid;
+                        grid-template-columns: 92px 1fr 170px;
+                        align-items: center;
+                        gap: 18px;
+                        padding: 0 18px;
+                        background: rgba(20,20,20,.96);
+                        border-bottom: 1px solid rgba(255,255,255,.08);
+                    }
+                    .traffic {
+                        display: flex;
+                        gap: 8px;
+                    }
+                    .traffic span {
+                        width: 11px;
+                        height: 11px;
+                        border-radius: 50%;
+                        background: rgba(255,255,255,.30);
+                    }
+                    .traffic span:nth-child(1) { background: #ff5f57; }
+                    .traffic span:nth-child(2) { background: #ffbd2e; }
+                    .traffic span:nth-child(3) { background: #28c840; }
+                    .address {
+                        height: 34px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        gap: 8px;
+                        padding: 0 20px;
+                        overflow: hidden;
+                        border: 1px solid rgba(255,255,255,.10);
+                        border-radius: 8px;
+                        background: rgba(255,255,255,.08);
+                        color: #e5e5e5;
+                        font-size: 13px;
+                        line-height: 1;
+                        white-space: nowrap;
+                    }
+                    .address svg {
+                        flex: 0 0 auto;
+                        opacity: .62;
+                    }
+                    .browser-meta {
+                        display: flex;
+                        align-items: center;
+                        justify-content: flex-end;
+                        color: #a3a3a3;
+                        font-size: 12px;
+                        white-space: nowrap;
+                    }
+                    .desktop-content {
+                        width: 100%;
+                        height: calc(100% - 58px);
+                        overflow: hidden;
+                        background: #ffffff;
+                    }
+                    .desktop-content img,
+                    .phone-content img {
+                        width: 100%;
+                        height: 100%;
+                        object-fit: contain;
+                        object-position: top center;
+                        display: block;
+                        background: #ffffff;
+                    }
+                    .mobile-meta {
+                        position: absolute;
+                        top: 78px;
+                        left: 50%;
+                        transform: translateX(-50%);
+                        display: flex;
+                        align-items: center;
+                        gap: 10px;
+                        padding: 10px 14px;
+                        border: 1px solid rgba(255,255,255,.08);
+                        border-radius: 999px;
+                        background: rgba(20,20,20,.72);
+                        color: #e5e5e5;
+                        font-size: 13px;
+                        box-shadow: 0 18px 50px rgba(0,0,0,.28);
+                    }
+                    .phone-wrap {
+                        position: absolute;
+                        inset: 0;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        perspective: 1600px;
+                    }
+                    .phone {
+                        position: relative;
+                        width: 414px;
+                        height: 896px;
+                        border-radius: 58px;
+                        padding: 12px;
+                        background: linear-gradient(145deg, #2b2b2b, #050505);
+                        border: 1px solid rgba(255,255,255,.20);
+                        box-shadow: 0 46px 120px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.05) inset;
+                        transform: rotateX(1.5deg) rotateY(-1deg);
+                    }
+                    .phone::before,
+                    .phone::after {
+                        content: "";
+                        position: absolute;
+                        width: 5px;
+                        border-radius: 4px;
+                        background: #2b2b2b;
+                    }
+                    .phone::before { left: -5px; top: 170px; height: 82px; }
+                    .phone::after { right: -5px; top: 190px; height: 96px; }
+                    .phone-screen {
+                        position: relative;
+                        width: 100%;
+                        height: 100%;
+                        overflow: hidden;
+                        border-radius: 47px;
+                        background: #ffffff;
+                    }
+                    .phone-content {
+                        position: absolute;
+                        inset: 48px 0 64px;
+                        overflow: hidden;
+                        background: #ffffff;
+                    }
+                    .ios-status {
+                        position: absolute;
+                        z-index: 5;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        height: 48px;
+                        display: flex;
+                        align-items: flex-end;
+                        justify-content: space-between;
+                        padding: 0 26px 10px;
+                        color: #050505;
+                        font-size: 15px;
+                        font-weight: 700;
+                        background: rgba(255,255,255,.96);
+                    }
+                    .island {
+                        position: absolute;
+                        z-index: 6;
+                        top: 11px;
+                        left: 50%;
+                        transform: translateX(-50%);
+                        width: 108px;
+                        height: 31px;
+                        border-radius: 999px;
+                        background: #000000;
+                    }
+                    .safari {
+                        position: absolute;
+                        z-index: 5;
+                        left: 0;
+                        right: 0;
+                        bottom: 0;
+                        height: 64px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 0 22px 10px;
+                        background: rgba(255,255,255,.96);
+                        border-top: 1px solid rgba(0,0,0,.08);
+                    }
+                    .safari-pill {
+                        width: 100%;
+                        height: 38px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        gap: 6px;
+                        border-radius: 12px;
+                        background: #f2f2f7;
+                        color: #1c1c1e;
+                        font-size: 13px;
+                    }
+                    .home-indicator {
+                        position: absolute;
+                        z-index: 7;
+                        bottom: 7px;
+                        left: 50%;
+                        width: 128px;
+                        height: 5px;
+                        transform: translateX(-50%);
+                        border-radius: 999px;
+                        background: #000000;
+                    }
+                </style>
+            </head>
+            <body>
+                <main class="stage">
+                    ${isMobile ? `
+                        <div class="mobile-meta">
+                            <span>${safeUrl}</span>
+                            <span style="color:#777;">${date} ${time}</span>
+                        </div>
+                        <section class="phone-wrap">
+                            <div class="phone">
+                                <div class="phone-screen">
+                                    <div class="ios-status">
+                                        <span>${time}</span>
+                                        <span style="font-size:12px; letter-spacing:.04em;">5G</span>
+                                    </div>
+                                    <div class="island"></div>
+                                    <div class="phone-content">
+                                        <img src="data:image/png;base64,${base64}" alt="Evidence capture" />
+                                    </div>
+                                    <div class="safari">
+                                        <div class="safari-pill">
+                                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V8a5 5 0 0 1 10 0v3"/></svg>
+                                            ${safeDomain}
+                                        </div>
+                                    </div>
+                                    <div class="home-indicator"></div>
+                                </div>
+                            </div>
+                        </section>
+                    ` : `
+                        <section class="desktop-shell">
+                            <div class="browser-bar">
+                                <div class="traffic"><span></span><span></span><span></span></div>
+                                <div class="address">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+                                    ${safeUrl}
+                                </div>
+                                <div class="browser-meta">${date} ${time}</div>
+                            </div>
+                            <div class="desktop-content">
+                                <img src="data:image/png;base64,${base64}" alt="Evidence capture" />
+                            </div>
+                        </section>
+                    `}
+                </main>
+            </body>
+            </html>
+        `;
+
+        await studioPage.setContent(html, { waitUntil: 'domcontentloaded' });
+        await abortableDelay(FAST_FRAME_SETTLE_MS, signal);
+
+        const finalBuffer = await Promise.race([
+            studioPage.screenshot({ type: 'png', timeout: FAST_SCREENSHOT_TIMEOUT_MS }),
+            timeoutPromise
+        ]);
+
+        throwIfCaptureAborted(signal)
+        return finalBuffer;
+    } finally {
+        if (compositionTimeout) clearTimeout(compositionTimeout)
+        if (closeStudioOnAbort) signal?.removeEventListener('abort', closeStudioOnAbort)
+        await studioPage?.close().catch(() => {})
+        if (ownsBrowser) await studioBrowser.close();
+    }
+}
 
 async function compositeStudioImage(
     screenshot: Buffer,
