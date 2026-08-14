@@ -133,6 +133,10 @@ function monthFolder(date = new Date()) {
     return `${month} - ${MONTH_NAMES_PT[monthIndex]}`
 }
 
+function dayFolder(date = new Date()) {
+    return getBrazilDateParts(date).day
+}
+
 function captureHourLabel(date = new Date()) {
     return `${getBrazilDateParts(date).hour}hrs`
 }
@@ -158,6 +162,7 @@ function captureFolderSegments(campaign: CampaignStorageInfo) {
     return [
         year,
         monthFolder(),
+        dayFolder(),
         sanitizeSegment(campaign.client, 'Sem cliente'),
         piFolderName(campaign),
     ]

@@ -60,14 +60,15 @@ Quando Drive estiver ativo, as evidencias sao organizadas assim:
 Adsnap Cloud/
   2026/
     08 - Agosto/
-      Cliente/
-        PI 123456 - Nome da campanha/
-          300x250 18hrs.png
+      14/
+        Cliente/
+          PI 123456 - Nome da campanha/
+            300x250 18hrs.png
 ```
 
 Se `GOOGLE_DRIVE_ROOT_FOLDER_ID` estiver definido, essa estrutura nasce dentro da pasta informada. Caso contrario, o provider tenta criar a pasta raiz `Adsnap Cloud`.
 
-A estrutura foi desenhada para auditoria operacional: primeiro o periodo, depois o cliente, depois o PI. Todos os formatos da campanha ficam juntos dentro da pasta do PI, e o nome do arquivo fica limpo: apenas formato e hora BRT. O ID interno do banco fica apenas no app/banco, nao no nome visual do print no Drive.
+A estrutura foi desenhada para auditoria operacional: primeiro ano, depois mes, depois dia, cliente e PI. Assim o usuario escolhe exatamente a data que precisa antes de abrir a campanha. Todos os formatos da campanha daquele dia ficam juntos dentro da pasta do PI, e o nome do arquivo fica limpo: apenas formato e hora BRT. O ID interno do banco fica apenas no app/banco, nao no nome visual do print no Drive.
 
 ## Trechos de codigo CORE
 
@@ -109,6 +110,7 @@ function captureFolderSegments(campaign: CampaignStorageInfo) {
     return [
         year,
         monthFolder(),
+        dayFolder(),
         sanitizeSegment(campaign.client, 'Sem cliente'),
         piFolderName(campaign),
     ]
