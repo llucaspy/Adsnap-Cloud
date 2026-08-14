@@ -89,7 +89,7 @@ const FIND_BANNER_SCRIPT = `
 async function _executeManualCapture(campaignId: string, settings: any, customDate: string, customTime: string): Promise<{ success: boolean; filePath?: string; error?: string }> {
     const campaign = await prisma.campaign.findUnique({
         where: { id: campaignId },
-        select: { url: true, format: true, device: true, client: true, agency: true }
+        select: { url: true, format: true, device: true, client: true, agency: true, campaignName: true, pi: true }
     });
 
     if (!campaign) throw new Error('Campanha não encontrada');
@@ -225,7 +225,10 @@ async function _executeManualCapture(campaignId: string, settings: any, customDa
         await browser.close();
 
         const finalImage = await compositeAssemblyImage(finalScreenshotBuffer, campaign.url, isMobile, customDate, customTime);
-        return await saveAssemblyCapture(campaign, finalImage, campaignId);
+        return await saveAssemblyCapture({
+            ...campaign,
+            formatLabel: bannerConfig?.label || `${targetW}x${targetH}`,
+        }, finalImage, campaignId);
 
     } catch (err) {
         if (browser) await browser.close();
@@ -236,7 +239,9 @@ async function _executeManualCapture(campaignId: string, settings: any, customDa
 
 async function saveAssemblyCapture(campaign: any, imageBuffer: Buffer, campaignId: string) {
     const storageLabel = getCaptureStorageProviderLabel()
-    const filename = `${campaign.format}_assembly_${Date.now()}.png`;
+    const formatName = campaign.formatLabel || campaign.format || 'Formato'
+    const campaignName = campaign.campaignName || campaign.client || 'Campanha'
+    const filename = `${campaignName} - PI ${campaign.pi || 'sem-pi'} - ${formatName} - montagem - ${Date.now()}.png`;
     const storedCapture = await uploadCaptureImage(imageBuffer, { campaign, campaignId, fileName: filename })
 
     await prisma.$transaction([
@@ -266,7 +271,7 @@ export async function processExistingImageAssembly(imageUrl: string, campaignId:
     try {
         const campaign = await prisma.campaign.findUnique({
             where: { id: campaignId },
-            select: { url: true, format: true, device: true, client: true, agency: true }
+            select: { url: true, format: true, device: true, client: true, agency: true, campaignName: true, pi: true }
         });
 
         if (!campaign) throw new Error('Campanha não encontrada');

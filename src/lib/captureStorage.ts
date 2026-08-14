@@ -14,6 +14,7 @@ type CampaignStorageInfo = {
     campaignName?: string | null
     pi?: string | null
     format?: string | null
+    formatLabel?: string | null
     device?: string | null
 }
 
@@ -39,6 +40,20 @@ const DRIVE_CAPTURE_PREFIX = 'gdrive://'
 const DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive']
 const HTTP_TIMEOUT_MS = 30_000
 const RETRYABLE_STATUS = new Set([403, 429, 500, 502, 503, 504])
+const MONTH_NAMES_PT = [
+    'Janeiro',
+    'Fevereiro',
+    'Março',
+    'Abril',
+    'Maio',
+    'Junho',
+    'Julho',
+    'Agosto',
+    'Setembro',
+    'Outubro',
+    'Novembro',
+    'Dezembro',
+]
 
 let driveClientPromise: Promise<ReturnType<typeof google.drive>> | null = null
 const driveFolderCache = new Map<string, string>()
@@ -67,31 +82,77 @@ function shouldFallbackToSupabase() {
 
 function sanitizeSegment(value: string | null | undefined, fallback: string) {
     const sanitized = String(value || fallback)
-        .normalize('NFKD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[\\/:*?"<>|#%{}[\]^~`]/g, ' ')
+        .normalize('NFC')
+        .replace(/[\\/:*?"<>|#%{}[\]^~`\r\n\t]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim()
 
     return sanitized || fallback
 }
 
-function dateFolder(date = new Date()) {
-    return date.toISOString().slice(0, 10)
+function getBrazilDateParts(date = new Date()) {
+    const formatter = new Intl.DateTimeFormat('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+    })
+
+    const parts = Object.fromEntries(
+        formatter.formatToParts(date).map(part => [part.type, part.value])
+    )
+
+    return {
+        year: parts.year || String(date.getUTCFullYear()),
+        month: parts.month || String(date.getUTCMonth() + 1).padStart(2, '0'),
+        day: parts.day || String(date.getUTCDate()).padStart(2, '0'),
+        hour: parts.hour || '00',
+        minute: parts.minute || '00',
+        second: parts.second || '00',
+    }
+}
+
+function monthFolder(date = new Date()) {
+    const { month } = getBrazilDateParts(date)
+    const monthIndex = Math.max(0, Math.min(11, Number(month) - 1))
+    return `${month} - ${MONTH_NAMES_PT[monthIndex]}`
+}
+
+function captureTimestamp(date = new Date()) {
+    const parts = getBrazilDateParts(date)
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}h${parts.minute}m${parts.second}s`
+}
+
+function readableFormatName(campaign: CampaignStorageInfo) {
+    return sanitizeSegment(campaign.formatLabel || campaign.format, 'Formato')
+}
+
+function piFolderName(campaign: CampaignStorageInfo) {
+    const pi = sanitizeSegment(campaign.pi, 'sem-pi')
+    const campaignName = sanitizeSegment(campaign.campaignName, '')
+    return campaignName ? `PI ${pi} - ${campaignName}` : `PI ${pi}`
 }
 
 function defaultCaptureFileName(input: UploadCaptureInput) {
-    const format = sanitizeSegment(input.campaign.format, 'formato')
+    const campaignName = sanitizeSegment(input.campaign.campaignName || input.campaign.client, 'Campanha')
+    const pi = sanitizeSegment(input.campaign.pi, 'sem-pi')
+    const format = readableFormatName(input.campaign)
     const device = sanitizeSegment(input.campaign.device, 'device')
-    return `${input.campaignId}_${format}_${device}_${Date.now()}.png`
+    return `${campaignName} - PI ${pi} - ${format} - ${device} - ${captureTimestamp()}.png`
 }
 
 function captureFolderSegments(campaign: CampaignStorageInfo) {
+    const { year } = getBrazilDateParts()
+
     return [
-        sanitizeSegment(campaign.agency, 'Sem agencia'),
+        year,
+        monthFolder(),
         sanitizeSegment(campaign.client, 'Sem cliente'),
-        `PI ${sanitizeSegment(campaign.pi, 'sem-pi')}`,
-        dateFolder(),
+        piFolderName(campaign),
     ]
 }
 
@@ -305,6 +366,7 @@ async function uploadToGoogleDrive(imageBuffer: Buffer, input: UploadCaptureInpu
     const drive = await getDriveClient()
     const parentId = await ensureDriveCaptureFolder(input.campaign)
     const fileName = sanitizeSegment(input.fileName || defaultCaptureFileName(input), 'captura.png')
+    const storagePath = [...captureFolderSegments(input.campaign), fileName].join('/')
     const checksum = crypto.createHash('sha256').update(imageBuffer).digest('hex')
 
     const created = await withDriveRetry(() => drive.files.create({
@@ -316,7 +378,7 @@ async function uploadToGoogleDrive(imageBuffer: Buffer, input: UploadCaptureInpu
                 source: 'adsnap-cloud',
                 campaignId: input.campaignId,
                 pi: input.campaign.pi || '',
-                format: input.campaign.format || '',
+                format: input.campaign.formatLabel || input.campaign.format || '',
                 checksum,
             },
         },
@@ -335,6 +397,7 @@ async function uploadToGoogleDrive(imageBuffer: Buffer, input: UploadCaptureInpu
         provider: 'google-drive',
         uri: `${DRIVE_CAPTURE_PREFIX}${fileId}`,
         fileId,
+        path: storagePath,
         size: imageBuffer.byteLength,
         checksum,
     }

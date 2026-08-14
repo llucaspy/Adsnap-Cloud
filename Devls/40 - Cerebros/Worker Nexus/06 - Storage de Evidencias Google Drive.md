@@ -58,14 +58,16 @@ Quando Drive estiver ativo, as evidencias sao organizadas assim:
 
 ```text
 Adsnap Cloud/
-  Agencia/
-    Cliente/
-      PI 123456/
-        2026-08-14/
-          campaignId_formato_device_timestamp.png
+  2026/
+    08 - Agosto/
+      Cliente/
+        PI 123456 - Nome da campanha/
+          Nome da campanha - PI 123456 - Formato real - device - 2026-08-14 17h50m30s.png
 ```
 
 Se `GOOGLE_DRIVE_ROOT_FOLDER_ID` estiver definido, essa estrutura nasce dentro da pasta informada. Caso contrario, o provider tenta criar a pasta raiz `Adsnap Cloud`.
+
+A estrutura foi desenhada para auditoria operacional: primeiro o periodo, depois o cliente, depois o PI. Todos os formatos da campanha ficam juntos dentro da pasta do PI, e o nome do arquivo usa campanha, PI, formato legivel e dispositivo. O ID interno do banco fica apenas no app/banco, nao no nome visual do print no Drive.
 
 ## Trechos de codigo CORE
 
@@ -95,6 +97,33 @@ export async function uploadCaptureImage(imageBuffer: Buffer, input: UploadCaptu
 ```
 
 Esse e o ponto de entrada unico para salvar evidencias. Se algum upload parar de funcionar, a primeira investigacao deve comecar aqui.
+
+### Padrao de caminho e nome
+
+Arquivo: `src/lib/captureStorage.ts`
+
+```ts
+function captureFolderSegments(campaign: CampaignStorageInfo) {
+    const { year } = getBrazilDateParts()
+
+    return [
+        year,
+        monthFolder(),
+        sanitizeSegment(campaign.client, 'Sem cliente'),
+        piFolderName(campaign),
+    ]
+}
+
+function defaultCaptureFileName(input: UploadCaptureInput) {
+    const campaignName = sanitizeSegment(input.campaign.campaignName || input.campaign.client, 'Campanha')
+    const pi = sanitizeSegment(input.campaign.pi, 'sem-pi')
+    const format = readableFormatName(input.campaign)
+    const device = sanitizeSegment(input.campaign.device, 'device')
+    return `${campaignName} - PI ${pi} - ${format} - ${device} - ${captureTimestamp()}.png`
+}
+```
+
+Esse trecho define a organizacao visual do Drive. Se um cliente pedir outro padrao de pastas, alterar aqui primeiro.
 
 O fallback para Supabase e proposital: se o Drive estiver sem permissao, cota ou responder erro temporario, a captura nao deve ser perdida. O log do Nexus informa que o Google Drive ficou indisponivel e registra o motivo em `fallbackReason`.
 

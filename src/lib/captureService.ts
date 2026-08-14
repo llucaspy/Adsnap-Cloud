@@ -6,6 +6,7 @@ import { alertStore } from './alertStore';
 import { sendTelegramAlert } from './telegram';
 import { normalizeCaptureDelaySeconds } from './captureTiming';
 import { getCaptureStorageProviderLabel, uploadCaptureImage } from './captureStorage';
+import { getFormatLabelMap, resolveFormatLabel } from './formatLabels';
 
 export interface CaptureResult {
     success: boolean
@@ -129,7 +130,11 @@ export async function processComposition(campaignId: string) {
     const finalImage = await compositeWithSharp(templateUrl, creativeUrl, box);
     
     // 5. Save
-    return await saveCapture(campaign, finalImage, campaignId);
+    const formatLabelMap = await getFormatLabelMap();
+    return await saveCapture({
+        ...campaign,
+        formatLabel: resolveFormatLabel(formatLabelMap, campaign.format),
+    }, finalImage, campaignId);
 }
 
 
@@ -728,6 +733,8 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
             device: true,
             client: true,
             agency: true,
+            campaignName: true,
+            pi: true,
             compositionBox: true,
             captureDelaySeconds: true,
         }
@@ -799,6 +806,11 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         await nexusLogStore.addLog(`Nexus: ${error}`, 'ERROR', undefined, campaignId);
         throw new Error(error);
     }
+
+    const campaignForStorage = {
+        ...campaign,
+        formatLabel: bannerConfig?.label || `${targetW}x${targetH}`,
+    };
 
     let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
     const closeBrowserOnAbort = () => {
@@ -1062,7 +1074,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                     );
                     const finalImage = await prepareFinalCaptureImage(screenshotBuffer, campaign.url, isMobile, browser, options.signal);
                     await browser.close();
-                    return await saveCapture(campaign, finalImage, campaignId, options);
+                    return await saveCapture(campaignForStorage, finalImage, campaignId, options);
                 } catch (selError) {
                     const msg = selError instanceof Error ? selError.message : String(selError);
                     console.warn('[Nexus] Falha no seletor:', msg);
@@ -1168,7 +1180,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         const finalImage = await prepareFinalCaptureImage(screenshotBuffer, campaign.url, isMobile, browser, options.signal);
         await browser.close();
 
-        return await saveCapture(campaign, finalImage, campaignId, options);
+        return await saveCapture(campaignForStorage, finalImage, campaignId, options);
 
     } catch (err) {
         if (browser) await browser.close();
