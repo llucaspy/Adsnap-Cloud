@@ -8,6 +8,9 @@ import { nexusLogStore } from './nexusLogStore'
 // ASSEMBLY SERVICE - FOR MANUAL PRINTS WITH CUSTOM TIMESTAMPS
 // ============================================================================
 
+const MOBILE_CAPTURE_VIEWPORT = { width: 375, height: 667 }
+const DESKTOP_CAPTURE_VIEWPORT = { width: 1920, height: 928 }
+
 export async function processManualCapture(campaignId: string, customDate: string, customTime: string) {
     console.log('[Nexus Assembly] Starting manual capture with custom timestamp...')
     try {
@@ -122,10 +125,12 @@ async function _executeManualCapture(campaignId: string, settings: any, customDa
         browser = await chromium.launch({ headless: true });
 
         const context = await browser.newContext(isMobile ? {
-            ...devices['iPhone 13'],
-            viewport: { width: 390, height: 722 },
+            ...devices['iPhone 8'],
+            viewport: MOBILE_CAPTURE_VIEWPORT,
+            screen: MOBILE_CAPTURE_VIEWPORT,
+            deviceScaleFactor: 1,
         } : {
-            viewport: { width: 1920, height: 928 },
+            viewport: DESKTOP_CAPTURE_VIEWPORT,
         });
 
         const page = await context.newPage();
@@ -176,11 +181,11 @@ async function _executeManualCapture(campaignId: string, settings: any, customDa
                 }
                 const box = await locator.boundingBox();
                 if (box && box.width > 0 && box.height > 0) {
-                    const viewportHeight = isMobile ? 722 : 928;
+                    const viewportHeight = isMobile ? MOBILE_CAPTURE_VIEWPORT.height : DESKTOP_CAPTURE_VIEWPORT.height;
                     const targetScrollY = Math.max(0, box.y + (box.height / 2) - (viewportHeight / 2));
                     await page.evaluate((y) => window.scrollTo(0, y), targetScrollY);
                     await page.waitForTimeout(5000);
-                    finalScreenshotBuffer = await page.screenshot({ type: 'png' });
+                    finalScreenshotBuffer = await page.screenshot({ type: 'png', scale: 'css' });
                 }
             } catch (err) {
                 console.warn('[Assembly] Selector strategy failed, falling back to auto-detection');
@@ -205,17 +210,17 @@ async function _executeManualCapture(campaignId: string, settings: any, customDa
                 }
 
                 if (bestCandidate) {
-                    const viewportHeight = isMobile ? 722 : 928;
+                    const viewportHeight = isMobile ? MOBILE_CAPTURE_VIEWPORT.height : DESKTOP_CAPTURE_VIEWPORT.height;
                     const targetScrollY = Math.max(0, bestCandidate.y + (bestCandidate.height / 2) - (viewportHeight / 2));
                     await page.evaluate((y) => window.scrollTo(0, y), targetScrollY);
                     await page.waitForTimeout(6000);
-                    finalScreenshotBuffer = await page.screenshot({ type: 'png' });
+                    finalScreenshotBuffer = await page.screenshot({ type: 'png', scale: 'css' });
                 }
             }
         }
 
         if (!finalScreenshotBuffer) {
-            finalScreenshotBuffer = await page.screenshot({ type: 'png' });
+            finalScreenshotBuffer = await page.screenshot({ type: 'png', scale: 'css' });
         }
 
         await browser.close();
@@ -440,7 +445,7 @@ export async function compositeAssemblyImage(screenshot: Buffer, url: string, is
 
                             <!-- Capture Content -->
                             <div style="flex: 1; overflow: hidden; background: #fff; padding-top: 48px; padding-bottom: 80px;">
-                                <img src="data:image/png;base64,${base64}" style="width:100%; height:100%; object-fit: cover; object-position: center;" />
+                                <img src="data:image/png;base64,${base64}" style="width:100%; height:100%; object-fit: cover; object-position: top center;" />
                             </div>
 
                             <!-- iOS Safari Bottom Bar -->
@@ -478,7 +483,7 @@ export async function compositeAssemblyImage(screenshot: Buffer, url: string, is
 
                     <!-- Web Content -->
                     <div style="flex: 1; background: #fff; overflow: hidden; position: relative;">
-                        <img src="data:image/png;base64,${base64}" style="width:100%; height:100%; object-fit: cover; object-position: center;" />
+                        <img src="data:image/png;base64,${base64}" style="width:100%; height:100%; object-fit: cover; object-position: top center;" />
                     </div>
                 </div>
 

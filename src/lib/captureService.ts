@@ -73,6 +73,8 @@ const FAST_SCREENSHOT_TIMEOUT_MS = readPositiveMsEnv('NEXUS_FAST_SCREENSHOT_TIME
 const FAST_FRAME_SETTLE_MS = readPositiveMsEnv('NEXUS_FAST_FRAME_SETTLE_MS', 100, 1_000)
 const FAST_FRAME_TIMEOUT_MS = readPositiveMsEnv('NEXUS_FAST_FRAME_TIMEOUT_MS', 3_000, 10_000)
 const MULTI_SIZE_SLOT_TIMEOUT_MS = readPositiveMsEnv('NEXUS_MULTI_SIZE_SLOT_TIMEOUT_MS', 8_000, 15_000)
+const MOBILE_CAPTURE_VIEWPORT = { width: 375, height: 667 }
+const DESKTOP_CAPTURE_VIEWPORT = { width: 1920, height: 928 }
 
 type ChromiumBrowser = Awaited<ReturnType<typeof chromium.launch>>
 
@@ -83,7 +85,7 @@ async function prepareFinalCaptureImage(
     browser: ChromiumBrowser,
     signal?: AbortSignal,
 ) {
-    return compositeEvidenceFrameImage(screenshot, url, isMobile, signal, browser)
+    return compositeStudioImage(screenshot, url, isMobile, signal, browser)
 }
 
 // ============================================================================
@@ -592,7 +594,14 @@ function isStandaloneCreativeAsset(assetUrl: string) {
     }
 }
 
-const BLOCKED_CAPTURE_ELEMENT_SELECTOR = '#cookie-banner'
+const BLOCKED_CAPTURE_ELEMENT_SELECTOR = [
+    '#cookie-banner',
+    '[id*="cookie-banner" i]',
+    '[id*="adopt" i]',
+    '[class*="adopt" i]',
+    'button#adopt-preferences-button',
+    'a[class*="adopt-" i]',
+].join(',')
 const BLOCKED_CAPTURE_ELEMENT_XPATH = '//*[@id="cookie-banner"]'
 const BLOCKED_CAPTURE_ELEMENT_STYLE = `
     ${BLOCKED_CAPTURE_ELEMENT_SELECTOR} {
@@ -701,7 +710,7 @@ async function captureScreenshotAfterConfiguredDelay(
     throwIfCaptureAborted(signal)
     await removeKnownBlockedElementsBeforeScreenshot(page, campaignId, signal)
     throwIfCaptureAborted(signal)
-    return page.screenshot({ type: 'png', animations, timeout: FAST_SCREENSHOT_TIMEOUT_MS })
+    return page.screenshot({ type: 'png', animations, scale: 'css', timeout: FAST_SCREENSHOT_TIMEOUT_MS })
 }
 
 // ============================================================================
@@ -821,12 +830,14 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         throwIfCaptureAborted(options.signal)
 
         const context = await browser.newContext(isMobile ? {
-            ...devices['iPhone 13'],
-            viewport: { width: 390, height: 722 },
+            ...devices['iPhone 8'],
+            viewport: MOBILE_CAPTURE_VIEWPORT,
+            screen: MOBILE_CAPTURE_VIEWPORT,
+            deviceScaleFactor: 1,
             timezoneId: 'America/Sao_Paulo',
             serviceWorkers: 'block',
         } : {
-            viewport: { width: 1920, height: 928 },
+            viewport: DESKTOP_CAPTURE_VIEWPORT,
             timezoneId: 'America/Sao_Paulo',
             serviceWorkers: 'block',
         });
@@ -834,7 +845,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         context.setDefaultNavigationTimeout(FAST_CAPTURE_NAVIGATION_TIMEOUT_MS)
         await context.route('**/*', route => {
             const resourceType = route.request().resourceType()
-            if (resourceType === 'font' || resourceType === 'manifest' || resourceType === 'websocket' || resourceType === 'eventsource') {
+            if (resourceType === 'manifest' || resourceType === 'websocket' || resourceType === 'eventsource') {
                 return route.abort().catch(() => undefined)
             }
             return route.continue().catch(() => undefined)
@@ -1004,7 +1015,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                         );
                     }
 
-                    const viewportHeight = isMobile ? 722 : 928;
+                    const viewportHeight = isMobile ? MOBILE_CAPTURE_VIEWPORT.height : DESKTOP_CAPTURE_VIEWPORT.height;
                     const targetScrollY = Math.max(0, captureAnchorBox.y + (captureAnchorBox.height / 2) - (viewportHeight / 2));
 
                     await page.evaluate((y) => window.scrollTo(0, y), targetScrollY);
@@ -1142,7 +1153,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
             return { success: false, error: 'Banners encontrados mas parecem vazios ou invisíveis' };
         }
 
-        const viewportHeight = isMobile ? 722 : 928;
+        const viewportHeight = isMobile ? MOBILE_CAPTURE_VIEWPORT.height : DESKTOP_CAPTURE_VIEWPORT.height;
         const targetScrollY = Math.max(0, bestCandidate.y + (bestCandidate.height / 2) - (viewportHeight / 2));
 
         console.log(`[Nexus] Scroll final para Y = ${Math.round(targetScrollY)} `);
@@ -1803,7 +1814,7 @@ async function compositeStudioImage(
 
                             <!-- Capture Content -->
                             <div style="flex: 1; overflow: hidden; background: #fff; padding-top: 48px; padding-bottom: 80px;">
-                                <img src="data:image/png;base64,${base64}" style="width:100%; height:100%; object-fit: cover; object-position: center;" />
+                                <img src="data:image/png;base64,${base64}" style="width:100%; height:100%; object-fit: cover; object-position: top center;" />
                             </div>
 
                             <!-- iOS Safari Bottom Bar -->
@@ -1841,7 +1852,7 @@ async function compositeStudioImage(
 
                     <!-- Web Content -->
                     <div style="flex: 1; background: #fff; overflow: hidden; position: relative;">
-                        <img src="data:image/png;base64,${base64}" style="width:100%; height:100%; object-fit: cover; object-position: center;" />
+                        <img src="data:image/png;base64,${base64}" style="width:100%; height:100%; object-fit: cover; object-position: top center;" />
                     </div>
                 </div>
 
