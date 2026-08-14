@@ -592,6 +592,57 @@ function isStandaloneCreativeAsset(assetUrl: string) {
     }
 }
 
+const BLOCKED_CAPTURE_ELEMENT_SELECTOR = '#cookie-banner'
+const BLOCKED_CAPTURE_ELEMENT_XPATH = '//*[@id="cookie-banner"]'
+const BLOCKED_CAPTURE_ELEMENT_STYLE = `
+    ${BLOCKED_CAPTURE_ELEMENT_SELECTOR} {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+    }
+`
+
+async function installKnownBlockedElementGuard(
+    page: import('playwright').Page,
+    signal?: AbortSignal,
+) {
+    throwIfCaptureAborted(signal)
+
+    await page.addInitScript((styleContent) => {
+        const blockedSelector = '#cookie-banner'
+        const styleId = 'adsnap-blocked-capture-elements'
+
+        const ensureStyle = () => {
+            if (document.getElementById(styleId)) return
+            const style = document.createElement('style')
+            style.id = styleId
+            style.textContent = String(styleContent)
+            ;(document.head || document.documentElement).appendChild(style)
+        }
+
+        const removeBlockedElements = () => {
+            document.querySelectorAll(blockedSelector).forEach((element) => element.remove())
+        }
+
+        const install = () => {
+            ensureStyle()
+            removeBlockedElements()
+            const observer = new MutationObserver(() => {
+                ensureStyle()
+                removeBlockedElements()
+            })
+            observer.observe(document.documentElement, { childList: true, subtree: true })
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', install, { once: true })
+        } else {
+            install()
+        }
+    }, BLOCKED_CAPTURE_ELEMENT_STYLE).catch(() => null)
+}
+
 async function removeKnownBlockedElementsBeforeScreenshot(
     page: import('playwright').Page,
     campaignId: string,
@@ -599,7 +650,8 @@ async function removeKnownBlockedElementsBeforeScreenshot(
 ) {
     throwIfCaptureAborted(signal)
 
-    const removed = await page.locator('xpath=//*[@id="cookie-banner"]').evaluateAll((elements) => {
+    await page.addStyleTag({ content: BLOCKED_CAPTURE_ELEMENT_STYLE }).catch(() => null)
+    const removed = await page.locator(`xpath=${BLOCKED_CAPTURE_ELEMENT_XPATH}`).evaluateAll((elements) => {
         for (const element of elements) {
             element.remove()
         }
@@ -611,7 +663,7 @@ async function removeKnownBlockedElementsBeforeScreenshot(
         await nexusLogStore.addLog(
             'Nexus: Cookie banner bloqueado antes do print',
             'SYSTEM',
-            'XPath bloqueado: //*[@id="cookie-banner"]',
+            `XPath bloqueado: ${BLOCKED_CAPTURE_ELEMENT_XPATH}`,
             campaignId,
         )
     }
@@ -789,6 +841,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         })
 
         const page = await context.newPage();
+        await installKnownBlockedElementGuard(page, options.signal)
         throwIfCaptureAborted(options.signal)
 
         // Navigate
@@ -806,6 +859,8 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
             console.log('[Nexus] Navegação inicial finalizada com aviso/timeout:', navMsg);
             await nexusLogStore.addLog(`Nexus: Aviso na navegação (prosseguindo)`, 'INFO', navMsg, campaignId);
         }
+
+        await removeKnownBlockedElementsBeforeScreenshot(page, campaignId, options.signal)
 
         // WARM-UP: Smart Scroll
         // Sempre realiza o scroll para mobile para garantir o carregamento de banners lazy-load (ex: Metrópoles)
