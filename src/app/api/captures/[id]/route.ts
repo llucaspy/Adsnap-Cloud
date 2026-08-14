@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
+import { loadCaptureFile } from '@/lib/captureStorage'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
-import fs from 'fs'
 
 const CACHE_HEADER = 'public, max-age=31536000, immutable'
 
@@ -45,29 +45,7 @@ export async function GET(
             return new NextResponse('Capture not found', { status: 404 })
         }
 
-        // If screenshotPath is a URL (Supabase), proxy it
-        if (capture.screenshotPath.startsWith('http')) {
-            const response = await fetch(capture.screenshotPath)
-            if (!response.ok) {
-                console.error(`[API] Failed to fetch from Supabase: ${capture.screenshotPath}`)
-                return new NextResponse('Error fetching from storage', { status: response.status })
-            }
-            const arrayBuffer = await response.arrayBuffer()
-            return new NextResponse(arrayBuffer, {
-                headers: imageHeaders(
-                    response.headers.get('Content-Type') || 'image/png',
-                    response.headers.get('Content-Length')
-                ),
-            })
-        }
-
-        // Check if local file exists
-        if (!fs.existsSync(capture.screenshotPath)) {
-            console.error(`[API] File not found: ${capture.screenshotPath}`)
-            return new NextResponse('File not found on server', { status: 404 })
-        }
-
-        const fileBuffer = fs.readFileSync(capture.screenshotPath)
+        const fileBuffer = await loadCaptureFile(capture.screenshotPath)
 
         return new NextResponse(new Uint8Array(fileBuffer), {
             headers: imageHeaders(getLocalContentType(capture.screenshotPath), fileBuffer.byteLength),

@@ -1,4 +1,5 @@
 import sharp from 'sharp';
+import { loadCaptureFile } from './captureStorage';
 
 /**
  * Composites a creative image over a background template using Sharp for pixel-perfect rasterization.
@@ -56,6 +57,7 @@ export async function compositeWithSharp(
 
 async function fetchImage(url: string): Promise<Buffer> {
     if (!url) throw new Error('Empty URL provided to fetchImage');
+    if (url.startsWith('gdrive://')) return loadCaptureFile(url);
     
     // Fallback prioritário: Se for URL do Supabase, usa o SDK para baixar o arquivo diretamente
     if (url.includes('supabase.co/storage/v1/object/public/screenshots/')) {

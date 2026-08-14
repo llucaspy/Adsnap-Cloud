@@ -1,8 +1,7 @@
 import { chromium, devices } from 'playwright'
 import prisma from '@/lib/prisma'
-import path from 'path'
-import fs from 'fs/promises'
 import { nexusLogStore } from './nexusLogStore'
+import { getCaptureStorageProviderLabel, uploadCaptureImage } from './captureStorage'
 
 // ============================================================================
 // ASSEMBLY SERVICE - FOR MANUAL PRINTS WITH CUSTOM TIMESTAMPS
@@ -236,22 +235,17 @@ async function _executeManualCapture(campaignId: string, settings: any, customDa
 }
 
 async function saveAssemblyCapture(campaign: any, imageBuffer: Buffer, campaignId: string) {
+    const storageLabel = getCaptureStorageProviderLabel()
     const filename = `${campaign.format}_assembly_${Date.now()}.png`;
-    const safeAgency = (campaign.agency || 'Unknown').replace(/\W/g, '_');
-    const safeClient = (campaign.client || 'Unknown').replace(/\W/g, '_');
-
-    const folder = path.join(process.cwd(), 'Comprovantes', safeAgency, safeClient);
-
-    await fs.mkdir(folder, { recursive: true });
-    const filePath = path.join(folder, filename);
-    await fs.writeFile(filePath, imageBuffer);
+    const storedCapture = await uploadCaptureImage(imageBuffer, { campaign, campaignId, fileName: filename })
 
     await prisma.$transaction([
         prisma.capture.create({
             data: {
                 campaignId,
-                screenshotPath: filePath,
-                status: 'SUCCESS'
+                screenshotPath: storedCapture.uri,
+                status: 'SUCCESS',
+                auditNotes: `Montagem manual salva via ${storageLabel}.`
             }
         }),
         prisma.campaign.update({
@@ -264,7 +258,7 @@ async function saveAssemblyCapture(campaign: any, imageBuffer: Buffer, campaignI
     ]);
 
     nexusLogStore.addLog(`Nexus: Montagem concluída - ${campaign.client} `, 'SUCCESS');
-    return { success: true, filePath };
+    return { success: true, filePath: storedCapture.uri };
 }
 
 export async function processExistingImageAssembly(imageUrl: string, campaignId: string, customDate: string, customTime: string) {

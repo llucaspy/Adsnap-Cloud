@@ -1,16 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
 import { requireAdmin } from '@/lib/auth'
-import { getSupabase } from '@/lib/supabase'
 import { revalidatePath } from 'next/cache'
-import fs from 'fs'
+import { deleteCaptureFile, getCaptureStorageKind } from '@/lib/captureStorage'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 const BRT_OFFSET_MS = 3 * 60 * 60 * 1000
 const DATE_PARAM_PATTERN = /^\d{4}-\d{2}-\d{2}$/
-const STORAGE_BATCH_SIZE = 50
 const DELETE_BATCH_SIZE = 150
 
 type CleanupBody = {
@@ -64,26 +62,6 @@ function getRangeBounds(startDate: string | null | undefined, endDate: string | 
     }
 }
 
-function extractStoragePath(screenshotPath: string) {
-    if (!screenshotPath || !screenshotPath.startsWith('http')) return null
-
-    try {
-        const url = new URL(screenshotPath)
-        const publicMarker = '/storage/v1/object/public/screenshots/'
-        const objectMarker = '/storage/v1/object/screenshots/'
-        const marker = url.pathname.includes(publicMarker) ? publicMarker : objectMarker
-        const markerIndex = url.pathname.indexOf(marker)
-
-        if (markerIndex === -1) return null
-
-        const path = url.pathname.slice(markerIndex + marker.length)
-        return decodeURIComponent(path)
-    } catch {
-        const fallback = screenshotPath.split('screenshots/')[1]?.split('?')[0]
-        return fallback ? decodeURIComponent(fallback) : null
-    }
-}
-
 function getRangeWhere(start: Date, end: Date) {
     return {
         createdAt: { gte: start, lte: end },
@@ -109,46 +87,28 @@ async function getCapturesForRange(start: Date, end: Date, take?: number) {
     })
 }
 
-async function removeStoragePaths(storagePaths: string[]) {
-    if (storagePaths.length === 0) {
-        return {
-            deletedStorageFiles: 0,
-            failedStorageFiles: 0,
-            deletedStoragePaths: new Set<string>()
-        }
-    }
-
-    const supabase = getSupabase()
-    const deletedStoragePaths = new Set<string>()
+async function removeCaptureFiles(captures: Array<{ id: string; screenshotPath: string }>) {
+    const deletedCaptureIds = new Set<string>()
     let failedStorageFiles = 0
 
-    for (let index = 0; index < storagePaths.length; index += STORAGE_BATCH_SIZE) {
-        const batch = storagePaths.slice(index, index + STORAGE_BATCH_SIZE)
-        const { error } = await supabase.storage.from('screenshots').remove(batch)
-
-        if (!error) {
-            batch.forEach((storagePath) => deletedStoragePaths.add(storagePath))
-            continue
-        }
-
-        console.error('[Admin Cleanup] Storage batch delete error:', error)
-
-        for (const storagePath of batch) {
-            const { error: singleError } = await supabase.storage.from('screenshots').remove([storagePath])
-
-            if (singleError) {
-                console.error('[Admin Cleanup] Storage single delete error:', storagePath, singleError)
-                failedStorageFiles += 1
+    for (const capture of captures) {
+        try {
+            const deleted = await deleteCaptureFile(capture.screenshotPath)
+            if (deleted) {
+                deletedCaptureIds.add(capture.id)
             } else {
-                deletedStoragePaths.add(storagePath)
+                failedStorageFiles += 1
             }
+        } catch (error) {
+            failedStorageFiles += 1
+            console.error('[Admin Cleanup] Storage delete error:', capture.id, error)
         }
     }
 
     return {
-        deletedStorageFiles: deletedStoragePaths.size,
+        deletedStorageFiles: deletedCaptureIds.size,
         failedStorageFiles,
-        deletedStoragePaths
+        deletedCaptureIds,
     }
 }
 
@@ -162,8 +122,11 @@ export async function GET(request: NextRequest) {
             searchParams.get('endDate')
         )
         const captures = await getCapturesForRange(start, end)
-        const storagePaths = captures.map((capture) => extractStoragePath(capture.screenshotPath)).filter(Boolean)
-        const localFiles = captures.filter((capture) => capture.screenshotPath && !capture.screenshotPath.startsWith('http')).length
+        const storageKinds = captures.reduce((acc, capture) => {
+            const kind = getCaptureStorageKind(capture.screenshotPath)
+            acc[kind] = (acc[kind] || 0) + 1
+            return acc
+        }, {} as Record<string, number>)
         const campaigns = new Map<string, { pi: string; client: string; count: number }>()
 
         captures.forEach((capture) => {
@@ -185,8 +148,10 @@ export async function GET(request: NextRequest) {
             startDate: startValue,
             endDate: endValue,
             captureCount: captures.length,
-            storageFileCount: storagePaths.length,
-            localFileCount: localFiles,
+            storageFileCount: (storageKinds.supabase || 0) + (storageKinds['google-drive'] || 0),
+            localFileCount: storageKinds.local || 0,
+            googleDriveFileCount: storageKinds['google-drive'] || 0,
+            remoteUrlFileCount: storageKinds['remote-url'] || 0,
             campaignCount: campaigns.size,
             campaigns: Array.from(campaigns.values())
                 .sort((a, b) => b.count - a.count)
@@ -226,45 +191,17 @@ export async function DELETE(request: NextRequest) {
             })
         }
 
-        const storagePathByCaptureId = new Map<string, string>()
-        captures.forEach((capture) => {
-            const storagePath = extractStoragePath(capture.screenshotPath)
-            if (storagePath) storagePathByCaptureId.set(capture.id, storagePath)
-        })
-        const storagePaths = Array.from(new Set(storagePathByCaptureId.values()))
-        const localPaths = Array.from(new Set(
-            captures
-                .filter((capture) => capture.screenshotPath && !capture.screenshotPath.startsWith('http'))
-                .map((capture) => capture.screenshotPath)
-        ))
-
         const {
             deletedStorageFiles,
             failedStorageFiles,
-            deletedStoragePaths
-        } = await removeStoragePaths(storagePaths)
+            deletedCaptureIds
+        } = await removeCaptureFiles(captures)
 
-        let deletedLocalFiles = 0
-
-        localPaths.forEach((filePath) => {
-            try {
-                if (fs.existsSync(filePath)) {
-                    fs.unlinkSync(filePath)
-                    deletedLocalFiles += 1
-                }
-            } catch (error) {
-                console.error('[Admin Cleanup] Local file delete error:', error)
-            }
-        })
-
-        const capturesToDelete = captures.filter((capture) => {
-            const storagePath = storagePathByCaptureId.get(capture.id)
-            return !storagePath || deletedStoragePaths.has(storagePath)
-        })
+        const capturesToDelete = captures.filter((capture) => deletedCaptureIds.has(capture.id))
 
         if (capturesToDelete.length === 0) {
             return NextResponse.json(
-                { error: 'O Supabase recusou a exclusao dos arquivos desse lote. Nenhum registro foi removido.' },
+                { error: 'O storage recusou a exclusao dos arquivos desse lote. Nenhum registro foi removido.' },
                 { status: 409 }
             )
         }
@@ -292,7 +229,7 @@ export async function DELETE(request: NextRequest) {
             deletedCaptures: capturesToDelete.length,
             deletedStorageFiles,
             failedStorageFiles,
-            deletedLocalFiles,
+            deletedLocalFiles: 0,
             processedCaptures: captures.length,
             remainingCaptures,
             hasMore: remainingCaptures > 0

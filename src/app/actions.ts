@@ -10,6 +10,7 @@ import { normalizeCaptureDelaySeconds } from '@/lib/captureTiming'
 import { enqueueCaptureJobs, isWorkerJobStorageMissing } from '@/lib/workerJobs'
 import { GAM_AUTH_REQUIRED_LEVEL, GAM_JOB_LEVELS, isGamActiveJobLevel } from '@/lib/gamJobStatus'
 import { notifyGamOrderStarted } from '@/lib/gamOrderTelegram'
+import { deleteCaptureFile, loadCaptureFile } from '@/lib/captureStorage'
 
 export async function getNexusActivity() {
     try {
@@ -1074,30 +1075,8 @@ export async function deleteCapture(id: string) {
             select: { screenshotPath: true }
         });
 
-        if (capture && capture.screenshotPath) {
-            // 1. If it's a Supabase URL, remove from Storage
-            if (capture.screenshotPath.startsWith('http')) {
-                const { supabase } = await import('@/lib/supabase')
-                // Extract part after 'screenshots/'
-                const path = capture.screenshotPath.split('screenshots/')[1]
-                if (path) {
-                    const { error } = await supabase.storage.from('screenshots').remove([path])
-                    if (error) console.error('[Nexus Storage] Delete error:', error)
-                    else console.log(`[Nexus Storage] File removed: ${path}`)
-                }
-            }
-            // 2. Legacy fallback for local files
-            else {
-                const fs = require('fs');
-                try {
-                    if (fs.existsSync(capture.screenshotPath)) {
-                        fs.unlinkSync(capture.screenshotPath);
-                        console.log(`[Nexus] Local file deleted: ${capture.screenshotPath}`);
-                    }
-                } catch (e) {
-                    console.error('[Nexus] Local file delete fail:', e);
-                }
-            }
+        if (capture?.screenshotPath) {
+            await deleteCaptureFile(capture.screenshotPath)
         }
 
 
@@ -1595,11 +1574,9 @@ export async function simulateMonthlyCleanup() {
 
         // Process a few captures to test dispatch
         for (const capture of captures) {
-            if (!capture.screenshotPath || !capture.screenshotPath.startsWith('http')) continue
+            if (!capture.screenshotPath) continue
             try {
-                const response = await fetch(capture.screenshotPath)
-                if (!response.ok) continue
-                const buffer = await response.arrayBuffer()
+                const buffer = await loadCaptureFile(capture.screenshotPath)
                 const agency = (capture.campaign.agency || 'Sem_Agencia').replace(/\W/g, '_')
                 const client = (capture.campaign.client || 'Sem_Cliente').replace(/\W/g, '_')
                 const pi = (capture.campaign.pi || 'Sem_PI').replace(/\W/g, '_')

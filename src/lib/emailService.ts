@@ -1,11 +1,10 @@
-import fs from 'fs/promises'
-import path from 'path'
 import JSZip from 'jszip'
 import nodemailer from 'nodemailer'
 import prisma from './prisma'
 import { nexusLogStore } from './nexusLogStore'
 import { getBrasiliaDayRange } from './governmentReportScope'
 import { getCampaignDateKey } from './campaignSchedule'
+import { getCaptureFileExtension, loadCaptureFile } from './captureStorage'
 
 const FEDERAL_SEGMENTATION = 'GOV_FEDERAL'
 const MAX_RAW_BYTES_PER_EMAIL = 16 * 1024 * 1024
@@ -165,22 +164,7 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, mapper: (item
 }
 
 async function loadCapture(pathOrUrl: string): Promise<Buffer> {
-    if (!pathOrUrl.startsWith('http')) {
-        return fs.readFile(pathOrUrl)
-    }
-
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 30_000)
-
-    try {
-        const response = await fetch(pathOrUrl, { signal: controller.signal })
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`)
-        }
-        return Buffer.from(await response.arrayBuffer())
-    } finally {
-        clearTimeout(timeout)
-    }
+    return loadCaptureFile(pathOrUrl)
 }
 
 function splitFilesBySize(files: CaptureFile[]) {
@@ -405,7 +389,7 @@ export async function sendCampaignReport({ pi, recipients, dispatchId, reportDat
                 const campaignFolder = sanitizePathSegment(`${campaign.client} - ${campaign.campaignName || campaign.pi}`)
                 const dateFolder = getBrtDateKey(capture.createdAt)
                 const timeKey = getBrtTimeKey(capture.createdAt)
-                const extension = path.extname(new URL(capture.screenshotPath, 'https://adsnap.local').pathname) || '.png'
+                const extension = getCaptureFileExtension(capture.screenshotPath)
 
                 return {
                     id: capture.id,

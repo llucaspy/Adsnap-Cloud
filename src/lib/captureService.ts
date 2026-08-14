@@ -1,11 +1,11 @@
 import { chromium, devices, Locator } from 'playwright';
 import { compositeWithSharp } from './rasterService';
 import prisma from './prisma';
-import { supabase } from './supabase';
 import { nexusLogStore } from './nexusLogStore';
 import { alertStore } from './alertStore';
 import { sendTelegramAlert } from './telegram';
 import { normalizeCaptureDelaySeconds } from './captureTiming';
+import { getCaptureStorageProviderLabel, uploadCaptureImage } from './captureStorage';
 
 export interface CaptureResult {
     success: boolean
@@ -1190,43 +1190,19 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
 async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: string, options: CaptureOptions = {}) {
     try {
         throwIfCaptureAborted(options.signal)
-        await nexusLogStore.addLog(`Nexus: Iniciando upload para o Supabase Storage...`, 'SYSTEM', undefined, campaignId);
+        const storageLabel = getCaptureStorageProviderLabel()
+        await nexusLogStore.addLog(`Nexus: Iniciando upload para o ${storageLabel}...`, 'SYSTEM', undefined, campaignId);
 
-        // 1. Prepare filename and path
-        const filename = `${campaignId}_${Date.now()}.png`;
-        const safeAgency = (campaign.agency || 'Unknown').replace(/\W/g, '_');
-        const safeClient = (campaign.client || 'Unknown').replace(/\W/g, '_');
-        const storagePath = `${safeAgency}/${safeClient}/${filename}`;
+        const storedCapture = await uploadCaptureImage(imageBuffer, { campaign, campaignId })
+        const publicUrl = storedCapture.uri
 
-        console.log(`[Nexus] Uploading to Supabase Storage: ${storagePath}`);
+        console.log(`[Nexus] Captura salva em ${storageLabel}: ${storedCapture.uri}`);
 
-        // 2. Upload to Supabase Storage
-        const { data, error: uploadError } = await supabase.storage
-            .from('screenshots')
-            .upload(storagePath, imageBuffer, {
-                contentType: 'image/png',
-                upsert: true
-            });
+        await nexusLogStore.addLog(`Nexus: Upload concluido no ${storageLabel}. Salvando no banco de dados...`, 'SYSTEM', storedCapture.uri, campaignId);
 
-        if (uploadError) {
-            console.error('[Nexus Storage Error]', uploadError);
-            const msg = `Falha no upload para o Storage: ${uploadError.message}`;
-            await nexusLogStore.addLog(`Nexus: Erro no Storage`, 'ERROR', msg, campaignId);
 
-            // Visual alert + Telegram
-            alertStore.addAlert('error', 'Falha no Upload Supabase', msg, campaignId);
-            sendTelegramAlert('Falha no Upload Supabase', 'O upload da captura para o Supabase Storage falhou.', uploadError.message, campaignId).catch(() => {});
 
-            throw new Error(msg);
-        }
-
-        // 3. Get Public URL
-        const { data: { publicUrl } } = supabase.storage
-            .from('screenshots')
-            .getPublicUrl(storagePath);
-
-        console.log(`[Nexus] URL Pública gerada: ${publicUrl}`);
-        await nexusLogStore.addLog(`Nexus: Upload concluído. Salvando no banco de dados...`, 'SYSTEM', publicUrl, campaignId);
+        console.log(`[Nexus] URI de captura gerada: ${publicUrl}`);
 
         // 4. Save to database using transaction
         await prisma.$transaction([

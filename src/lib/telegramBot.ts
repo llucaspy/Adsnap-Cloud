@@ -607,7 +607,7 @@ async function showBookPi(context: BotCommandContext, pi: string) {
                 where: { status: 'SUCCESS' },
                 orderBy: { createdAt: 'desc' },
                 take: 1,
-                select: { screenshotPath: true, createdAt: true },
+                select: { id: true, screenshotPath: true, createdAt: true },
             },
         },
     })
@@ -623,7 +623,7 @@ async function showBookPi(context: BotCommandContext, pi: string) {
             capture ? `Ultimo print: ${html(formatDate(capture.createdAt))}` : 'Sem print ainda',
             '',
         )
-        if (capture?.screenshotPath?.startsWith('http')) {
+        if (capture?.screenshotPath) {
             buttons.push([button(`Enviar ${resolveFormatLabel(formatMap, campaign.format)}`.slice(0, 60), `book:photo:${campaign.id}`)])
         }
     }
@@ -650,20 +650,23 @@ async function sendBookPhoto(context: BotCommandContext, campaignId: string) {
                 where: { status: 'SUCCESS' },
                 orderBy: { createdAt: 'desc' },
                 take: 1,
-                select: { screenshotPath: true, createdAt: true },
+                select: { id: true, screenshotPath: true, createdAt: true },
             },
         },
     })
     const capture = campaign?.captures[0]
-    if (!campaign || !capture?.screenshotPath?.startsWith('http')) {
+    if (!campaign || !capture?.screenshotPath) {
         await respond(context, 'Print indisponivel para essa campanha.', [[button('Menu', 'menu:home')]])
         return
     }
 
     const formatMap = await getFormatLabelMap()
+    const photoUrl = capture.screenshotPath.startsWith('http')
+        ? capture.screenshotPath
+        : `${appUrl()}/api/captures/${capture.id}`
     await sendPhoto(
         context.chatId,
-        capture.screenshotPath,
+        photoUrl,
         `<b>${html(campaign.client)}</b>\nPI ${html(campaign.pi)} | ${html(resolveFormatLabel(formatMap, campaign.format))} / ${html(campaign.device)}\n${html(formatDate(capture.createdAt))}`,
     )
 }

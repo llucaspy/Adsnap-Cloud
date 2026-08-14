@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/lib/prisma'
-import fs from 'fs'
 import JSZip from 'jszip'
 import type { Prisma } from '@prisma/client'
+import { loadCaptureFile } from '@/lib/captureStorage'
 
 export const dynamic = 'force-dynamic'
 
@@ -124,18 +124,9 @@ export async function GET(req: NextRequest) {
 
         for (const capture of captures) {
             let fileContent: Buffer | null = null;
-            const isUrl = capture.screenshotPath.startsWith('http')
 
             try {
-                if (isUrl) {
-                    const response = await fetch(capture.screenshotPath);
-                    if (response.ok) {
-                        const arrayBuffer = await response.arrayBuffer();
-                        fileContent = Buffer.from(arrayBuffer);
-                    }
-                } else if (fs.existsSync(capture.screenshotPath)) {
-                    fileContent = fs.readFileSync(capture.screenshotPath);
-                }
+                fileContent = await loadCaptureFile(capture.screenshotPath)
 
                 if (fileContent) {
                     const campaign = capture.campaign;

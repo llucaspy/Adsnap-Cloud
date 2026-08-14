@@ -40,6 +40,12 @@ jobs:
       - name: Create .env file
         run: |
           echo "${{ secrets.ADSNAP_CLOUD_KEYS }}" > .env
+          {
+            echo ""
+            echo "NEXUS_CAPTURE_STORAGE_PROVIDER=${{ secrets.NEXUS_CAPTURE_STORAGE_PROVIDER }}"
+            echo "GOOGLE_DRIVE_ROOT_FOLDER_ID=${{ secrets.GOOGLE_DRIVE_ROOT_FOLDER_ID }}"
+            echo "GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=${{ secrets.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON }}"
+          } >> .env
           cp .env .env.local
           echo "✅ .env and .env.local created from ADSNAP_CLOUD_KEYS"
           echo "Keys found:"

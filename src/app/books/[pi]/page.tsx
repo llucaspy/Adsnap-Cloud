@@ -78,6 +78,7 @@ export default async function PiDetailPage({
 
             // If it's a URL (Supabase), it's valid for the frontend
             if (c.screenshotPath.startsWith('http')) return true;
+            if (c.screenshotPath.startsWith('gdrive://')) return true;
 
             // If it's a local path, check if it exists
             try {

@@ -11,6 +11,7 @@ Este cerebro guarda o mapa operacional do worker do Adsnap Cloud: como a fila de
 - [[03 - Plano de Otimizacao|Plano de Otimizacao]]
 - [[04 - Runbook e Consultas|Runbook e Consultas]]
 - [[05 - Mudancas Aplicadas 2026-06-23|Mudancas Aplicadas 2026-06-23]]
+- [[06 - Storage de Evidencias Google Drive|Storage de Evidencias Google Drive]]
 
 ## Principio central
 
