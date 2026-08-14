@@ -227,7 +227,7 @@ async function _executeManualCapture(campaignId: string, settings: any, customDa
         const finalImage = await compositeAssemblyImage(finalScreenshotBuffer, campaign.url, isMobile, customDate, customTime);
         return await saveAssemblyCapture({
             ...campaign,
-            formatLabel: bannerConfig?.label || `${targetW}x${targetH}`,
+            formatLabel: `${targetW}x${targetH}`,
         }, finalImage, campaignId);
 
     } catch (err) {
@@ -239,10 +239,7 @@ async function _executeManualCapture(campaignId: string, settings: any, customDa
 
 async function saveAssemblyCapture(campaign: any, imageBuffer: Buffer, campaignId: string) {
     const storageLabel = getCaptureStorageProviderLabel()
-    const formatName = campaign.formatLabel || campaign.format || 'Formato'
-    const campaignName = campaign.campaignName || campaign.client || 'Campanha'
-    const filename = `${campaignName} - PI ${campaign.pi || 'sem-pi'} - ${formatName} - montagem - ${Date.now()}.png`;
-    const storedCapture = await uploadCaptureImage(imageBuffer, { campaign, campaignId, fileName: filename })
+    const storedCapture = await uploadCaptureImage(imageBuffer, { campaign, campaignId })
 
     await prisma.$transaction([
         prisma.capture.create({

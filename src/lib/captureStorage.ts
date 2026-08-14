@@ -80,14 +80,25 @@ function shouldFallbackToSupabase() {
     return !['0', 'false', 'no', 'off'].includes(raw.trim().toLowerCase())
 }
 
-function sanitizeSegment(value: string | null | undefined, fallback: string) {
+function sanitizeSegment(value: string | null | undefined, fallback: string, maxLength = 120) {
     const sanitized = String(value || fallback)
         .normalize('NFC')
         .replace(/[\\/:*?"<>|#%{}[\]^~`\r\n\t]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim()
 
-    return sanitized || fallback
+    const safeValue = sanitized || fallback
+    return safeValue.length > maxLength ? safeValue.slice(0, maxLength).trim() : safeValue
+}
+
+function sanitizeFileName(value: string | null | undefined, fallback: string) {
+    const withoutExtension = sanitizeSegment(
+        String(value || fallback).replace(/\.png$/i, ''),
+        fallback.replace(/\.png$/i, ''),
+        180
+    )
+
+    return `${withoutExtension.replace(/\.+$/g, '')}.png`
 }
 
 function getBrazilDateParts(date = new Date()) {
@@ -122,27 +133,23 @@ function monthFolder(date = new Date()) {
     return `${month} - ${MONTH_NAMES_PT[monthIndex]}`
 }
 
-function captureTimestamp(date = new Date()) {
-    const parts = getBrazilDateParts(date)
-    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}h${parts.minute}m${parts.second}s`
+function captureHourLabel(date = new Date()) {
+    return `${getBrazilDateParts(date).hour}hrs`
 }
 
 function readableFormatName(campaign: CampaignStorageInfo) {
-    return sanitizeSegment(campaign.formatLabel || campaign.format, 'Formato')
+    return sanitizeSegment(campaign.formatLabel || campaign.format, 'Formato', 80)
 }
 
 function piFolderName(campaign: CampaignStorageInfo) {
     const pi = sanitizeSegment(campaign.pi, 'sem-pi')
-    const campaignName = sanitizeSegment(campaign.campaignName, '')
+    const campaignName = sanitizeSegment(campaign.campaignName, '', 90)
     return campaignName ? `PI ${pi} - ${campaignName}` : `PI ${pi}`
 }
 
 function defaultCaptureFileName(input: UploadCaptureInput) {
-    const campaignName = sanitizeSegment(input.campaign.campaignName || input.campaign.client, 'Campanha')
-    const pi = sanitizeSegment(input.campaign.pi, 'sem-pi')
     const format = readableFormatName(input.campaign)
-    const device = sanitizeSegment(input.campaign.device, 'device')
-    return `${campaignName} - PI ${pi} - ${format} - ${device} - ${captureTimestamp()}.png`
+    return `${format} ${captureHourLabel()}.png`
 }
 
 function captureFolderSegments(campaign: CampaignStorageInfo) {
@@ -157,7 +164,7 @@ function captureFolderSegments(campaign: CampaignStorageInfo) {
 }
 
 function buildStoragePath(input: UploadCaptureInput) {
-    const safeFileName = sanitizeSegment(input.fileName || defaultCaptureFileName(input), 'captura.png')
+    const safeFileName = sanitizeFileName(input.fileName || defaultCaptureFileName(input), 'captura.png')
     return [...captureFolderSegments(input.campaign), safeFileName].join('/')
 }
 
@@ -322,13 +329,13 @@ async function ensureDriveFolder(name: string, parentId?: string) {
     return createdId
 }
 
-async function ensureDriveCaptureFolder(campaign: CampaignStorageInfo) {
+async function ensureDriveCaptureFolder(campaign: CampaignStorageInfo, folderSegments = captureFolderSegments(campaign)) {
     let parentId = (process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || process.env.NEXUS_GOOGLE_DRIVE_ROOT_FOLDER_ID || '').trim()
     if (!parentId) {
         parentId = await ensureDriveFolder(process.env.GOOGLE_DRIVE_ROOT_FOLDER_NAME || 'Adsnap Cloud')
     }
 
-    for (const segment of captureFolderSegments(campaign)) {
+    for (const segment of folderSegments) {
         parentId = await ensureDriveFolder(segment, parentId)
     }
 
@@ -364,9 +371,10 @@ async function uploadToSupabase(imageBuffer: Buffer, input: UploadCaptureInput):
 
 async function uploadToGoogleDrive(imageBuffer: Buffer, input: UploadCaptureInput): Promise<StoredCapture> {
     const drive = await getDriveClient()
-    const parentId = await ensureDriveCaptureFolder(input.campaign)
-    const fileName = sanitizeSegment(input.fileName || defaultCaptureFileName(input), 'captura.png')
-    const storagePath = [...captureFolderSegments(input.campaign), fileName].join('/')
+    const folderSegments = captureFolderSegments(input.campaign)
+    const parentId = await ensureDriveCaptureFolder(input.campaign, folderSegments)
+    const fileName = sanitizeFileName(input.fileName || defaultCaptureFileName(input), 'captura.png')
+    const storagePath = [...folderSegments, fileName].join('/')
     const checksum = crypto.createHash('sha256').update(imageBuffer).digest('hex')
 
     const created = await withDriveRetry(() => drive.files.create({

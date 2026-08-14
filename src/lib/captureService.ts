@@ -809,7 +809,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
 
     const campaignForStorage = {
         ...campaign,
-        formatLabel: bannerConfig?.label || `${targetW}x${targetH}`,
+        formatLabel: `${targetW}x${targetH}`,
     };
 
     let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
@@ -1208,8 +1208,11 @@ async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: strin
         const storedCapture = await uploadCaptureImage(imageBuffer, { campaign, campaignId })
         const storageLabel = getCaptureStorageProviderLabel(storedCapture.provider)
         const publicUrl = storedCapture.uri
+        const storageDetails = storedCapture.path
+            ? `${storedCapture.uri}\n${storedCapture.path}`
+            : storedCapture.uri
 
-        console.log(`[Nexus] Captura salva em ${storageLabel}: ${storedCapture.uri}`);
+        console.log(`[Nexus] Captura salva em ${storageLabel}: ${storageDetails}`);
 
         if (storedCapture.fallbackReason) {
             await nexusLogStore.addLog(
@@ -1220,7 +1223,7 @@ async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: strin
             )
         }
 
-        await nexusLogStore.addLog(`Nexus: Upload concluido no ${storageLabel}. Salvando no banco de dados...`, 'SYSTEM', storedCapture.uri, campaignId);
+        await nexusLogStore.addLog(`Nexus: Upload concluido no ${storageLabel}. Salvando no banco de dados...`, 'SYSTEM', storageDetails, campaignId);
 
 
 

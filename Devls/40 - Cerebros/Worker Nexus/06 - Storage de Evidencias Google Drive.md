@@ -62,12 +62,12 @@ Adsnap Cloud/
     08 - Agosto/
       Cliente/
         PI 123456 - Nome da campanha/
-          Nome da campanha - PI 123456 - Formato real - device - 2026-08-14 17h50m30s.png
+          300x250 18hrs.png
 ```
 
 Se `GOOGLE_DRIVE_ROOT_FOLDER_ID` estiver definido, essa estrutura nasce dentro da pasta informada. Caso contrario, o provider tenta criar a pasta raiz `Adsnap Cloud`.
 
-A estrutura foi desenhada para auditoria operacional: primeiro o periodo, depois o cliente, depois o PI. Todos os formatos da campanha ficam juntos dentro da pasta do PI, e o nome do arquivo usa campanha, PI, formato legivel e dispositivo. O ID interno do banco fica apenas no app/banco, nao no nome visual do print no Drive.
+A estrutura foi desenhada para auditoria operacional: primeiro o periodo, depois o cliente, depois o PI. Todos os formatos da campanha ficam juntos dentro da pasta do PI, e o nome do arquivo fica limpo: apenas formato e hora BRT. O ID interno do banco fica apenas no app/banco, nao no nome visual do print no Drive.
 
 ## Trechos de codigo CORE
 
@@ -115,11 +115,8 @@ function captureFolderSegments(campaign: CampaignStorageInfo) {
 }
 
 function defaultCaptureFileName(input: UploadCaptureInput) {
-    const campaignName = sanitizeSegment(input.campaign.campaignName || input.campaign.client, 'Campanha')
-    const pi = sanitizeSegment(input.campaign.pi, 'sem-pi')
     const format = readableFormatName(input.campaign)
-    const device = sanitizeSegment(input.campaign.device, 'device')
-    return `${campaignName} - PI ${pi} - ${format} - ${device} - ${captureTimestamp()}.png`
+    return `${format} ${captureHourLabel()}.png`
 }
 ```
 
