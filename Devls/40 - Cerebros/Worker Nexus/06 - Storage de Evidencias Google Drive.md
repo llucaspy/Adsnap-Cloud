@@ -34,19 +34,23 @@ NEXUS_CAPTURE_STORAGE_PROVIDER=google-drive
 GOOGLE_DRIVE_ROOT_FOLDER_ID=...
 ```
 
-Autenticacao por service account:
-
-```env
-GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=...
-```
-
-Ou autenticacao OAuth:
+Autenticacao OAuth recomendada:
 
 ```env
 GOOGLE_DRIVE_CLIENT_ID=...
 GOOGLE_DRIVE_CLIENT_SECRET=...
 GOOGLE_DRIVE_REFRESH_TOKEN=...
 ```
+
+O OAuth usa a conta Google autorizada para gravar no Drive e evita a limitacao de cota propria das service accounts.
+
+Autenticacao alternativa por service account:
+
+```env
+GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=...
+```
+
+Quando OAuth e service account existem juntos, o sistema usa OAuth primeiro. Service account deve ser usada preferencialmente com Shared Drive/Workspace; em "Meu Drive" pode falhar por falta de cota propria.
 
 ## Estrutura no Drive
 
@@ -120,6 +124,7 @@ Apesar do nome legado `publicUrl`, quando o provider e Google Drive o valor salv
 - O Google Drive nao deve ser tratado como infinito. Ele remove o problema do limite pequeno do Supabase, mas ainda depende do plano de armazenamento da conta.
 - A API do Drive pode retornar limite temporario. O provider implementa retry com backoff para erros 403, 429 e 5xx.
 - Se aparecer `File not found: <folder_id>`, a service account nao consegue enxergar a pasta raiz. Validar se a pasta foi compartilhada como Editor com o `client_email` do JSON.
+- Se aparecer `Service Accounts do not have storage quota`, usar OAuth da conta dona do Drive ou Shared Drive corporativo.
 - Para clientes diferentes, cada instancia deve usar seu proprio Drive, Supabase e Vercel, mantendo isolamento total.
 - Antes de ativar em producao, configurar as credenciais do Drive no ambiente e testar uma captura real.
 

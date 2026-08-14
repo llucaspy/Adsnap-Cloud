@@ -159,21 +159,21 @@ async function getDriveClient() {
     if (driveClientPromise) return driveClientPromise
 
     driveClientPromise = (async () => {
+        const clientId = process.env.GOOGLE_DRIVE_CLIENT_ID?.trim()
+        const clientSecret = process.env.GOOGLE_DRIVE_CLIENT_SECRET?.trim()
+        const refreshToken = process.env.GOOGLE_DRIVE_REFRESH_TOKEN?.trim()
+        if (clientId && clientSecret && refreshToken) {
+            const auth = new google.auth.OAuth2(clientId, clientSecret)
+            auth.setCredentials({ refresh_token: refreshToken })
+            return google.drive({ version: 'v3', auth })
+        }
+
         const serviceAccountCredentials = buildServiceAccountCredentials()
         if (serviceAccountCredentials) {
             const auth = new google.auth.GoogleAuth({
                 credentials: serviceAccountCredentials,
                 scopes: DRIVE_SCOPES,
             })
-            return google.drive({ version: 'v3', auth })
-        }
-
-        const clientId = process.env.GOOGLE_DRIVE_CLIENT_ID
-        const clientSecret = process.env.GOOGLE_DRIVE_CLIENT_SECRET
-        const refreshToken = process.env.GOOGLE_DRIVE_REFRESH_TOKEN
-        if (clientId && clientSecret && refreshToken) {
-            const auth = new google.auth.OAuth2(clientId, clientSecret)
-            auth.setCredentials({ refresh_token: refreshToken })
             return google.drive({ version: 'v3', auth })
         }
 
