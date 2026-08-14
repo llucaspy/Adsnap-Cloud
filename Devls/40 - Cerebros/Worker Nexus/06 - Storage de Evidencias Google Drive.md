@@ -72,12 +72,27 @@ Arquivo: `src/lib/captureStorage.ts`
 ```ts
 export async function uploadCaptureImage(imageBuffer: Buffer, input: UploadCaptureInput): Promise<StoredCapture> {
     const provider = getCaptureStorageProvider()
-    if (provider === 'google-drive') return uploadToGoogleDrive(imageBuffer, input)
+    if (provider === 'google-drive') {
+        try {
+            return await uploadToGoogleDrive(imageBuffer, input)
+        } catch (error) {
+            if (!shouldFallbackToSupabase()) throw error
+
+            const fallback = await uploadToSupabase(imageBuffer, input)
+            return {
+                ...fallback,
+                requestedProvider: 'google-drive',
+                fallbackReason: error instanceof Error ? error.message : String(error),
+            }
+        }
+    }
     return uploadToSupabase(imageBuffer, input)
 }
 ```
 
 Esse e o ponto de entrada unico para salvar evidencias. Se algum upload parar de funcionar, a primeira investigacao deve comecar aqui.
+
+O fallback para Supabase e proposital: se o Drive estiver sem permissao, cota ou responder erro temporario, a captura nao deve ser perdida. O log do Nexus informa que o Google Drive ficou indisponivel e registra o motivo em `fallbackReason`.
 
 ### Contrato de leitura
 
@@ -104,6 +119,7 @@ Apesar do nome legado `publicUrl`, quando o provider e Google Drive o valor salv
 
 - O Google Drive nao deve ser tratado como infinito. Ele remove o problema do limite pequeno do Supabase, mas ainda depende do plano de armazenamento da conta.
 - A API do Drive pode retornar limite temporario. O provider implementa retry com backoff para erros 403, 429 e 5xx.
+- Se aparecer `File not found: <folder_id>`, a service account nao consegue enxergar a pasta raiz. Validar se a pasta foi compartilhada como Editor com o `client_email` do JSON.
 - Para clientes diferentes, cada instancia deve usar seu proprio Drive, Supabase e Vercel, mantendo isolamento total.
 - Antes de ativar em producao, configurar as credenciais do Drive no ambiente e testar uma captura real.
 

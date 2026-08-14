@@ -1190,13 +1190,23 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
 async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: string, options: CaptureOptions = {}) {
     try {
         throwIfCaptureAborted(options.signal)
-        const storageLabel = getCaptureStorageProviderLabel()
-        await nexusLogStore.addLog(`Nexus: Iniciando upload para o ${storageLabel}...`, 'SYSTEM', undefined, campaignId);
+        const requestedStorageLabel = getCaptureStorageProviderLabel()
+        await nexusLogStore.addLog(`Nexus: Iniciando upload para o ${requestedStorageLabel}...`, 'SYSTEM', undefined, campaignId);
 
         const storedCapture = await uploadCaptureImage(imageBuffer, { campaign, campaignId })
+        const storageLabel = getCaptureStorageProviderLabel(storedCapture.provider)
         const publicUrl = storedCapture.uri
 
         console.log(`[Nexus] Captura salva em ${storageLabel}: ${storedCapture.uri}`);
+
+        if (storedCapture.fallbackReason) {
+            await nexusLogStore.addLog(
+                `Nexus: Google Drive indisponivel. Captura preservada no Supabase Storage.`,
+                'INFO',
+                storedCapture.fallbackReason,
+                campaignId
+            )
+        }
 
         await nexusLogStore.addLog(`Nexus: Upload concluido no ${storageLabel}. Salvando no banco de dados...`, 'SYSTEM', storedCapture.uri, campaignId);
 

@@ -25,11 +25,13 @@ type UploadCaptureInput = {
 
 type StoredCapture = {
     provider: StorageProvider
+    requestedProvider?: StorageProvider
     uri: string
     fileId?: string
     path?: string
     size: number
     checksum: string
+    fallbackReason?: string
 }
 
 const DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder'
@@ -53,6 +55,14 @@ export function getCaptureStorageProvider(): StorageProvider {
 
 export function getCaptureStorageProviderLabel(provider = getCaptureStorageProvider()) {
     return provider === 'google-drive' ? 'Google Drive' : 'Supabase Storage'
+}
+
+function shouldFallbackToSupabase() {
+    const raw = process.env.NEXUS_CAPTURE_STORAGE_FALLBACK_TO_SUPABASE
+        || process.env.CAPTURE_STORAGE_FALLBACK_TO_SUPABASE
+        || 'true'
+
+    return !['0', 'false', 'no', 'off'].includes(raw.trim().toLowerCase())
 }
 
 function sanitizeSegment(value: string | null | undefined, fallback: string) {
@@ -332,7 +342,20 @@ async function uploadToGoogleDrive(imageBuffer: Buffer, input: UploadCaptureInpu
 
 export async function uploadCaptureImage(imageBuffer: Buffer, input: UploadCaptureInput): Promise<StoredCapture> {
     const provider = getCaptureStorageProvider()
-    if (provider === 'google-drive') return uploadToGoogleDrive(imageBuffer, input)
+    if (provider === 'google-drive') {
+        try {
+            return await uploadToGoogleDrive(imageBuffer, input)
+        } catch (error) {
+            if (!shouldFallbackToSupabase()) throw error
+
+            const fallback = await uploadToSupabase(imageBuffer, input)
+            return {
+                ...fallback,
+                requestedProvider: 'google-drive',
+                fallbackReason: error instanceof Error ? error.message : String(error),
+            }
+        }
+    }
     return uploadToSupabase(imageBuffer, input)
 }
 
