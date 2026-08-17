@@ -7,6 +7,7 @@ import {
     getGamImportDrafts,
     getSettings,
     requestGamImportDraft,
+    triggerGamSessionRefresh,
 } from '@/app/actions'
 import type { GamImportDraft } from '@/lib/gamImportPlanner'
 import type { CaptureCadence } from '@/lib/governmentReportScope'
@@ -17,7 +18,7 @@ import {
     Building2, User2, Hash, Layers,
     CalendarRange, Landmark, Building, Users,
     ChevronDown, Trash2, X, RefreshCw, FileCheck2,
-    Loader2, CircleCheck, CircleX, RotateCcw, Clock3, Square, ExternalLink
+    Loader2, CircleCheck, CircleX, RotateCcw, Clock3, Square, KeyRound
 } from 'lucide-react'
 import { MultiTimePicker } from './MultiTimePicker'
 import {
@@ -112,6 +113,7 @@ export function CreateCampaignFlow({
     const [gamCustomSegmentation, setGamCustomSegmentation] = useState('')
     const [gamStatus, setGamStatus] = useState('')
     const [isGamRefreshing, setIsGamRefreshing] = useState(false)
+    const [renewingGamJobId, setRenewingGamJobId] = useState<string | null>(null)
     const [gamDrafts, setGamDrafts] = useState<GamImportJob[]>([])
     const [selectedGamJobId, setSelectedGamJobId] = useState<string | null>(initialGamJobId)
     const [loadedGamJobId, setLoadedGamJobId] = useState<string | null>(null)
@@ -284,6 +286,22 @@ export function CreateCampaignFlow({
         }
     }
 
+    async function handleRenewGamLogin(jobId: string) {
+        if (renewingGamJobId) return
+        setRenewingGamJobId(jobId)
+        setGamStatus('Solicitando renovacao do login Google...')
+        try {
+            await triggerGamSessionRefresh(jobId)
+            setGamStatus('Renovacao acionada. Aprove a verificacao Google quando ela aparecer e acompanhe os logs.')
+            await refreshGamDrafts()
+        } catch (error) {
+            setGamStatus((error as Error).message)
+            await refreshGamDrafts().catch(() => null)
+        } finally {
+            setRenewingGamJobId(null)
+        }
+    }
+
     async function handleFinalSubmit() {
         startTransition(async () => {
             try {
@@ -378,6 +396,8 @@ export function CreateCampaignFlow({
                 onRetry={handleRetryGamDraft}
                 onDelete={handleDeleteGamDraft}
                 onStop={handleStopGamWorker}
+                onRenewLogin={handleRenewGamLogin}
+                renewingJobId={renewingGamJobId}
                 selectedJobId={selectedGamJobId}
                 onSelectJob={setSelectedGamJobId}
                 isPending={isGamPending}
@@ -481,6 +501,8 @@ function GamImportPanel({
     onRetry,
     onDelete,
     onStop,
+    onRenewLogin,
+    renewingJobId,
     selectedJobId,
     onSelectJob,
     isPending,
@@ -505,6 +527,8 @@ function GamImportPanel({
     onRetry: (job: GamImportJob) => void
     onDelete: (jobId: string) => Promise<void>
     onStop: (jobId: string) => Promise<void>
+    onRenewLogin: (jobId: string) => Promise<void>
+    renewingJobId: string | null
     selectedJobId: string | null
     onSelectJob: (jobId: string) => void
     isPending: boolean
@@ -687,7 +711,14 @@ function GamImportPanel({
                 </div>
 
                 {selectedJob ? (
-                    <GamJobDebugger job={selectedJob} onStop={onStop} onDelete={onDelete} presentation={debuggerPresentation(selectedJob)} />
+                    <GamJobDebugger
+                        job={selectedJob}
+                        onStop={onStop}
+                        onDelete={onDelete}
+                        onRenewLogin={onRenewLogin}
+                        renewingJobId={renewingJobId}
+                        presentation={debuggerPresentation(selectedJob)}
+                    />
                 ) : (
                     <div className="min-h-[290px] flex flex-col items-center justify-center text-center px-8" style={{ background: '#0f0f0f', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px' }}>
                         <Clock3 size={22} style={{ color: '#737373' }} />
@@ -737,10 +768,17 @@ function GamImportPanel({
                                             <RotateCcw size={14} />
                                         </button>
                                     )}
-                                    {job.level === GAM_AUTH_REQUIRED_LEVEL && job.authWorkflowUrl && (
-                                        <a href={job.authWorkflowUrl} target="_blank" rel="noreferrer" className="h-9 px-3 flex items-center gap-2 text-xs font-semibold" style={{ color: '#f59e0b', border: '1px solid rgba(245,158,11,0.28)', borderRadius: '8px' }} title="Renovar login Google">
-                                            Login <ExternalLink size={13} />
-                                        </a>
+                                    {job.level === GAM_AUTH_REQUIRED_LEVEL && (
+                                        <button
+                                            onClick={() => onRenewLogin(job.id)}
+                                            disabled={renewingJobId === job.id}
+                                            className="h-9 px-3 flex items-center gap-2 text-xs font-semibold disabled:opacity-50"
+                                            style={{ color: '#f59e0b', border: '1px solid rgba(245,158,11,0.28)', borderRadius: '8px' }}
+                                            title="Renovar login Google"
+                                        >
+                                            {renewingJobId === job.id ? <Loader2 size={13} className="animate-spin" /> : <KeyRound size={13} />}
+                                            Login
+                                        </button>
                                     )}
                                     {canDelete && (
                                         <button onClick={() => onDelete(job.id)} className="w-9 h-9 flex items-center justify-center" style={{ color: '#ef4444', border: '1px solid rgba(239,68,68,0.28)', borderRadius: '8px' }} title="Excluir Order">
@@ -757,10 +795,12 @@ function GamImportPanel({
     )
 }
 
-function GamJobDebugger({ job, onStop, onDelete, presentation }: {
+function GamJobDebugger({ job, onStop, onDelete, onRenewLogin, renewingJobId, presentation }: {
     job: GamImportJob | null
     onStop: (jobId: string) => Promise<void>
     onDelete: (jobId: string) => Promise<void>
+    onRenewLogin: (jobId: string) => Promise<void>
+    renewingJobId: string | null
     presentation: ReturnType<typeof debuggerPresentation> | null
 }) {
     if (!job || !presentation) return null
@@ -812,16 +852,16 @@ function GamJobDebugger({ job, onStop, onDelete, presentation }: {
             </div>
 
             <div className="px-4 py-3 flex justify-end gap-2" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-                {job.level === GAM_AUTH_REQUIRED_LEVEL && job.authWorkflowUrl ? (
-                    <a
-                        href={job.authWorkflowUrl}
-                        target="_blank"
-                        rel="noreferrer"
+                {job.level === GAM_AUTH_REQUIRED_LEVEL ? (
+                    <button
+                        onClick={() => onRenewLogin(job.id)}
+                        disabled={renewingJobId === job.id}
                         className="px-3 py-2 flex items-center gap-2 text-xs font-semibold transition-colors"
                         style={{ color: '#f59e0b', border: '1px solid rgba(245,158,11,0.28)', borderRadius: '8px' }}
                     >
-                        <ExternalLink size={13} /> Renovar login Google
-                    </a>
+                        {renewingJobId === job.id ? <Loader2 size={13} className="animate-spin" /> : <KeyRound size={13} />}
+                        {renewingJobId === job.id ? 'Acionando...' : 'Renovar login Google'}
+                    </button>
                 ) : isActive ? (
                     <button
                         onClick={() => onStop(job.id)}

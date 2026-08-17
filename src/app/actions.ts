@@ -842,6 +842,101 @@ export async function triggerGamWorker(jobId?: string) {
     }
 }
 
+function normalizeGithubRepo(value: string | undefined) {
+    if (!value) return ''
+    if (value.includes('github.com/')) {
+        return value.split('github.com/')[1].replace(/\/$/, '').replace(/\.git$/, '')
+    }
+    return value.replace(/\/$/, '').replace(/\.git$/, '')
+}
+
+function appendGamExecutionLog(details: Record<string, unknown>, message: string, tone: 'info' | 'success' | 'error' = 'info') {
+    const currentLogs = Array.isArray(details.executionLogs) ? details.executionLogs : []
+    return {
+        ...details,
+        executionLogs: [
+            ...currentLogs,
+            { at: new Date().toISOString(), message, tone },
+        ].slice(-100),
+    }
+}
+
+export async function triggerGamSessionRefresh(jobId?: string) {
+    const token = process.env.GITHUB_TOKEN
+    const repo = normalizeGithubRepo(process.env.GITHUB_REPO || process.env.GITHUB_REPOSITORY)
+
+    const workflowUrl = repo ? `https://github.com/${repo}/actions/workflows/gam-session-refresh.yml` : ''
+
+    async function updateJob(message: string, tone: 'info' | 'success' | 'error' = 'info') {
+        if (!jobId) return
+        const job = await prisma.nexusLog.findUnique({ where: { id: jobId } })
+        if (!job || !job.level.startsWith('JOB_GAM_')) return
+
+        let details: Record<string, unknown> = {}
+        try {
+            details = JSON.parse(job.details || '{}') as Record<string, unknown>
+        } catch {
+            details = { orderUrl: job.details || '' }
+        }
+
+        await prisma.nexusLog.update({
+            where: { id: jobId },
+            data: {
+                details: JSON.stringify(appendGamExecutionLog({
+                    ...details,
+                    authWorkflowUrl: workflowUrl || details.authWorkflowUrl,
+                }, message, tone)),
+            },
+        })
+    }
+
+    if (!token || !repo) {
+        await updateJob('Renovacao nao iniciada: GITHUB_TOKEN ou GITHUB_REPO ausente.', 'error')
+        await nexusLogStore.addLog('Nexus GAM: renovacao nao iniciada por falta de GITHUB_TOKEN ou GITHUB_REPO.', 'ERROR')
+        throw new Error('GITHUB_TOKEN ou GITHUB_REPO nao esta configurado para acionar a renovacao GAM.')
+    }
+
+    await updateJob('Renovacao de login Google solicitada pelo Adsnap.', 'info')
+
+    try {
+        const response = await fetch(
+            `https://api.github.com/repos/${repo}/actions/workflows/gam-session-refresh.yml/dispatches`,
+            {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    Accept: 'application/vnd.github+json',
+                    'X-GitHub-Api-Version': '2022-11-28',
+                    'User-Agent': 'Adsnap-GAM-Agent',
+                },
+                body: JSON.stringify({
+                    ref: 'main',
+                    inputs: {
+                        network_code: process.env.GAM_NETWORK_CODE || '',
+                        process_queue: 'true',
+                    },
+                }),
+            },
+        )
+
+        if (!response.ok) {
+            const errorText = await response.text()
+            await updateJob(`Falha ao iniciar renovacao GAM (${response.status}).`, 'error')
+            await nexusLogStore.addLog(`Nexus GAM: falha ao acionar renovacao (${response.status})`, 'ERROR', errorText.slice(0, 500))
+            throw new Error(`Falha ao acionar renovacao GAM (${response.status}).`)
+        }
+
+        await updateJob('Workflow de renovacao GAM acionado. Aprove a verificacao Google quando aparecer.', 'success')
+        await nexusLogStore.addLog('Nexus GAM: renovacao de login Google acionada pelo Adsnap.', 'SYSTEM', JSON.stringify({ jobId, workflow: 'gam-session-refresh.yml' }))
+        revalidatePath('/campaigns')
+        return { success: true, workflowUrl }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        await updateJob(`Erro ao acionar renovacao GAM: ${message}`, 'error')
+        throw error
+    }
+}
+
 async function cancelGamWorkflowRun(jobId: string) {
     const token = process.env.GITHUB_TOKEN
     let repo = process.env.GITHUB_REPO
