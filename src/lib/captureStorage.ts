@@ -4,6 +4,7 @@ import path from 'path'
 import { Readable } from 'stream'
 import { google } from 'googleapis'
 import { supabase } from './supabase'
+import prisma from './prisma'
 
 type StorageProvider = 'supabase' | 'google-drive'
 
@@ -35,11 +36,21 @@ type StoredCapture = {
     fallbackReason?: string
 }
 
+type DriveClient = ReturnType<typeof google.drive>
+
+type DriveFolderCandidate = {
+    id?: string | null
+    name?: string | null
+    createdTime?: string | null
+}
+
 const DRIVE_FOLDER_MIME = 'application/vnd.google-apps.folder'
 const DRIVE_CAPTURE_PREFIX = 'gdrive://'
 const DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive']
 const HTTP_TIMEOUT_MS = 30_000
 const RETRYABLE_STATUS = new Set([403, 429, 500, 502, 503, 504])
+const DRIVE_FOLDER_PAGE_SIZE = 100
+const DRIVE_FOLDER_CREATE_SETTLE_MS = 650
 const MONTH_NAMES_PT = [
     'Janeiro',
     'Fevereiro',
@@ -287,6 +298,140 @@ function escapeDriveQueryValue(value: string) {
     return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
 }
 
+function driveFolderLockKey(value: string) {
+    return crypto
+        .createHash('sha256')
+        .update(`adsnap-drive-folder:${value}`)
+        .digest()
+        .readBigInt64BE(0)
+}
+
+function driveFolderIdentity(parent: string, safeName: string) {
+    return crypto
+        .createHash('sha256')
+        .update(`${parent}/${safeName}`)
+        .digest('hex')
+}
+
+function buildDriveFolderQuery(safeName: string, parent: string) {
+    return [
+        `name = '${escapeDriveQueryValue(safeName)}'`,
+        `mimeType = '${DRIVE_FOLDER_MIME}'`,
+        `'${escapeDriveQueryValue(parent)}' in parents`,
+        'trashed = false',
+    ].join(' and ')
+}
+
+function chooseCanonicalDriveFolder(folders: DriveFolderCandidate[]) {
+    const foldersWithId = folders.filter((folder): folder is DriveFolderCandidate & { id: string } => Boolean(folder.id))
+
+    foldersWithId.sort((a, b) => {
+        const createdA = a.createdTime ? Date.parse(a.createdTime) : Number.MAX_SAFE_INTEGER
+        const createdB = b.createdTime ? Date.parse(b.createdTime) : Number.MAX_SAFE_INTEGER
+        if (createdA !== createdB) return createdA - createdB
+        return a.id.localeCompare(b.id)
+    })
+
+    return foldersWithId[0]?.id || null
+}
+
+async function listDriveFoldersByName(drive: DriveClient, safeName: string, parent: string) {
+    const folders: DriveFolderCandidate[] = []
+    let pageToken: string | undefined
+
+    do {
+        const response = await withDriveRetry(() => drive.files.list({
+            q: buildDriveFolderQuery(safeName, parent),
+            spaces: 'drive',
+            fields: 'nextPageToken, files(id, name, createdTime)',
+            pageSize: DRIVE_FOLDER_PAGE_SIZE,
+            pageToken,
+            supportsAllDrives: true,
+            includeItemsFromAllDrives: true,
+            orderBy: 'createdTime',
+        }), 'listar pasta')
+
+        folders.push(...(response.data.files || []))
+        pageToken = response.data.nextPageToken || undefined
+    } while (pageToken)
+
+    return folders
+}
+
+async function createDriveFolder(drive: DriveClient, safeName: string, parent: string) {
+    const created = await withDriveRetry(() => drive.files.create({
+        requestBody: {
+            name: safeName,
+            mimeType: DRIVE_FOLDER_MIME,
+            parents: [parent],
+            appProperties: {
+                source: 'adsnap-cloud',
+                folderKey: driveFolderIdentity(parent, safeName),
+            },
+        },
+        fields: 'id, name, createdTime',
+        supportsAllDrives: true,
+    }), 'criar pasta')
+
+    const createdId = created.data.id
+    if (!createdId) throw new Error(`Google Drive nao retornou ID para a pasta ${safeName}`)
+    return createdId
+}
+
+function logDriveFolderDuplicates(safeName: string, parent: string, folders: DriveFolderCandidate[], canonicalId: string | null) {
+    if (folders.length <= 1) return
+
+    console.warn(
+        `[CaptureStorage] Google Drive possui ${folders.length} pastas duplicadas para "${safeName}" em ${parent}. ` +
+        `Novos uploads vao usar a pasta canonica ${canonicalId || 'nao encontrada'}.`
+    )
+}
+
+async function resolveExistingDriveFolderId(drive: DriveClient, safeName: string, parent: string) {
+    const folders = await listDriveFoldersByName(drive, safeName, parent)
+    const canonicalId = chooseCanonicalDriveFolder(folders)
+    logDriveFolderDuplicates(safeName, parent, folders, canonicalId)
+    return canonicalId
+}
+
+async function resolveOrCreateDriveFolderId(drive: DriveClient, safeName: string, parent: string) {
+    const existingId = await resolveExistingDriveFolderId(drive, safeName, parent)
+    if (existingId) return existingId
+
+    const createdId = await createDriveFolder(drive, safeName, parent)
+    await new Promise(resolve => setTimeout(resolve, DRIVE_FOLDER_CREATE_SETTLE_MS))
+
+    const folders = await listDriveFoldersByName(drive, safeName, parent)
+    const canonicalId = chooseCanonicalDriveFolder(folders) || createdId
+    logDriveFolderDuplicates(safeName, parent, folders, canonicalId)
+
+    return canonicalId
+}
+
+async function withDriveFolderLock<T>(cacheKey: string, operation: () => Promise<T>) {
+    const lockKey = driveFolderLockKey(cacheKey)
+    let lockAcquired = false
+
+    try {
+        return await prisma.$transaction(async tx => {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`
+            lockAcquired = true
+            return operation()
+        }, {
+            maxWait: 15_000,
+            timeout: 90_000,
+        })
+    } catch (error) {
+        if (lockAcquired) throw error
+
+        console.warn(
+            `[CaptureStorage] Nao foi possivel usar trava Postgres para pasta do Drive (${cacheKey}). ` +
+            'Seguindo com resolucao direta.'
+        )
+        return operation()
+    }
+}
+
 async function ensureDriveFolder(name: string, parentId?: string) {
     const drive = await getDriveClient()
     const safeName = sanitizeSegment(name, 'Adsnap Cloud')
@@ -295,43 +440,20 @@ async function ensureDriveFolder(name: string, parentId?: string) {
     const cached = driveFolderCache.get(cacheKey)
     if (cached) return cached
 
-    const q = [
-        `name = '${escapeDriveQueryValue(safeName)}'`,
-        `mimeType = '${DRIVE_FOLDER_MIME}'`,
-        `'${escapeDriveQueryValue(parent)}' in parents`,
-        'trashed = false',
-    ].join(' and ')
-
-    const existing = await withDriveRetry(() => drive.files.list({
-        q,
-        spaces: 'drive',
-        fields: 'files(id, name)',
-        pageSize: 1,
-        supportsAllDrives: true,
-        includeItemsFromAllDrives: true,
-    }), 'listar pasta')
-
-    const foundId = existing.data.files?.[0]?.id
-    if (foundId) {
-        driveFolderCache.set(cacheKey, foundId)
-        return foundId
+    const existingId = await resolveExistingDriveFolderId(drive, safeName, parent)
+    if (existingId) {
+        driveFolderCache.set(cacheKey, existingId)
+        return existingId
     }
 
-    const created = await withDriveRetry(() => drive.files.create({
-        requestBody: {
-            name: safeName,
-            mimeType: DRIVE_FOLDER_MIME,
-            parents: [parent],
-        },
-        fields: 'id',
-        supportsAllDrives: true,
-    }), 'criar pasta')
+    return withDriveFolderLock(cacheKey, async () => {
+        const lockedCached = driveFolderCache.get(cacheKey)
+        if (lockedCached) return lockedCached
 
-    const createdId = created.data.id
-    if (!createdId) throw new Error(`Google Drive nao retornou ID para a pasta ${safeName}`)
-
-    driveFolderCache.set(cacheKey, createdId)
-    return createdId
+        const folderId = await resolveOrCreateDriveFolderId(drive, safeName, parent)
+        driveFolderCache.set(cacheKey, folderId)
+        return folderId
+    })
 }
 
 async function ensureDriveCaptureFolder(campaign: CampaignStorageInfo, folderSegments = captureFolderSegments(campaign)) {
