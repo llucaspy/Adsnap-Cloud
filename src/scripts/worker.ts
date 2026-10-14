@@ -459,6 +459,12 @@ type CaptureSummary = {
     deferred: number
 }
 
+function captureCycleStatus(summary: CaptureSummary) {
+    if (summary.failed > 0 || summary.cycleErrors > 0 || summary.ownershipLost > 0) return 'FAILED'
+    if (summary.stoppedByDeadline || summary.requeued > 0 || summary.deferred > 0) return 'DEFERRED'
+    return summary.claimed ? 'SUCCESS' : 'IDLE'
+}
+
 /** Return a reservation that never reached the browser, without using an attempt.
  * A lease may have expired while logging, so release checks the exact owner and
  * attempt under locks, rather than requiring an unexpired processing lease.
@@ -845,10 +851,10 @@ async function runWorkerCycle(options: WorkerCycleOptions = {}) {
     }
 
     const durationMs = Date.now() - cycleStartedAt
-    const failed = captureSummary.failed > 0 || captureSummary.cycleErrors > 0 || captureSummary.ownershipLost > 0
-    const cycleStatus = failed ? 'FAILED' : captureSummary.stoppedByDeadline ? 'DEFERRED' : captureSummary.claimed ? 'SUCCESS' : 'IDLE'
+    const cycleStatus = captureCycleStatus(captureSummary)
+    const failed = cycleStatus === 'FAILED'
     await nexusLogStore.addLog(
-        `Nexus Worker: Ciclo finalizado (${captureSummary.success} sucesso, ${captureSummary.failed} falha)`,
+        `Nexus Worker: Ciclo finalizado (${captureSummary.success} sucesso, ${captureSummary.failed} falha, ${captureSummary.requeued} aguardando nova tentativa)`,
         failed ? 'ERROR' : cycleStatus === 'SUCCESS' ? 'SUCCESS' : 'SYSTEM',
         JSON.stringify({ runId, cycleStatus, durationMs, captureSummary, captureBatchSize, captureConcurrency, captureTimeoutMs, configuredCaptureTimeoutMs, drainQueue, maxRuntimeMs })
     )

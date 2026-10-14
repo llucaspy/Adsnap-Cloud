@@ -123,7 +123,7 @@ function levelTone(level: string) {
     if (level.includes('ERROR') || level === 'QUARANTINE' || level === 'FAILED') return { color: C.error, bg: 'rgba(239,68,68,0.12)', icon: AlertTriangle }
     if (level.includes('SUCCESS') || level === 'SUCCESS' || level.includes('REVIEW')) return { color: C.success, bg: 'rgba(34,197,94,0.12)', icon: CheckCircle2 }
     if (level.includes('RUNNING') || level === 'PROCESSING') return { color: C.accent, bg: 'rgba(255,255,255,0.12)', icon: Loader2 }
-    if (level === 'QUEUED' || level.includes('PENDING') || level === 'AUTOCONFIG') return { color: C.warning, bg: 'rgba(245,158,11,0.12)', icon: Clock3 }
+    if (level === 'QUEUED' || level === 'DEFERRED' || level.includes('PENDING') || level === 'AUTOCONFIG') return { color: C.warning, bg: 'rgba(245,158,11,0.12)', icon: Clock3 }
     return { color: C.muted, bg: C.surface, icon: Activity }
 }
 
@@ -351,11 +351,12 @@ export function WorkerLogsPanel({
                     <div style={{ display: 'grid', gap: 10, marginBottom: 28 }}>
                         {workerRuns.length === 0 && <SmallEmpty label="Sem ciclos recentes" />}
                         {workerRuns.map(run => {
-                            const summary = run.details?.captureSummary as { claimed?: number; success?: number; failed?: number; timeout?: number; quarantine?: number } | undefined
+                            const summary = run.details?.captureSummary as { claimed?: number; success?: number; failed?: number; timeout?: number; quarantine?: number; requeued?: number } | undefined
+                            const cycleStatus = typeof run.details?.cycleStatus === 'string' ? run.details.cycleStatus : run.level
                             return (
                                 <div key={run.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14 }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
-                                        <StatusBadge value={run.level} />
+                                        <StatusBadge value={cycleStatus} />
                                         <span style={{ color: C.muted, fontSize: 11, fontWeight: 700 }}>{formatClock(run.createdAt)}</span>
                                     </div>
                                     <p style={{ margin: 0, color: C.text, fontSize: 12, fontWeight: 700, lineHeight: 1.45 }}>{run.message}</p>
@@ -368,6 +369,7 @@ export function WorkerLogsPanel({
                                             <MiniMetric label="quar" value={summary.quarantine || 0} />
                                         </div>
                                     )}
+                                    {!!summary?.requeued && <p style={{ margin: '10px 0 0', color: C.warning, fontSize: 12 }}>{summary.requeued} aguardando nova tentativa</p>}
                                 </div>
                             )
                         })}
