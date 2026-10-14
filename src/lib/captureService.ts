@@ -5,8 +5,12 @@ import { nexusLogStore } from './nexusLogStore';
 import { alertStore } from './alertStore';
 import { sendTelegramAlert } from './telegram';
 import { normalizeCaptureDelaySeconds } from './captureTiming';
-import { getCaptureStorageProviderLabel, uploadCaptureImage } from './captureStorage';
+import { deleteCaptureFile, getCaptureStorageProviderLabel, uploadCaptureImage } from './captureStorage';
 import { getFormatLabelMap, resolveFormatLabel } from './formatLabels';
+import { createHash, randomUUID } from 'node:crypto';
+import type { Prisma } from '@prisma/client';
+import { assertCaptureOwnership, completeCaptureOwnership, CaptureOwnershipLostError, type CaptureOwnership } from './captureOwnership';
+import { inspectCreativeContent, matchesCaptureDimensions, type CreativeEvidence } from './captureValidation';
 
 export interface CaptureResult {
     success: boolean
@@ -15,10 +19,46 @@ export interface CaptureResult {
     quarantined?: boolean
     aborted?: boolean
     nonRetryable?: boolean
+    errorCode?: string
 }
 
 export interface CaptureOptions {
     signal?: AbortSignal
+    ownership?: CaptureOwnership
+}
+
+type CaptureEvidenceMetadata = {
+    mode: 'OBSERVED' | 'MODIFIED_PREVIEW' | 'ASSEMBLY'
+    rawSha256?: string
+    finalSha256: string
+    rawPreserved: false
+    validation?: CreativeEvidence
+}
+
+function isOwnershipLost(error: unknown) {
+    return typeof error === 'object' && error !== null && 'code' in error
+        && error.code === 'CAPTURE_OWNERSHIP_LOST'
+}
+
+async function assertCaptureMayWrite(tx: Prisma.TransactionClient, campaignId: string, options: CaptureOptions) {
+    throwIfCaptureAborted(options.signal)
+    if (options.ownership) {
+        if (options.ownership.campaignId !== campaignId) throw new CaptureOwnershipLostError()
+        await assertCaptureOwnership(tx, options.ownership)
+    } else {
+        // Compatibility callers must never steal a campaign claimed by any worker.
+        const rows = await tx.$queryRawUnsafe<{ id: string }[]>(`
+            select id from "Campaign" where id = $1
+              and status <> 'PROCESSING' and "processingRunId" is null and "isArchived" = false
+            for update
+        `, campaignId)
+        if (rows.length !== 1) throw new CaptureOwnershipLostError()
+        const activeJobs = await tx.workerJob.count({ where: {
+            campaignId, type: 'CAPTURE', status: { in: ['QUEUED', 'PROCESSING'] },
+        } })
+        if (activeJobs > 0) throw new CaptureOwnershipLostError()
+    }
+    throwIfCaptureAborted(options.signal)
 }
 
 class CaptureAbortedError extends Error {
@@ -40,7 +80,7 @@ function throwIfCaptureAborted(signal?: AbortSignal) {
 }
 
 function isCaptureAborted(error: unknown, signal?: AbortSignal) {
-    return error instanceof CaptureAbortedError || signal?.aborted
+    return error instanceof CaptureAbortedError || signal?.aborted || isOwnershipLost(error)
 }
 
 function abortableDelay(ms: number, signal?: AbortSignal) {
@@ -93,7 +133,7 @@ async function prepareFinalCaptureImage(
 // NEXUS V48 - RASTER COMPOSITION ENGINE (SHARP)
 // ============================================================================
 
-export async function processComposition(campaignId: string) {
+export async function processComposition(campaignId: string, options: CaptureOptions = {}) {
     console.log('[Nexus Composition] Iniciando montagem para:', campaignId)
     
     // 1. Get Target Campaign (source of the creative)
@@ -134,7 +174,9 @@ export async function processComposition(campaignId: string) {
     return await saveCapture({
         ...campaign,
         formatLabel: resolveFormatLabel(formatLabelMap, campaign.format),
-    }, finalImage, campaignId);
+    }, finalImage, campaignId, options, {
+        mode: 'ASSEMBLY', finalSha256: createHash('sha256').update(finalImage).digest('hex'), rawPreserved: false,
+    });
 }
 
 
@@ -152,7 +194,8 @@ export async function processCampaign(campaignId: string, options: CaptureOption
         };
 
         let retryCount = 0;
-        const MAX_RETRIES = settings.nexusMaxRetries;
+        const MAX_RETRIES = options.ownership?.jobId ? 1
+            : Math.max(1, Math.min(3, Number(settings.nexusMaxRetries) || 3));
         let lastError = '';
         let stoppedForNonRetryable = false;
 
@@ -171,23 +214,13 @@ export async function processCampaign(campaignId: string, options: CaptureOption
             if (result.aborted) return result
 
             if (result.success) {
-                await prisma.campaign.update({
-                    where: { id: campaignId },
-                    data: {
-                        retryCount: 0,
-                        processingStartedAt: null,
-                        processingHeartbeatAt: null,
-                        processingRunId: null,
-                        lockedUntil: null,
-                        lastWorkerError: null,
-                    }
-                });
+                // saveCapture committed the capture, campaign and queue acknowledgement atomically.
                 await nexusLogStore.addLog(
                     `Nexus: Sucesso total na campanha ${campaignId}`,
                     'SUCCESS',
                     `Duracao: ${((Date.now() - attemptStartedAt) / 1000).toFixed(1)}s`,
                     campaignId
-                );
+                ).catch(error => console.error('[Nexus] Post-commit log failed:', error));
                 return result;
             }
 
@@ -203,23 +236,16 @@ export async function processCampaign(campaignId: string, options: CaptureOption
             await nexusLogStore.addLog(`Nexus: Falha na tentativa ${retryCount}. Erro: ${lastError}`, 'INFO', undefined, campaignId);
         }
 
-        console.log(`[Nexus] Quarentena aplicada para ${campaignId}. Motivo: ${lastError}`);
-        if (stoppedForNonRetryable) {
-            await nexusLogStore.addLog('Nexus: Quarentena aplicada. Falha nao recuperavel. Tentativas interrompidas.', 'ERROR', `Ultimo erro: ${lastError}`, campaignId);
-        } else {
-        await nexusLogStore.addLog(`Nexus: Quarentena aplicada. Todas as tentativas falharam.`, 'ERROR', `Último erro: ${lastError}`, campaignId);
-
+        // WorkerJob is the retry authority; transient failure must not clear its fence.
+        if (options.ownership?.jobId && !stoppedForNonRetryable) {
+            return { success: false, error: lastError }
         }
 
-        // Visual alert + Telegram
-        const attemptMessage = stoppedForNonRetryable
-            ? `Falha nao recuperavel apos ${retryCount} tentativa(s).`
-            : `Todas as ${MAX_RETRIES} tentativas falharam.`;
-        alertStore.addAlert('error', 'Campanha em Quarentena', `${attemptMessage} Erro: ${lastError}`, campaignId);
-        sendTelegramAlert('Campanha em Quarentena', `${attemptMessage} Campanha enviada para quarentena.`, `Erro: ${lastError}`, campaignId).catch(() => {});
-
         // Save failure to database as a record even in quarantine
-        await prisma.capture.create({
+        throwIfCaptureAborted(options.signal)
+        await prisma.$transaction(async tx => {
+        await assertCaptureMayWrite(tx, campaignId, options)
+        await tx.capture.create({
             data: {
                 campaignId,
                 status: 'QUARANTINE',
@@ -228,7 +254,7 @@ export async function processCampaign(campaignId: string, options: CaptureOption
             }
         });
 
-        await prisma.campaign.update({
+        await tx.campaign.update({
             where: { id: campaignId },
             data: {
                 status: 'QUARANTINE',
@@ -239,11 +265,20 @@ export async function processCampaign(campaignId: string, options: CaptureOption
                 lastWorkerError: lastError,
             }
         });
+        })
+
+        const attemptMessage = stoppedForNonRetryable
+            ? `Falha nao recuperavel apos ${retryCount} tentativa(s).`
+            : `Todas as ${MAX_RETRIES} tentativas falharam.`;
+        await nexusLogStore.addLog('Nexus: Quarentena aplicada.', 'ERROR', `Ultimo erro: ${lastError}`, campaignId)
+            .catch(error => console.error('[Nexus] Quarantine log failed:', error));
+        alertStore.addAlert('error', 'Campanha em Quarentena', `${attemptMessage} Erro: ${lastError}`, campaignId);
+        sendTelegramAlert('Campanha em Quarentena', `${attemptMessage} Campanha enviada para quarentena.`, `Erro: ${lastError}`, campaignId).catch(() => {});
 
         return { success: false, error: lastError, quarantined: true, nonRetryable: stoppedForNonRetryable };
     } catch (e) {
         if (isCaptureAborted(e, options.signal)) {
-            const errorMsg = getAbortMessage(options.signal)
+            const errorMsg = isOwnershipLost(e) ? 'CAPTURE_OWNERSHIP_LOST' : getAbortMessage(options.signal)
             console.warn('[Nexus Capture Aborted]', errorMsg)
             await nexusLogStore.addLog('Nexus: Captura abortada pelo worker', 'INFO', errorMsg, campaignId)
             return { success: false, error: errorMsg, aborted: true }
@@ -276,12 +311,12 @@ interface BannerCandidate {
     height: number;
     selector?: string;
     html?: string;
+    domIndex?: number;
 }
 
 // Script run INSIDE the browser to find the best candidate
 const FIND_BANNER_SCRIPT = `
     ([targetW, targetH]) => {
-        const MAX_SIZE_DIFF = 0.10; // 10% strict tolerance
         const candidates = [];
         
         // Helper to check visibility
@@ -293,7 +328,7 @@ const FIND_BANNER_SCRIPT = `
         // 1. Scan common elements
         const elements = document.querySelectorAll('iframe, img, div[id*="google"], ins, div[class*="ad"], div[id*="banner"]');
         
-        elements.forEach(el => {
+        elements.forEach((el, domIndex) => {
             if (!isVisible(el)) return;
             
             const rect = el.getBoundingClientRect();
@@ -305,10 +340,8 @@ const FIND_BANNER_SCRIPT = `
             const wDiff = Math.abs(width - targetW) / targetW;
             const hDiff = Math.abs(height - targetH) / targetH;
             
-            // Relaxed tolerance for small banners (e.g. 56px vs 50px is ~12%)
-            const finalMaxDiff = targetH <= 100 ? 0.20 : MAX_SIZE_DIFF;
-            
-            if (wDiff <= finalMaxDiff && hDiff <= finalMaxDiff) {
+            if (Math.abs(width - targetW) <= Math.max(2, targetW * 0.02)
+                && Math.abs(height - targetH) <= Math.max(2, targetH * 0.02)) {
                 // Calculate distance from center (prefer more central ads)
                 const centerX = rect.x + width / 2;
                 const centerY = rect.y + height / 2;
@@ -316,6 +349,7 @@ const FIND_BANNER_SCRIPT = `
                 
                 candidates.push({
                     element: el,
+                    domIndex,
                     rect: {
                         x: rect.x + window.scrollX,
                         y: rect.y + window.scrollY,
@@ -337,7 +371,8 @@ const FIND_BANNER_SCRIPT = `
             y: c.rect.y,
             width: c.rect.width,
             height: c.rect.height,
-            selector: c.element.tagName
+            selector: c.element.tagName,
+            domIndex: c.domIndex
         }));
     }
 `;
@@ -348,11 +383,12 @@ interface MeasuredAdBox {
     y: number;
     width: number;
     height: number;
+    nodeIndex?: number | null;
 }
 
 const measureAdBoxesInPage = new Function('el', `
     const boxes = [];
-    const nodes = Array.from(el.querySelectorAll('iframe, img, ins'));
+    const nodes = Array.from(el.querySelectorAll('iframe, img, ins, canvas, video'));
     nodes.push(el);
 
     for (let index = 0; index < nodes.length; index++) {
@@ -365,6 +401,7 @@ const measureAdBoxesInPage = new Function('el', `
 
         boxes.push({
             source: target === el ? 'selector' : target.tagName.toLowerCase() + '#' + (index + 1),
+            nodeIndex: target === el ? null : index,
             x: rect.x + window.scrollX,
             y: rect.y + window.scrollY,
             width: rect.width,
@@ -376,45 +413,31 @@ const measureAdBoxesInPage = new Function('el', `
 `) as (el: Element) => MeasuredAdBox[];
 
 function matchesExpectedDimension(box: MeasuredAdBox, targetW: number, targetH: number) {
-    if (!box.width || !box.height || !targetW || !targetH) return false;
+    return matchesCaptureDimensions(box, targetW, targetH);
+}
 
-    const widthTolerance = targetW <= 320 ? 0.30 : 0.12;
-    const heightTolerance = targetH <= 100 ? 0.25 : 0.12;
-    const widthDiff = Math.abs(box.width - targetW) / targetW;
-    const heightDiff = Math.abs(box.height - targetH) / targetH;
-
-    if (targetH <= 100 && heightDiff <= heightTolerance && box.width >= targetW && box.width <= targetW * 1.4) {
-        return true;
+async function validateCreative(locator: Locator, width: number, height: number) {
+    const box = await locator.boundingBox()
+    if (!box || !matchesCaptureDimensions(box, width, height)) {
+        throw new Error(`TARGET_DIMENSION_MISMATCH: esperado ${width}x${height}`)
     }
+    const evidence = await inspectCreativeContent(locator)
+    if (evidence.state !== 'CONFIRMED') throw new Error(`${evidence.reason}: criativo requer nova verificacao`)
+    return evidence
+}
 
-    return widthDiff <= widthTolerance && heightDiff <= heightTolerance;
+function evidenceMetadata(raw: Buffer, final: Buffer, modified: boolean, validation: CreativeEvidence): CaptureEvidenceMetadata {
+    return {
+        mode: modified ? 'MODIFIED_PREVIEW' : 'OBSERVED', rawPreserved: false,
+        rawSha256: createHash('sha256').update(raw).digest('hex'),
+        finalSha256: createHash('sha256').update(final).digest('hex'), validation,
+    }
 }
 
 function describeMeasuredBoxes(boxes: MeasuredAdBox[]) {
     return boxes
         .map(box => `${box.source}:${Math.round(box.width)}x${Math.round(box.height)}`)
         .join(', ') || 'sem boxes visiveis';
-}
-
-async function getLocatorDocumentBox(locator: Locator): Promise<MeasuredAdBox | null> {
-    return await locator.evaluate((element) => {
-        const rect = element.getBoundingClientRect();
-        const style = window.getComputedStyle(element);
-        const isVisible = rect.width > 0
-            && rect.height > 0
-            && style.display !== 'none'
-            && style.visibility !== 'hidden';
-
-        if (!isVisible) return null;
-
-        return {
-            source: 'selector',
-            x: rect.x + window.scrollX,
-            y: rect.y + window.scrollY,
-            width: rect.width,
-            height: rect.height,
-        };
-    }).catch(() => null);
 }
 
 async function waitForExpectedDimensionInSlot(
@@ -690,6 +713,7 @@ async function captureScreenshotAfterConfiguredDelay(
     signal?: AbortSignal,
     animations: 'allow' | 'disabled' = 'allow',
     _alreadyWaitedMs = 0,
+    validateBeforeScreenshot?: () => Promise<void>,
 ) {
     throwIfCaptureAborted(signal)
     const configuredDelayMs = normalizeCaptureDelaySeconds(captureDelaySeconds) * 1000
@@ -714,6 +738,8 @@ async function captureScreenshotAfterConfiguredDelay(
     }
     throwIfCaptureAborted(signal)
     await removeKnownBlockedElementsBeforeScreenshot(page, campaignId, signal)
+    throwIfCaptureAborted(signal)
+    await validateBeforeScreenshot?.()
     throwIfCaptureAborted(signal)
     return page.screenshot({ type: 'png', animations, scale: 'css', timeout: FAST_SCREENSHOT_TIMEOUT_MS })
 }
@@ -801,7 +827,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         targetH = dims[1];
     }
 
-    if (!targetW || !targetH) {
+    if (![targetW, targetH].every(value => Number.isFinite(value) && value > 0)) {
         const error = `Formato inválido ou não configurado: ${campaign.format}`;
         await nexusLogStore.addLog(`Nexus: ${error}`, 'ERROR', undefined, campaignId);
         throw new Error(error);
@@ -1007,25 +1033,16 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                         selectorDimensionWaitMs = waitedMeasurement.waitedMs;
                     }
     
-                    const captureAnchorBox = matchingBox || await getLocatorDocumentBox(locator);
-
-                    if (!captureAnchorBox) {
-                        throw new Error('Seletor configurado sem area visivel para captura');
+                    if (!matchingBox) {
+                        throw new Error(`TARGET_DIMENSION_MISMATCH: esperado ${targetW}x${targetH}; medido ${describeMeasuredBoxes(measuredBoxes)}`)
                     }
+                    const captureAnchorBox = matchingBox
+                    let creativeLocator = matchingBox.nodeIndex == null
+                        ? locator : locator.locator('iframe, img, ins, canvas, video').nth(matchingBox.nodeIndex)
+                    let creativeEvidence: CreativeEvidence = { state: 'INCONCLUSIVE', reason: 'AWAITING_CAPTURE_DELAY' }
 
-                    if (matchingBox) {
-                        console.log(`[Nexus] Seletor validado! ${matchingBox.source} (${Math.round(matchingBox.width)}x${Math.round(matchingBox.height)})`);
-                        await nexusLogStore.addLog('Nexus: Seletor validado com dimensao correta', 'SUCCESS', `Dim: ${Math.round(matchingBox.width)}x${Math.round(matchingBox.height)} | Esperado: ${targetW}x${targetH}`, campaignId);
-                    } else {
-                        const measured = describeMeasuredBoxes(measuredBoxes);
-                        console.log(`[Nexus] Dimensao nao confirmou ${targetW}x${targetH}; seguindo pelo XPath configurado. Medido: ${measured}`);
-                        await nexusLogStore.addLog(
-                            'Nexus: Dimensao nao confirmou; seguindo pelo XPath configurado',
-                            'INFO',
-                            `Esperado ${targetW}x${targetH}; medido apos espera: ${measured}`,
-                            campaignId,
-                        );
-                    }
+                    console.log(`[Nexus] Seletor validado! ${matchingBox.source} (${Math.round(matchingBox.width)}x${Math.round(matchingBox.height)})`);
+                    await nexusLogStore.addLog('Nexus: Seletor validado com dimensao correta', 'INFO', `Dim: ${Math.round(matchingBox.width)}x${Math.round(matchingBox.height)} | Esperado: ${targetW}x${targetH}`, campaignId);
 
                     const viewportHeight = isMobile ? MOBILE_CAPTURE_VIEWPORT.height : DESKTOP_CAPTURE_VIEWPORT.height;
                     const targetScrollY = Math.max(0, captureAnchorBox.y + (captureAnchorBox.height / 2) - (viewportHeight / 2));
@@ -1035,6 +1052,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
 
                     if (standaloneCreativeAssetUrl) {
                         await injectCreativeAsset(locator, standaloneCreativeAssetUrl, targetW, targetH);
+                        creativeLocator = locator.locator('img[data-adsnap-creative="true"]').first()
                         await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
                     }
 
@@ -1053,6 +1071,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                         );
                         const renderedDataUrl = `data:image/png;base64,${renderedCreative.toString('base64')}`;
                         await injectCreativeAsset(locator, renderedDataUrl, targetW, targetH);
+                        creativeLocator = locator.locator('img[data-adsnap-creative="true"]').first()
                         await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
                         await nexusLogStore.addLog(
                             'Nexus: Criativo HTML5 renderizado e fixado no slot',
@@ -1071,16 +1090,22 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                         options.signal,
                         screenshotAnimations,
                         selectorDimensionWaitMs,
+                        async () => { creativeEvidence = await validateCreative(creativeLocator, targetW, targetH) },
                     );
                     const finalImage = await prepareFinalCaptureImage(screenshotBuffer, campaign.url, isMobile, browser, options.signal);
                     await browser.close();
-                    return await saveCapture(campaignForStorage, finalImage, campaignId, options);
+                    return await saveCapture(campaignForStorage, finalImage, campaignId, options,
+                        evidenceMetadata(screenshotBuffer, finalImage, Boolean(standaloneCreativeAssetUrl || layeredCreativeDocumentUrl), creativeEvidence));
                 } catch (selError) {
+                    if (isCaptureAborted(selError, options.signal)) throw selError
                     const msg = selError instanceof Error ? selError.message : String(selError);
+                    selectorMismatchError = msg
                     console.warn('[Nexus] Falha no seletor:', msg);
                     await nexusLogStore.addLog(`Nexus: Falha no seletor (${msg}). Tentando proximo slot...`, 'INFO', undefined, campaignId);
                 }
             }
+            // An explicit target must not silently fall back to a different advertisement.
+            return { success: false, error: selectorMismatchError || 'CONFIGURED_SLOT_NOT_CONFIRMED', errorCode: 'CONFIGURED_SLOT_NOT_CONFIRMED' }
         }
 
         // ====================================================
@@ -1105,12 +1130,9 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         console.log(`[Nexus] ${candidates.length} candidatos encontrados.`);
         await nexusLogStore.addLog(`Nexus: ${candidates.length} candidatos identificados. Analisando conteúdo...`, 'SYSTEM', undefined, campaignId);
 
-        let bestCandidate = null;
-        let fallbackCandidate = null;
-        let largestSizeKB = 0;
-
-        const MIN_STRICT_KB = 0.5;
-        const MIN_FALLBACK_KB = 0.1;
+        let bestCandidate: BannerCandidate | null = null;
+        let bestLocator: Locator | null = null;
+        let creativeEvidence: CreativeEvidence | null = null;
 
         for (const [index, candidate] of candidates.entries()) {
             throwIfCaptureAborted(options.signal)
@@ -1120,49 +1142,26 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                 await page.evaluate((y) => window.scrollTo(0, y), Math.max(0, candidate.y - 300));
                 await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
 
-                const clip = {
-                    x: candidate.x,
-                    y: candidate.y,
-                    width: candidate.width,
-                    height: candidate.height
-                };
-
-                const bannerBuffer = await page.screenshot({ clip, timeout: FAST_SCREENSHOT_TIMEOUT_MS });
-                const sizeKB = bannerBuffer.length / 1024;
-                console.log(`[Nexus] Candidato #${index + 1} - Tamanho: ${sizeKB.toFixed(2)} KB`);
-
-                if (sizeKB > largestSizeKB) {
-                    largestSizeKB = sizeKB;
-                    fallbackCandidate = candidate;
-                }
-
-                if (sizeKB >= MIN_STRICT_KB) {
-                    console.log(`[Nexus] Candidato #${index + 1} validado!`);
-                    await nexusLogStore.addLog(`Nexus: Candidato #${index + 1} validado (${sizeKB.toFixed(2)} KB)`, 'INFO', undefined, campaignId);
-                    bestCandidate = candidate;
-                    break;
-                } else {
-                    await nexusLogStore.addLog(`Nexus: Candidato #${index + 1} muito leve (${sizeKB.toFixed(2)} KB)`, 'INFO', undefined, campaignId);
-                }
+                if (candidate.domIndex == null) continue
+                const candidateLocator = page.locator('iframe, img, div[id*="google"], ins, div[class*="ad"], div[id*="banner"]').nth(candidate.domIndex)
+                creativeEvidence = await validateCreative(candidateLocator, targetW, targetH)
+                bestCandidate = candidate
+                bestLocator = candidateLocator
+                break
             } catch (e) {
+                if (isCaptureAborted(e, options.signal)) throw e
                 console.warn(`[Nexus] Erro ao analisar candidato #${index + 1}:`, e);
             }
         }
 
-        if (!bestCandidate && fallbackCandidate && largestSizeKB >= MIN_FALLBACK_KB) {
-            console.log(`[Nexus] Usando fallback: ${largestSizeKB.toFixed(2)} KB`);
-            await nexusLogStore.addLog(`Nexus: Usando melhor material alternativo encontrado (${largestSizeKB.toFixed(2)} KB)`, 'INFO', undefined, campaignId);
-            bestCandidate = fallbackCandidate;
-        }
-
-        if (!bestCandidate) {
+        if (!bestCandidate || !bestLocator || !creativeEvidence) {
             console.log('[Nexus] Falha: Nenhum conteúdo visual detectado.');
             await browser.close();
             await nexusLogStore.addLog('Nexus: Falha - Banners localizados mas parecem vazios ou invisiveis', 'INFO', undefined, campaignId);
             if (selectorMismatchError) {
                 return { success: false, error: selectorMismatchError };
             }
-            return { success: false, error: 'Banners encontrados mas parecem vazios ou invisíveis' };
+            return { success: false, error: 'CREATIVE_NOT_CONFIRMED: nenhum criativo com conteudo confirmado', errorCode: 'CREATIVE_NOT_CONFIRMED' };
         }
 
         const viewportHeight = isMobile ? MOBILE_CAPTURE_VIEWPORT.height : DESKTOP_CAPTURE_VIEWPORT.height;
@@ -1174,18 +1173,21 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
 
         console.log('[Nexus] Aguardando delay configurado para screenshot final...')
-        const screenshotBuffer = await captureScreenshotAfterConfiguredDelay(page, campaignId, campaign.captureDelaySeconds, options.signal);
+        const selectedLocator = bestLocator
+        const screenshotBuffer = await captureScreenshotAfterConfiguredDelay(page, campaignId, campaign.captureDelaySeconds, options.signal,
+            'allow', 0, async () => { creativeEvidence = await validateCreative(selectedLocator, targetW, targetH) });
         await nexusLogStore.addLog('Nexus: Print capturado. Aplicando moldura obrigatoria...', 'SYSTEM', undefined, campaignId);
 
         const finalImage = await prepareFinalCaptureImage(screenshotBuffer, campaign.url, isMobile, browser, options.signal);
         await browser.close();
 
-        return await saveCapture(campaignForStorage, finalImage, campaignId, options);
+        return await saveCapture(campaignForStorage, finalImage, campaignId, options,
+            evidenceMetadata(screenshotBuffer, finalImage, false, creativeEvidence));
 
     } catch (err) {
         if (browser) await browser.close();
         if (isCaptureAborted(err, options.signal)) {
-            const msg = getAbortMessage(options.signal)
+            const msg = isOwnershipLost(err) ? 'CAPTURE_OWNERSHIP_LOST' : getAbortMessage(options.signal)
             await nexusLogStore.addLog('Nexus: Captura interrompida por timeout', 'INFO', msg, campaignId);
             return { success: false, error: msg, aborted: true };
         }
@@ -1196,16 +1198,28 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         return { success: false, error: msg };
     } finally {
         options.signal?.removeEventListener('abort', closeBrowserOnAbort)
+        if (browser?.isConnected()) await browser.close().catch(() => {})
     }
 }
 
-async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: string, options: CaptureOptions = {}) {
+async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: string, options: CaptureOptions = {}, metadata?: CaptureEvidenceMetadata) {
+    let uploadedUri: string | undefined
+    let commitStarted = false
+    const evidence = metadata || {
+        mode: 'ASSEMBLY', finalSha256: createHash('sha256').update(imageBuffer).digest('hex'), rawPreserved: false,
+    }
     try {
         throwIfCaptureAborted(options.signal)
+        await prisma.$transaction(tx => assertCaptureMayWrite(tx, campaignId, options))
         const requestedStorageLabel = getCaptureStorageProviderLabel()
         await nexusLogStore.addLog(`Nexus: Iniciando upload para o ${requestedStorageLabel}...`, 'SYSTEM', undefined, campaignId);
 
-        const storedCapture = await uploadCaptureImage(imageBuffer, { campaign, campaignId })
+        // An attempt owns an immutable object key, so abort cleanup cannot remove older evidence.
+        const fileName = `evidence-${randomUUID()}.png`
+        const storedCapture = await uploadCaptureImage(imageBuffer, { campaign, campaignId, fileName })
+        uploadedUri = storedCapture.uri
+        // Cancellation or ownership may change while the provider is uploading.
+        throwIfCaptureAborted(options.signal)
         const storageLabel = getCaptureStorageProviderLabel(storedCapture.provider)
         const publicUrl = storedCapture.uri
         const storageDetails = storedCapture.path
@@ -1229,17 +1243,21 @@ async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: strin
 
         console.log(`[Nexus] URI de captura gerada: ${publicUrl}`);
 
-        // 4. Save to database using transaction
-        await prisma.$transaction([
-            prisma.capture.create({
+        // The job acknowledgement, evidence and campaign state are one fenced commit.
+        commitStarted = true
+        await prisma.$transaction(async tx => {
+            await assertCaptureMayWrite(tx, campaignId, options)
+            await tx.capture.create({
                 data: {
                     campaignId,
                     screenshotPath: publicUrl,
                     status: 'SUCCESS',
-                    auditNotes: 'Captura realizada com sucesso via Nexus Engine Cloud.'
+                    auditNotes: JSON.stringify(evidence),
+                    isAssembly: evidence.mode === 'ASSEMBLY' || evidence.mode === 'MODIFIED_PREVIEW',
                 }
-            }),
-            prisma.campaign.update({
+            })
+            throwIfCaptureAborted(options.signal)
+            await tx.campaign.update({
                 where: { id: campaignId },
                 data: {
                     status: 'SUCCESS',
@@ -1252,33 +1270,26 @@ async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: strin
                     lastWorkerError: null
                 }
             })
-        ]);
+            if (options.ownership) await completeCaptureOwnership(tx, options.ownership)
+            throwIfCaptureAborted(options.signal)
+        });
 
-        await nexusLogStore.addLog(`Nexus: Processo finalizado com sucesso!`, 'SUCCESS', undefined, campaignId);
+        await nexusLogStore.addLog(`Nexus: Processo finalizado com sucesso!`, 'SUCCESS', undefined, campaignId)
+            .catch(error => console.error('[Nexus] Post-commit log failed:', error));
         return { success: true, filePath: publicUrl };
 
     } catch (err) {
+        // Remove only an upload known not to have been committed. Ambiguous database errors
+        // retain the object for reconciliation rather than risking deletion of a valid capture.
+        if (uploadedUri && (!commitStarted || err instanceof CaptureAbortedError || isOwnershipLost(err))) {
+            await deleteCaptureFile(uploadedUri).catch(error => console.error('[Nexus] Orphan upload cleanup failed:', error))
+        }
         const msg = err instanceof Error ? err.message : String(err);
         console.error('[Nexus saveCapture Error]', err);
-        await nexusLogStore.addLog(`Nexus: Erro ao salvar captura final`, 'ERROR', msg, campaignId);
+        await nexusLogStore.addLog(`Nexus: Erro ao salvar captura final`, 'ERROR', msg, campaignId)
+            .catch(error => console.error('[Nexus] Failure log failed:', error));
 
-        // Ensure failed state in database
-        try {
-            await prisma.campaign.update({
-                where: { id: campaignId },
-                data: {
-                    status: 'FAILED',
-                    processingStartedAt: null,
-                    processingHeartbeatAt: null,
-                    processingRunId: null,
-                    lockedUntil: null,
-                    lastWorkerError: msg
-                }
-            });
-        } catch (dbErr) {
-            console.error('[Nexus saveCapture DB Fallback Error]', dbErr);
-        }
-
+        // The owning worker handles retry/failure. A stale result must never clear a new owner's lease.
         throw err;
     }
 }

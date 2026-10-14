@@ -3,6 +3,7 @@ import { HomeView } from '@/components/HomeView'
 import type { Prisma } from '@prisma/client'
 import { getFormatLabelMap, resolveFormatLabel } from '@/lib/formatLabels'
 import { getSession } from '@/lib/auth'
+import { sanitizeLogMessage } from '@/lib/logRedaction'
 
 export const revalidate = 30
 
@@ -168,11 +169,11 @@ export default async function HomePage() {
       take: 8,
       orderBy: { createdAt: 'desc' },
     }).catch(() => []),
-    prisma.workerJob.count({ where: { status: 'QUEUED' } }).catch(() => 0),
-    prisma.workerJob.count({ where: { status: { in: ['RUNNING', 'PROCESSING'] } } }).catch(() => 0),
-    prisma.workerJob.count({ where: { status: { in: ['FAILED', 'ERROR'] } } }).catch(() => 0),
-    prisma.campaign.count({ where: { status: { in: ['QUEUED', 'AUTOCONFIG'] }, isArchived: false } }).catch(() => 0),
-    prisma.campaign.count({ where: { status: 'PROCESSING', isArchived: false } }).catch(() => 0),
+    prisma.workerJob.count({ where: { type: 'CAPTURE', status: 'QUEUED', campaign: { is: { isArchived: false } } } }).catch(() => 0),
+    prisma.workerJob.count({ where: { type: 'CAPTURE', status: { in: ['RUNNING', 'PROCESSING'] }, campaign: { is: { isArchived: false } } } }).catch(() => 0),
+    prisma.workerJob.count({ where: { type: 'CAPTURE', status: { in: ['FAILED', 'ERROR'] }, campaign: { is: { isArchived: false } } } }).catch(() => 0),
+    prisma.campaign.count({ where: { status: { in: ['QUEUED', 'AUTOCONFIG'] }, isArchived: false, workerJobs: { none: { type: 'CAPTURE', status: { in: ['QUEUED', 'PROCESSING'] } } } } }).catch(() => 0),
+    prisma.campaign.count({ where: { status: 'PROCESSING', isArchived: false, workerJobs: { none: { type: 'CAPTURE', status: { in: ['QUEUED', 'PROCESSING'] } } } } }).catch(() => 0),
     prisma.campaign.findMany({
       where: activePrintCampaignWhere,
       orderBy: { updatedAt: 'desc' },
@@ -233,7 +234,7 @@ export default async function HomePage() {
       recentLogs={recentLogs.map(log => ({
         id: log.id,
         level: log.level,
-        message: log.message,
+        message: sanitizeLogMessage(log.message),
         createdAt: log.createdAt.toISOString(),
       }))}
       activePrintTotal={activePrintCampaignGroups.length}

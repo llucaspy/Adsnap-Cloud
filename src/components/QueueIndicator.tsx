@@ -2,18 +2,22 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { Activity, Zap, Layers, CheckCircle2 } from 'lucide-react'
-import { getQueueStatus, stopAllCaptures } from '@/app/actions'
+import { getQueueOutcomes, getQueueStatus, stopAllCaptures } from '@/app/actions'
+import { confirmedQueueSuccess } from '@/lib/queueTransitions'
+
+type QueueStatusItem = Awaited<ReturnType<typeof getQueueStatus>>[number]
 
 export function QueueIndicator() {
-    const [queue, setQueue] = useState<any[]>([])
-    const [lastCompletedId, setLastCompletedId] = useState<string | null>(null)
+    const [queue, setQueue] = useState<QueueStatusItem[]>([])
     const [showCompleted, setShowCompleted] = useState(false)
-    const prevQueueRef = useRef<any[]>([])
+    const prevQueueRef = useRef<QueueStatusItem[]>([])
 
     // Cyberpunk Synth Sound using Web Audio API
     const playZapSound = () => {
         try {
-            const context = new (window.AudioContext || (window as any).webkitAudioContext)()
+            const Audio = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+            if (!Audio) return
+            const context = new Audio()
             const oscillator = context.createOscillator()
             const gainNode = context.createGain()
 
@@ -29,24 +33,29 @@ export function QueueIndicator() {
 
             oscillator.start()
             oscillator.stop(context.currentTime + 0.2)
+            oscillator.onended = () => { void context.close().catch(() => {}) }
         } catch (e) {
             console.error('Audio error:', e)
         }
     }
 
     useEffect(() => {
+        let fetching = false
+        let cancelled = false
         const checkQueue = async () => {
+            if (document.hidden || fetching) return
+            fetching = true
             try {
                 const currentQueue = await getQueueStatus()
 
-                // Detection logic for sound
-                // If a campaign that was in queue is now gone, it completed (or failed)
-                const completed = prevQueueRef.current.find(prev =>
-                    !currentQueue.find((curr: any) => curr.id === prev.id)
+                const disappeared = prevQueueRef.current.filter(prev =>
+                    !currentQueue.find(curr => curr.id === prev.id)
                 )
+                const outcomes = disappeared.length > 0 ? await getQueueOutcomes(disappeared.map(item => item.id)) : []
+                const completed = disappeared.find(prev => confirmedQueueSuccess(prev, outcomes.find(outcome => outcome.id === prev.id)))
 
+                if (cancelled) return
                 if (completed) {
-                    setLastCompletedId(completed.id)
                     setShowCompleted(true)
                     playZapSound()
                     setTimeout(() => setShowCompleted(false), 5000)
@@ -56,13 +65,13 @@ export function QueueIndicator() {
                 prevQueueRef.current = currentQueue
             } catch (error) {
                 console.error('Queue poll error:', error)
-            }
+            } finally { fetching = false }
         }
 
         const interval = setInterval(checkQueue, 5000) // Poll every 5 seconds
         checkQueue()
 
-        return () => clearInterval(interval)
+        return () => { cancelled = true; clearInterval(interval) }
     }, [])
 
     if (queue.length === 0 && !showCompleted) return null

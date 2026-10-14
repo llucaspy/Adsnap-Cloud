@@ -1,0 +1,11 @@
+{
+  "date": "2026-10-14T19:56:08.747Z",
+  "scope": "Synthetic loopback fixtures on a local production build, not cloud certification",
+  "checks": [
+    "Anonymous logs access refused before data is returned",
+    "Legitimate login and authorized redacted diagnostics work",
+    "Panel and job detail functional at 1365px without page overflow or raw fixture secret",
+    "Panel and job detail functional at 390px without page overflow or raw fixture secret"
+  ],
+  "exceptions": []
+}

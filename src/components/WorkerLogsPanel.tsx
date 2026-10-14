@@ -3,6 +3,7 @@
 import { useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { hasExpiredLease, workerJobHref } from '@/lib/workerPresentation'
 import {
     Activity,
     AlertTriangle,
@@ -21,6 +22,7 @@ import {
 
 type QueueItem = {
     id: string
+    jobId?: string | null
     pi: string
     client: string
     campaignName: string
@@ -192,6 +194,7 @@ export function WorkerLogsPanel({
     queue,
     campaignStatusCounts,
     recentLogs,
+    recentErrors,
     logLevelCounts,
     captureStatusCounts,
     workerRuns,
@@ -202,6 +205,7 @@ export function WorkerLogsPanel({
     queue: QueueItem[]
     campaignStatusCounts: CountItem[]
     recentLogs: LogItem[]
+    recentErrors?: LogItem[]
     logLevelCounts: CountItem[]
     captureStatusCounts: CountItem[]
     workerRuns: WorkerRun[]
@@ -210,7 +214,7 @@ export function WorkerLogsPanel({
     const router = useRouter()
 
     useEffect(() => {
-        const timer = setInterval(() => router.refresh(), 15000)
+        const timer = setInterval(() => { if (!document.hidden) router.refresh() }, 15000)
         return () => clearInterval(timer)
     }, [router])
 
@@ -227,11 +231,11 @@ export function WorkerLogsPanel({
         return { queued, processing, autoconfig, errors24h, success24h, oldest }
     }, [campaignStatusCounts, logLevelCounts, captureStatusCounts, queue])
 
-    const errorLogs = recentLogs.filter(log => log.level.includes('ERROR')).slice(0, 12)
+    const errorLogs = recentErrors || recentLogs.filter(log => log.level.includes('ERROR')).slice(0, 12)
 
     return (
-        <main className="page-enter" style={{ minHeight: '100vh', color: C.text, background: C.bg }}>
-            <header style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 24, marginBottom: 28, flexWrap: 'wrap' }}>
+        <main className="page-enter workers-panel" style={{ minHeight: '100vh', color: C.text, background: C.bg }}>
+            <header className="worker-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 24, marginBottom: 28, flexWrap: 'wrap' }}>
                 <div>
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '4px 10px', borderRadius: 4, background: C.card, color: C.muted, fontSize: 10, fontWeight: 800, letterSpacing: '0.16em', textTransform: 'uppercase', marginBottom: 14 }}>
                         <ServerCog size={14} />
@@ -241,7 +245,7 @@ export function WorkerLogsPanel({
                         Painel dos Workers
                     </h1>
                     <p style={{ marginTop: 10, color: C.muted, fontSize: 14, maxWidth: 560 }}>
-                        Atualizado {formatClock(generatedAt)}
+                        Atualizado {formatClock(generatedAt)} · Fila atual e histórico de tarefas
                     </p>
                 </div>
                 <button
@@ -267,24 +271,24 @@ export function WorkerLogsPanel({
             </header>
 
             <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 16, marginBottom: 18 }}>
-                <StatCard label="Lotes totais" value={batchMetrics.total} icon={Layers} tone={C.text} hint={`${batchMetrics.totalItems} itens - ${batchMetrics.batchSize}/lote`} />
-                <StatCard label="Em execução" value={batchMetrics.running} icon={Loader2} tone={C.accent} hint={`${batchMetrics.runningItems} itens processando`} />
-                <StatCard label="Em espera" value={batchMetrics.waiting} icon={Clock3} tone={C.warning} hint={`${batchMetrics.waitingItems} itens aguardando`} />
-                <StatCard label="Com erro" value={batchMetrics.errors} icon={AlertTriangle} tone={batchMetrics.errors > 0 ? C.error : C.muted} hint={`${batchMetrics.errorItems} itens em falha`} />
+                <StatCard label="Tarefas ativas" value={batchMetrics.waitingItems + batchMetrics.runningItems} icon={Layers} tone={C.text} hint="Aguardando ou em processamento" />
+                <StatCard label="Em execução" value={batchMetrics.runningItems} icon={Loader2} tone={C.accent} hint="Tarefas com processamento iniciado" />
+                <StatCard label="Em espera" value={batchMetrics.waitingItems} icon={Clock3} tone={C.warning} hint="Tarefas aguardando o worker" />
+                <StatCard label="Falhas no histórico" value={batchMetrics.errorItems} icon={AlertTriangle} tone={batchMetrics.errors > 0 ? C.error : C.muted} hint="Todos os períodos, sem arquivados" />
             </section>
 
             <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 32 }}>
                 <StatCard label="Na fila" value={stats.queued} icon={Layers} tone={C.warning} />
                 <StatCard label="Processando" value={stats.processing} icon={Loader2} tone={C.accent} />
                 <StatCard label="Autoconfig" value={stats.autoconfig} icon={DatabaseZap} tone={C.text} />
-                <StatCard label="Erros 24h" value={stats.errors24h} icon={ShieldAlert} tone={stats.errors24h > 0 ? C.error : C.muted} />
-                <StatCard label="Sucessos 24h" value={stats.success24h} icon={CheckCircle2} tone={C.success} />
+                <StatCard label="Eventos de erro · 24h" value={stats.errors24h} icon={ShieldAlert} tone={stats.errors24h > 0 ? C.error : C.muted} />
+                <StatCard label="Capturas salvas · 24h" value={stats.success24h} icon={CheckCircle2} tone={C.success} hint="Resultado técnico; revisão é independente" />
                 <StatCard label="Mais antigo" value={`${stats.oldest}m`} icon={TimerReset} tone={stats.oldest > 45 ? C.error : C.muted} />
             </section>
 
-            <section style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.35fr) minmax(320px, 0.65fr)', gap: 20, alignItems: 'start' }}>
+            <section className="worker-columns" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.35fr) minmax(280px, 0.65fr)', gap: 20, alignItems: 'start' }}>
                 <div>
-                    <SectionTitle title="Fila Viva" count={queue.length} />
+                    <SectionTitle title="Tarefas e histórico" count={queue.length} />
                     <div style={{ display: 'grid', gap: 10 }}>
                         {queue.length === 0 && (
                             <div style={{ border: `1px dashed ${C.borderStrong}`, borderRadius: 12, padding: 32, color: C.muted, textAlign: 'center', background: C.card }}>
@@ -293,18 +297,19 @@ export function WorkerLogsPanel({
                         )}
                         {queue.map(item => {
                             const age = minutesSince(item.processingStartedAt || item.updatedAt) || 0
+                            const expired = hasExpiredLease(item)
                             return (
                                 <Link
-                                    key={item.id}
-                                    href={`/monitoring/live/${item.id}`}
-                                    className="hover-lift"
+                                    key={item.jobId || `campaign-${item.id}`}
+                                    href={workerJobHref(item)}
+                                    className="hover-lift worker-queue-card"
                                     style={{
                                         display: 'grid',
                                         gridTemplateColumns: 'minmax(0, 1fr) auto',
                                         gap: 16,
                                         textDecoration: 'none',
                                         background: C.card,
-                                        border: `1px solid ${age > 45 ? 'rgba(239,68,68,0.35)' : C.border}`,
+                                        border: `1px solid ${expired ? 'rgba(239,68,68,0.35)' : C.border}`,
                                         borderRadius: 12,
                                         padding: 16,
                                         boxShadow: 'rgba(0,0,0,0.30) 0px 8px 24px 0px',
@@ -328,10 +333,11 @@ export function WorkerLogsPanel({
                                             </p>
                                         )}
                                     </div>
-                                    <div style={{ display: 'grid', gap: 7, justifyItems: 'end', color: C.muted, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
-                                        <span>{age}m</span>
+                                    <div className="worker-queue-meta" style={{ display: 'grid', gap: 7, justifyItems: 'end', color: C.muted, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                                        <span>{age}m {item.status === 'PROCESSING' ? 'em execução' : 'desde atualização'}</span>
+                                        {item.status === 'PROCESSING' && <span>{expired ? 'Reserva vencida' : `Sinal há ${minutesSince(item.processingHeartbeatAt) ?? '?'}m`}</span>}
                                         <span>{item.processingAttempts} tent.</span>
-                                        <span>{item.processingRunId || '-'}</span>
+                                        <span style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{item.processingRunId || '-'}</span>
                                         <ExternalLink size={14} />
                                     </div>
                                 </Link>
@@ -383,9 +389,9 @@ export function WorkerLogsPanel({
                 </aside>
             </section>
 
-            <section style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 0.8fr) minmax(0, 1.2fr)', gap: 20, marginTop: 32 }}>
+            <section className="worker-event-columns" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 0.8fr) minmax(0, 1.2fr)', gap: 20, marginTop: 32 }}>
                 <div>
-                    <SectionTitle title="Erros Recentes" count={errorLogs.length} />
+                    <SectionTitle title="Erros nas últimas 24h" count={errorLogs.length} />
                     <div style={{ display: 'grid', gap: 10 }}>
                         {errorLogs.length === 0 && <SmallEmpty label="Nenhum erro recente" />}
                         {errorLogs.map(log => (
@@ -406,13 +412,13 @@ export function WorkerLogsPanel({
                 </div>
 
                 <div>
-                    <SectionTitle title="Linha do Tempo" count={recentLogs.length} />
+                    <SectionTitle title="Eventos recentes" count={Math.min(recentLogs.length, 60)} />
                     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
                         {recentLogs.slice(0, 60).map((log, index) => {
                             const tone = levelTone(log.level)
                             const Icon = tone.icon
                             return (
-                                <div key={log.id} style={{
+                                <div key={log.id} className="worker-event-row" style={{
                                     display: 'grid',
                                     gridTemplateColumns: '28px minmax(0, 1fr) auto',
                                     gap: 12,
@@ -438,6 +444,24 @@ export function WorkerLogsPanel({
                     </div>
                 </div>
             </section>
+            <style jsx global>{`
+                .workers-panel .worker-queue-meta { min-width: 0; max-width: 260px; }
+                @media (max-width: 900px) {
+                    .workers-panel .worker-columns,
+                    .workers-panel .worker-event-columns { grid-template-columns: minmax(0, 1fr) !important; }
+                }
+                @media (max-width: 600px) {
+                    .workers-panel .worker-header { padding-top: 40px; }
+                    .workers-panel .worker-queue-card { grid-template-columns: minmax(0, 1fr) !important; }
+                    .workers-panel .worker-queue-meta {
+                        display: flex !important; flex-wrap: wrap; justify-content: flex-start;
+                        white-space: normal !important; max-width: 100%;
+                    }
+                    .workers-panel .worker-queue-meta span { overflow-wrap: anywhere; }
+                    .workers-panel .worker-event-row { grid-template-columns: 28px minmax(0, 1fr) !important; }
+                    .workers-panel .worker-event-row > span:last-child { grid-column: 2; }
+                }
+            `}</style>
         </main>
     )
 }
