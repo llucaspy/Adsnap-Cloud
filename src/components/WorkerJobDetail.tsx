@@ -41,7 +41,7 @@ export function WorkerJobDetail({ item }: { item: WorkerJobDiagnostic }) {
                 ['Tentativas', `${item.attempts}${item.maxAttempts ? ` de ${item.maxAttempts}` : ''}`],
                 ['Agendada para', clock(item.scheduledFor)], ['Início', clock(item.startedAt)],
                 ['Fim', clock(item.finishedAt)], ['Reserva até', clock(item.lockedUntil)],
-                ['Execução', item.runId || 'Não iniciada'],
+                ['Execução', item.runId || (item.attempts > 0 ? 'Sem reserva ativa' : 'Não iniciada')],
             ].map(([label, value]) => <div key={label} style={card}><p style={{ color: '#a3a3a3', margin: '0 0 10px', fontSize: 12 }}>{label}</p><strong style={{ overflowWrap: 'anywhere', fontSize: 14 }}>{value}</strong></div>)}
         </section>
         {item.lastError && <section style={{ ...card, borderColor: '#b45353', marginBottom: 24 }}>
