@@ -22,3 +22,11 @@ Validação local anterior ao envio:
 Estado deste registro: pronto para CI remoto. **Nenhum deploy desta etapa confirmado ainda.** O SHA, CI remoto e verificações do serviço online serão acrescentados após a publicação.
 
 Não houve migração nem leitura de segredo do banco de produção. O índice opcional continua sem aplicação. Hashes identificam buffers, mas o raw físico continua pendente; não declarar a etapa 4 concluída.
+
+## Correção urgente de compatibilidade da sessão
+
+O deploy `e7d44a55f71fc73f704ede022e3fbb6f8f716f41` ficou pronto e `/api/nexus/logs` passou a retornar 401/no-store sem sessão. Porém, o login legítimo retornou 500 com `AUTH_SECRET is required`. A verificação prévia do coordenador não comprovava a existência de uma chave configurada; a inferência registrada no gate estava incorreta.
+
+Correção: restaurar somente a resolução da chave de sessão que já era usada no baseline; preservar proteção/redação dos logs, fila, captura, diagnóstico e validação do payload da sessão. A exigência da chave e seus dois testes foram retirados desta entrega. Isso restaura compatibilidade, mas **não corrige a chave pública legada**: provisionar uma chave privada em AUTH_SECRET na Vercel e retirar o fallback continua pendente. Não é correto anunciar autenticação integralmente endurecida antes dessa configuração. Nenhuma chave/token foi revogado ou trocado.
+
+O coordenador não tem sessão autenticada no painel Vercel. A correção segue pelo repositório já autorizado e terá login real retestado após deploy.
