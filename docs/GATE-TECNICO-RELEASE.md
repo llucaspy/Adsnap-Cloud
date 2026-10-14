@@ -2,6 +2,8 @@
 
 Data: 14/10/2026. Base: `2f9fd474345e9a50a76c517e0a24b4984d81d12c`; revisão sobre a árvore de trabalho `Adsnap-Cloud-hardening` antes do commit/publicação. Responsável: agente independente dos autores das implementações.
 
+**Atualização após deploy pelo coordenador:** a inferência prévia sobre AUTH_SECRET estava incorreta. O primeiro deploy recusou o login legítimo por ausência/configuração legada da chave. Uma correção urgente restaura somente a compatibilidade da chave do baseline. A remoção do fallback público fica pendente de provisionamento de AUTH_SECRET na Vercel; não anunciar esse endurecimento como entregue. A proteção das rotas continua dependendo da configuração de sessão existente. O incidente e o reteste estão em `REGISTRO-DE-PUBLICACOES.md`.
+
 **Parecer independente original: REPROVADO provisoriamente por falha no controle positivo de imagem CDN com CSP.** O parecer e os achados abaixo foram preservados como registro da revisão.
 
 **Atualização do coordenador em 14/10/2026:** a comparação dos buffers foi movida para uma página neutra descartável; a CSP do portal permanece aplicada. O teste independente que bloqueou a entrega passou na suíte completa de **83/83 testes**. Também passaram **10/10 integrações em PostgreSQL real**, typecheck específico do worker e build de produção. A conferência local das telas usa fixtures sintéticas em desktop e celular. Uma última repetição visual corrigiu compressão do texto da tarefa em telas pequenas.

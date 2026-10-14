@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { jwtVerify } from 'jose'
-import { sessionSigningKey } from './lib/sessionSecret'
 
 function getJwtSecret() {
-    return sessionSigningKey(process.env.AUTH_SECRET)
+    return new TextEncoder().encode(process.env.AUTH_SECRET || 'adsnap-v2-secret-key-change-in-production-2026')
 }
 
 // Rotas públicas que NÃO exigem autenticação
