@@ -23,6 +23,14 @@ Estado deste registro: pronto para CI remoto. **Nenhum deploy desta etapa confir
 
 Não houve migração nem leitura de segredo do banco de produção. O índice opcional continua sem aplicação. Hashes identificam buffers, mas o raw físico continua pendente; não declarar a etapa 4 concluída.
 
+## Integração da primeira entrega
+
+PR #1: https://github.com/llucaspy/Adsnap-Cloud/pull/1. Commit da implementação: `42f714e44286cab6cf492437c7f8c2d3d98af339`. Integração em main: `e7d44a55f71fc73f704ede022e3fbb6f8f716f41`.
+
+Ambas as execuções remotas de Capture regression (push e PR) passaram: regressão, PostgreSQL 18 isolado, tipos do worker, build e navegação nas telas. Preview Vercel passou. Antes do merge, main ainda estava no baseline e nenhum worker estava em execução/espera. Deploy de produção ainda em conferência neste registro.
+
+Uma checagem adicional do coordenador encontrou classificação ambígua quando um ciclo apenas reenfileirava tentativas. Correção complementar: ciclo com retry pendente fica DEFERRED e o painel exibe a contagem aguardando nova tentativa; não anuncia SUCCESS parcial. Falhas terminais/operacionais continuam FAILED. O teste novo passou junto aos 14 casos anteriores do worker (15/15). O workflow de regressão passa a executar no PR e em main, evitando a duplicação por push no branch + PR.
+
 ## Correção urgente de compatibilidade da sessão
 
 O deploy `e7d44a55f71fc73f704ede022e3fbb6f8f716f41` ficou pronto e `/api/nexus/logs` passou a retornar 401/no-store sem sessão. Porém, o login legítimo retornou 500 com `AUTH_SECRET is required`. A verificação prévia do coordenador não comprovava a existência de uma chave configurada; a inferência registrada no gate estava incorreta.

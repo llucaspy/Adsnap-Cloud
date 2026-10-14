@@ -147,6 +147,16 @@ test('timeout budget remains below the lease', () => {
     assert.equal(unit.deriveCaptureTimeoutMs(10, 20 * 60_000), 30_000)
 })
 
+test('a cycle with retries waiting is deferred even when other captures succeeded', () => {
+    const { unit } = worker(['captureCycleStatus'], {})
+    const state = { ...summary(), claimed: 2, success: 1, requeued: 1, deferred: 0, stoppedByDeadline: false }
+    assert.equal(unit.captureCycleStatus(state), 'DEFERRED')
+    assert.equal(unit.captureCycleStatus({ ...state, success: 0 }), 'DEFERRED')
+    assert.equal(unit.captureCycleStatus({ ...state, failed: 1 }), 'FAILED')
+    assert.equal(unit.captureCycleStatus({ ...state, requeued: 0 }), 'SUCCESS')
+    assert.equal(unit.captureCycleStatus({ ...state, claimed: 0, success: 0, requeued: 0 }), 'IDLE')
+})
+
 test('parallel runner waits for sibling completion before propagating a failure', async () => {
     let completed = false
     const { unit } = worker(['runWithConcurrency'], {})
