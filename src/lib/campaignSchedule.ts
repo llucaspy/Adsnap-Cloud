@@ -59,18 +59,12 @@ export function getCampaignDateKey(date: Date) {
     return isLegacyUtcDate ? date.toISOString().slice(0, 10) : getBrasiliaClock(date).dateKey
 }
 
-function isTimestampInBrasiliaDay(date: Date | null, now: Date) {
-    if (!date) return false
-    const range = getBrasiliaDayRangeFor(now)
-    return date >= range.start && date < range.end
-}
-
 export function isCampaignFinalDayToday(campaign: ScheduledCampaign, now = new Date()) {
     if (!campaign.flightEnd) return false
     const todayKey = getBrasiliaClock(now).dateKey
     const endKey = getCampaignDateKey(campaign.flightEnd)
 
-    return endKey === todayKey || isTimestampInBrasiliaDay(campaign.flightEnd, now)
+    return endKey === todayKey
 }
 
 export function isCampaignStartDayToday(campaign: ScheduledCampaign, now = new Date()) {
@@ -78,7 +72,7 @@ export function isCampaignStartDayToday(campaign: ScheduledCampaign, now = new D
     const todayKey = getBrasiliaClock(now).dateKey
     const startKey = getCampaignDateKey(campaign.flightStart)
 
-    return startKey === todayKey || isTimestampInBrasiliaDay(campaign.flightStart, now)
+    return startKey === todayKey
 }
 
 function readScheduledMinutes(raw: string | null) {

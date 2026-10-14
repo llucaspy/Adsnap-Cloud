@@ -476,7 +476,7 @@ async function uploadToSupabase(imageBuffer: Buffer, input: UploadCaptureInput):
         .from('screenshots')
         .upload(storagePath, imageBuffer, {
             contentType: 'image/png',
-            upsert: true,
+            upsert: false,
         })
 
     if (uploadError) {

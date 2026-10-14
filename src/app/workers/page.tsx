@@ -3,26 +3,15 @@ import { WorkerLogsPanel } from '@/components/WorkerLogsPanel'
 import { isWorkerJobStorageMissing, WORKER_JOB_TYPE_CAPTURE } from '@/lib/workerJobs'
 import { getFormatLabelMap, resolveFormatLabel } from '@/lib/formatLabels'
 import { GAM_JOB_LEVELS } from '@/lib/gamJobStatus'
+import { Prisma } from '@prisma/client'
+import { sanitizeLogMessage, sanitizeLogRecord } from '@/lib/logRedaction'
+import { groupWorkerRunLogs, readWorkerBatchSize } from '@/lib/workerPresentation'
+import { requireAuth } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
-function parseRunDetails(details: string | null) {
-    if (!details?.trim().startsWith('{')) return null
-    try {
-        return JSON.parse(details) as Record<string, unknown>
-    } catch {
-        return null
-    }
-}
-
 function serializeDate(value: Date | null | undefined) {
     return value ? value.toISOString() : null
-}
-
-function readBatchSize() {
-    const parsed = Number(process.env.NEXUS_CAPTURE_BATCH_SIZE)
-    if (!Number.isFinite(parsed) || parsed <= 0) return 5
-    return Math.min(Math.floor(parsed), 20)
 }
 
 function countStatus(items: { status: string; _count: { _all: number } }[], status: string) {
@@ -34,7 +23,17 @@ function batchesFor(items: number, batchSize: number) {
 }
 
 export default async function WorkersPage() {
+    const session = await requireAuth()
+    const formatLabels = await getFormatLabelMap()
+    return prisma.$transaction(async (prisma) => {
     const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    const legacyWhere: Prisma.CampaignWhereInput = {
+        isArchived: false,
+        OR: [
+            { status: { in: ['QUEUED', 'PROCESSING', 'AUTOCONFIG'] }, workerJobs: { none: { type: WORKER_JOB_TYPE_CAPTURE, status: { in: ['QUEUED', 'PROCESSING'] } } } },
+            { status: { in: ['FAILED', 'QUARANTINE'] }, workerJobs: { none: { type: WORKER_JOB_TYPE_CAPTURE } } },
+        ],
+    }
 
     const [
         formatLabelMap,
@@ -45,13 +44,11 @@ export default async function WorkersPage() {
         captureStatusCounts,
         gamJobs,
         processingRunGroups,
+        recentErrors,
     ] = await Promise.all([
-        getFormatLabelMap(),
+        Promise.resolve(formatLabels),
         prisma.campaign.findMany({
-            where: {
-                isArchived: false,
-                status: { in: ['QUEUED', 'PROCESSING', 'AUTOCONFIG', 'FAILED', 'QUARANTINE'] },
-            },
+            where: legacyWhere,
             orderBy: [{ status: 'asc' }, { updatedAt: 'asc' }],
             take: 80,
             select: {
@@ -80,7 +77,7 @@ export default async function WorkersPage() {
         }),
         prisma.campaign.groupBy({
             by: ['status'],
-            where: { isArchived: false },
+            where: legacyWhere,
             _count: { _all: true },
         }),
         prisma.nexusLog.findMany({
@@ -120,10 +117,17 @@ export default async function WorkersPage() {
             },
             _count: { _all: true },
         }),
+        prisma.nexusLog.findMany({
+            where: { level: { in: ['ERROR', 'API_ERROR', 'FAILED'] }, createdAt: { gte: dayAgo } },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            take: 12,
+            select: { id: true, level: true, message: true, details: true, campaignId: true, createdAt: true },
+        }),
     ])
 
-    const batchSize = readBatchSize()
-    let workerJobQueue: typeof queue = []
+    const batchSize = readWorkerBatchSize(process.env.NEXUS_CAPTURE_BATCH_SIZE)
+    type QueueRow = (typeof queue)[number] & { jobId?: string | null }
+    let workerJobQueue: QueueRow[] = []
     let workerJobStatusCounts: { status: string; _count: { _all: number } }[] = []
     let workerJobRunGroups: { runId: string | null; _count: { _all: number } }[] = []
 
@@ -135,7 +139,7 @@ export default async function WorkersPage() {
                     status: { in: ['QUEUED', 'PROCESSING', 'FAILED'] },
                     campaign: { is: { isArchived: false } },
                 },
-                orderBy: [{ status: 'asc' }, { priority: 'desc' }, { scheduledFor: 'asc' }],
+                orderBy: [{ status: 'desc' }, { priority: 'desc' }, { scheduledFor: 'asc' }],
                 take: 80,
                 include: {
                     campaign: {
@@ -170,6 +174,7 @@ export default async function WorkersPage() {
                 where: {
                     type: WORKER_JOB_TYPE_CAPTURE,
                     status: { in: ['QUEUED', 'PROCESSING', 'FAILED'] },
+                    campaign: { is: { isArchived: false } },
                 },
                 _count: { _all: true },
             }),
@@ -179,6 +184,7 @@ export default async function WorkersPage() {
                     type: WORKER_JOB_TYPE_CAPTURE,
                     status: 'PROCESSING',
                     runId: { not: null },
+                    campaign: { is: { isArchived: false } },
                 },
                 _count: { _all: true },
             }),
@@ -188,6 +194,7 @@ export default async function WorkersPage() {
             .filter(job => job.campaign)
             .map(job => ({
                 ...job.campaign!,
+                jobId: job.id,
                 status: job.status,
                 updatedAt: job.updatedAt,
                 processingStartedAt: job.startedAt,
@@ -204,10 +211,12 @@ export default async function WorkersPage() {
     }
 
     const hasWorkerJobMetrics = workerJobStatusCounts.length > 0 || workerJobQueue.length > 0
-    const statusSource = hasWorkerJobMetrics ? workerJobStatusCounts : campaignStatusCounts
-    const waitingItems = countStatus(statusSource, 'QUEUED') + (hasWorkerJobMetrics ? 0 : countStatus(campaignStatusCounts, 'AUTOCONFIG'))
+    const mergedCounts = new Map<string, number>()
+    for (const item of [...campaignStatusCounts, ...workerJobStatusCounts]) mergedCounts.set(item.status, (mergedCounts.get(item.status) || 0) + item._count._all)
+    const statusSource = [...mergedCounts].map(([status, count]) => ({ status, _count: { _all: count } }))
+    const waitingItems = countStatus(statusSource, 'QUEUED') + countStatus(statusSource, 'AUTOCONFIG')
     const runningItems = countStatus(statusSource, 'PROCESSING')
-    const errorItems = countStatus(statusSource, 'FAILED') + (hasWorkerJobMetrics ? 0 : countStatus(campaignStatusCounts, 'QUARANTINE'))
+    const errorItems = countStatus(statusSource, 'FAILED') + countStatus(statusSource, 'QUARANTINE')
     const waitingBatches = batchesFor(waitingItems, batchSize)
     const runningGroups = hasWorkerJobMetrics ? workerJobRunGroups : processingRunGroups
     const runningBatches = runningGroups.length > 0 ? runningGroups.length : batchesFor(runningItems, batchSize)
@@ -224,7 +233,7 @@ export default async function WorkersPage() {
         errorItems,
     }
 
-    const campaignIds = [...new Set(recentLogs.map(log => log.campaignId).filter(Boolean))] as string[]
+    const campaignIds = [...new Set([...recentLogs, ...recentErrors].map(log => log.campaignId).filter(Boolean))] as string[]
     const campaignsById = campaignIds.length > 0
         ? await prisma.campaign.findMany({
             where: { id: { in: campaignIds } },
@@ -233,17 +242,24 @@ export default async function WorkersPage() {
         : []
     const campaignMap = new Map(campaignsById.map(campaign => [campaign.id, campaign]))
 
-    const workerRuns = recentLogs
-        .map(log => ({ log, details: parseRunDetails(log.details) }))
-        .filter(item => item.details?.runId || item.log.message.includes('Nexus Worker: Ciclo'))
-        .slice(0, 10)
+    const safeLogs = recentLogs.map(sanitizeLogRecord)
+    const workerRuns = groupWorkerRunLogs(safeLogs)
+    const displayLogs = (logs: typeof recentLogs) => logs.map(sanitizeLogRecord).map(log => ({
+        ...log,
+        details: session.role === 'admin' ? log.details : null,
+        createdAt: log.createdAt.toISOString(),
+        campaign: log.campaignId
+            ? (() => { const campaign = campaignMap.get(log.campaignId); return campaign ? { ...campaign, formatLabel: resolveFormatLabel(formatLabelMap, campaign.format) } : null })()
+            : null,
+    }))
 
     return (
         <WorkerLogsPanel
             generatedAt={new Date().toISOString()}
             batchMetrics={batchMetrics}
-            queue={(hasWorkerJobMetrics ? workerJobQueue : queue).map(item => ({
+            queue={([...workerJobQueue, ...queue] as QueueRow[]).map(item => ({
                 ...item,
+                lastWorkerError: item.lastWorkerError ? sanitizeLogMessage(item.lastWorkerError) : null,
                 formatLabel: resolveFormatLabel(formatLabelMap, item.format),
                 updatedAt: serializeDate(item.updatedAt)!,
                 lastCaptureAt: serializeDate(item.lastCaptureAt),
@@ -258,19 +274,8 @@ export default async function WorkersPage() {
                 status: item.status,
                 count: item._count._all,
             }))}
-            recentLogs={recentLogs.map(log => ({
-                ...log,
-                details: log.details,
-                createdAt: log.createdAt.toISOString(),
-                campaign: log.campaignId
-                    ? (() => {
-                        const campaign = campaignMap.get(log.campaignId)
-                        return campaign
-                            ? { ...campaign, formatLabel: resolveFormatLabel(formatLabelMap, campaign.format) }
-                            : null
-                    })()
-                    : null,
-            }))}
+            recentLogs={displayLogs(recentLogs)}
+            recentErrors={displayLogs(recentErrors)}
             logLevelCounts={logLevelCounts.map(item => ({
                 level: item.level,
                 count: item._count._all,
@@ -284,12 +289,14 @@ export default async function WorkersPage() {
                 level: item.log.level,
                 message: item.log.message,
                 createdAt: item.log.createdAt.toISOString(),
-                details: item.details,
+                details: session.role === 'admin' ? item.details : null,
             }))}
             gamJobs={gamJobs.map(job => ({
-                ...job,
+                ...sanitizeLogRecord(job),
+                details: session.role === 'admin' ? sanitizeLogRecord(job).details : null,
                 createdAt: job.createdAt.toISOString(),
             }))}
         />
     )
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: 15_000 })
 }

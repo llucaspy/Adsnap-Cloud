@@ -1,16 +1,14 @@
 import bcrypt from 'bcryptjs'
 import { SignJWT, jwtVerify } from 'jose'
 import { cookies } from 'next/headers'
+import { sessionSigningKey } from './sessionSecret'
 
 const SALT_ROUNDS = 12
 const SESSION_COOKIE = 'adsnap_session'
 const JWT_EXPIRY = '24h'
 
-// Use AUTH_SECRET env var or fallback to a generated key
-// In production, always set AUTH_SECRET in your .env
 function getJwtSecret() {
-    const secret = process.env.AUTH_SECRET || 'adsnap-v2-secret-key-change-in-production-2026'
-    return new TextEncoder().encode(secret)
+    return sessionSigningKey(process.env.AUTH_SECRET)
 }
 
 // --- Password Utilities ---
@@ -55,6 +53,9 @@ export async function getSession(): Promise<SessionPayload | null> {
         if (!token) return null
 
         const { payload } = await jwtVerify(token, getJwtSecret())
+        if (typeof payload.userId !== 'string' || !payload.userId.trim()
+            || typeof payload.email !== 'string' || !payload.email.trim()
+            || !['admin', 'user'].includes(String(payload.role))) return null
         return {
             userId: payload.userId as string,
             role: payload.role as string,

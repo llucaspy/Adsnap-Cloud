@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { jwtVerify } from 'jose'
+import { sessionSigningKey } from './lib/sessionSecret'
 
 function getJwtSecret() {
-    const secret = process.env.AUTH_SECRET || 'adsnap-v2-secret-key-change-in-production-2026'
-    return new TextEncoder().encode(secret)
+    return sessionSigningKey(process.env.AUTH_SECRET)
 }
 
 // Rotas públicas que NÃO exigem autenticação
@@ -40,6 +40,9 @@ export async function middleware(request: NextRequest) {
 
     try {
         const { payload } = await jwtVerify(token, getJwtSecret())
+        if (typeof payload.userId !== 'string' || !payload.userId.trim()
+            || typeof payload.email !== 'string' || !payload.email.trim()
+            || !['admin', 'user'].includes(String(payload.role))) throw new Error('Invalid session')
 
         // Verificação extra: rotas operacionais exigem role 'admin'
         if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {

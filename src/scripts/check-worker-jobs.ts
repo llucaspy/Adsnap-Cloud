@@ -1,3 +1,6 @@
+const diagnosticGithubToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+if (!diagnosticGithubToken) throw new Error('Set GITHUB_TOKEN for this diagnostic');
+
 const https = require('https');
 
 const options = {
@@ -5,7 +8,7 @@ const options = {
   path: '/repos/llucaspy/Adsnap-Cloud/actions/runs?per_page=10',
   method: 'GET',
   headers: {
-    'Authorization': 'Bearer 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',
+    'Authorization': 'Bearer ' + diagnosticGithubToken,
     'Accept': 'application/vnd.github+json',
     'User-Agent': 'Node.js-Agent'
   }

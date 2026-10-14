@@ -1,4 +1,5 @@
 import prisma from './prisma';
+import { redactLogText, sanitizeLogMessage, sanitizeLogDetails } from './logRedaction';
 
 type NexusLog = {
     message: string;
@@ -8,12 +9,20 @@ type NexusLog = {
     campaignId?: string;
 };
 
-class NexusLogStore {
+type PersistedLog = {
+    level: NexusLog['type'];
+    message: string;
+    details?: string;
+    campaignId?: string;
+    createdAt: Date;
+};
+
+export class NexusLogStore {
     private static instance: NexusLogStore;
     private logs: NexusLog[] = [];
     private readonly MAX_LOGS = 50;
 
-    private constructor() { }
+    constructor(private readonly persist: (data: PersistedLog) => Promise<unknown> = data => prisma.nexusLog.create({ data })) { }
 
     public static getInstance(): NexusLogStore {
         if (!NexusLogStore.instance) {
@@ -23,12 +32,14 @@ class NexusLogStore {
     }
 
     public async addLog(message: string, type: NexusLog['type'] = 'INFO', details?: string, campaignId?: string) {
+        const safeMessage = sanitizeLogMessage(message);
+        const safeDetails = sanitizeLogDetails(details) ?? undefined;
         // Log to memory (for UI)
         this.logs.push({
-            message,
+            message: safeMessage,
             timestamp: Date.now(),
             type,
-            details,
+            details: safeDetails,
             campaignId
         });
 
@@ -38,22 +49,23 @@ class NexusLogStore {
 
         // Log to database (Persistent)
         try {
-            await prisma.nexusLog.create({
-                data: {
-                    level: type,
-                    message,
-                    details,
-                    campaignId,
-                    createdAt: new Date()
-                }
+            await this.persist({
+                level: type,
+                message: safeMessage,
+                details: safeDetails,
+                campaignId,
+                createdAt: new Date()
             });
         } catch (err) {
-            console.error('[NexusLogStore] Failed to save log to DB:', err);
+            console.error('[NexusLogStore] Failed to save log to DB:', redactLogText(
+                err instanceof Error ? err.message : String(err),
+                1_000,
+            ));
         }
     }
 
     public getLogs(): NexusLog[] {
-        return this.logs;
+        return this.logs.map(log => ({ ...log }));
     }
 
     public clear() {

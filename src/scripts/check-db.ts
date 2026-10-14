@@ -1,5 +1,6 @@
 import '../lib/env'
 import { PrismaClient } from '@prisma/client'
+import { sanitizeLogMessage } from '../lib/logRedaction'
 const prisma = new PrismaClient()
 
 async function main() {
@@ -14,7 +15,7 @@ async function main() {
         const count = await prisma.campaign.count()
         console.log(`✅ [Check DB] Banco de dados acessível. ${count} campanhas encontradas.`)
     } catch (err) {
-        console.error('❌ [Check DB] Falha na conexão:', err)
+        console.error('❌ [Check DB] Falha na conexão:', sanitizeLogMessage(err instanceof Error ? err.message : String(err)))
         process.exit(1)
     } finally {
         await prisma.$disconnect()

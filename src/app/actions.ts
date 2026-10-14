@@ -11,21 +11,28 @@ import { enqueueCaptureJobs, isWorkerJobStorageMissing } from '@/lib/workerJobs'
 import { GAM_AUTH_REQUIRED_LEVEL, GAM_JOB_LEVELS, isGamActiveJobLevel } from '@/lib/gamJobStatus'
 import { notifyGamOrderStarted } from '@/lib/gamOrderTelegram'
 import { deleteCaptureFile, loadCaptureFile } from '@/lib/captureStorage'
+import { getSession } from '@/lib/auth'
+import { sanitizeLogRecord } from '@/lib/logRedaction'
 
 export async function getNexusActivity() {
+    const session = await getSession()
+    if (!session?.userId || !session.email || !['admin', 'user'].includes(session.role)) return []
     try {
         const logs = await prisma.nexusLog.findMany({
             take: 50,
             orderBy: { createdAt: 'desc' }
         });
 
-        return logs.map(log => ({
-            id: log.id,
-            message: log.message,
-            type: log.level,
-            timestamp: log.createdAt.getTime(),
-            details: (log as any).details || null
-        })).reverse(); // Reverse to show chronological order in the feed
+        return logs.map(log => {
+            const safe = sanitizeLogRecord(log)
+            return {
+                id: safe.id,
+                message: safe.message,
+                type: safe.level,
+                timestamp: safe.createdAt.getTime(),
+                details: session.role === 'admin' ? safe.details || null : null,
+            }
+        }).reverse();
     } catch (error) {
         console.error('[Actions] Failed to fetch nexus activity:', error);
         return [];
@@ -657,6 +664,8 @@ export async function getScheduleUsage(): Promise<Record<string, number>> {
 }
 
 export async function getQueueStatus() {
+    const session = await getSession()
+    if (!session?.userId || !session.email || !['admin', 'user'].includes(session.role)) return []
     const campaigns = await prisma.campaign.findMany({
         where: {
             status: { in: ['QUEUED', 'PROCESSING', 'AUTOCONFIG'] },
@@ -666,14 +675,23 @@ export async function getQueueStatus() {
             id: true,
             client: true,
             status: true,
-            campaignName: true as any,
+            campaignName: true,
             updatedAt: true,
+            processingStartedAt: true,
             lastWorkerError: true,
         },
         orderBy: { updatedAt: 'asc' },
         take: 25,
-    }) as any
-    return campaigns
+    })
+    return campaigns.map((campaign: typeof campaigns[number]) => ({ ...campaign, lastWorkerError: campaign.lastWorkerError ? sanitizeLogRecord({ message: campaign.lastWorkerError }).message : null }))
+}
+
+export async function getQueueOutcomes(campaignIds: string[]) {
+    const session = await getSession()
+    if (!session?.userId || !session.email || !['admin', 'user'].includes(session.role)) return []
+    const ids = [...new Set(campaignIds.filter(id => typeof id === 'string' && id.length <= 100))].slice(0, 25)
+    if (ids.length === 0) return []
+    return prisma.campaign.findMany({ where: { id: { in: ids }, isArchived: false }, select: { id: true, status: true, lastCaptureAt: true } })
 }
 
 export async function runAllCaptures() {
@@ -742,10 +760,7 @@ export async function triggerNexusWorker(campaignIds: string[] = []) {
         return false
     }
 
-    // Diagnostic log: show first 7 chars of token to verify if it's the correct one
-    const tokenPrefix = token.substring(0, 10);
-    console.log(`[Nexus] Using GITHUB_TOKEN starting with: ${tokenPrefix}`);
-    nexusLogStore.addLog(`Nexus: Usando GITHUB_TOKEN (${tokenPrefix}...)`, 'INFO');
+    // Never log credentials or prefixes, even for trigger diagnostics.
 
     // Sanitize repo if it's a full URL
     if (repo.includes('github.com/')) {

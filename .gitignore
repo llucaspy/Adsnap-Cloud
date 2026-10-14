@@ -2,6 +2,10 @@
 
 # dependencies
 /node_modules
+**/node_modules/
+.test-infra/
+test-results/
+test-support/postgres/schema.prisma
 /.pnp
 .pnp.*
 .yarn/*

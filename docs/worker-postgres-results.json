@@ -1,0 +1,107 @@
+{
+  "generatedAt": "2026-10-14T19:41:19.373Z",
+  "database": "loopback / adsnap_worker_test",
+  "engine": "Real PostgreSQL + Prisma 5.22.0; original hardened functions executed with explicit test client; no environment files or cloud integrations.",
+  "total": 10,
+  "passed": 10,
+  "results": [
+    {
+      "name": "twenty concurrent enqueues create one active job",
+      "passed": true,
+      "durationMs": 235,
+      "evidence": {
+        "requests": 20,
+        "activeJobs": 1
+      }
+    },
+    {
+      "name": "concurrent claims are exclusive even with duplicate historical jobs",
+      "passed": true,
+      "durationMs": 89,
+      "evidence": {
+        "existingJobs": 2,
+        "simultaneousClaims": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "campaign update failure rolls job claim back in real PostgreSQL",
+      "passed": true,
+      "durationMs": 50,
+      "evidence": {
+        "status": "QUEUED",
+        "attempts": 0
+      }
+    },
+    {
+      "name": "stale finish and retry cannot mutate a newer owner",
+      "passed": true,
+      "durationMs": 106,
+      "evidence": {
+        "status": "PROCESSING",
+        "attempts": 2,
+        "lostOwnerRecorded": 1
+      }
+    },
+    {
+      "name": "stale recovery read cannot resurrect a completed job",
+      "passed": true,
+      "durationMs": 76,
+      "evidence": {
+        "jobAfterRecovery": "SUCCESS",
+        "completedBetweenReadAndWrite": true
+      }
+    },
+    {
+      "name": "future job blocks direct legacy capture",
+      "passed": true,
+      "durationMs": 86,
+      "evidence": {
+        "structuredClaims": 0,
+        "legacyClaims": 0
+      }
+    },
+    {
+      "name": "unstarted reservation release restores attempt counters and permits a later claim",
+      "passed": true,
+      "durationMs": 86,
+      "evidence": {
+        "releasedJobAttempts": 0,
+        "releasedCampaignAttempts": 0,
+        "nextClaimAttempts": 1,
+        "nextClaimOwnerChanged": true
+      }
+    },
+    {
+      "name": "capture record, campaign and job ACK share one atomic transaction",
+      "passed": true,
+      "durationMs": 183,
+      "evidence": {
+        "captures": 1,
+        "jobStatus": "SUCCESS",
+        "duplicateCommitRejected": true
+      }
+    },
+    {
+      "name": "closing recovery uses the configured schedule and never reopens manual or quarantined campaigns",
+      "passed": true,
+      "durationMs": 98,
+      "evidence": {
+        "scheduledJobs": 1,
+        "manualJobs": 0,
+        "reopenedQuarantines": 0
+      }
+    },
+    {
+      "name": "boundary cleanup cancels only automatic queued jobs and retains manual requests",
+      "passed": true,
+      "durationMs": 78,
+      "evidence": {
+        "automatic": "CANCELLED",
+        "manual": "QUEUED"
+      }
+    }
+  ]
+}

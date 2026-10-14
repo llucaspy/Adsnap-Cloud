@@ -1,17 +1,14 @@
-import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
+import { getSession } from '@/lib/auth';
+import { createNexusLogsHandler } from '@/lib/nexusLogRead';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
-    try {
-        const logs = await prisma.nexusLog.findMany({
-            orderBy: { createdAt: 'desc' },
-            take: 30
-        });
-
-        return NextResponse.json(logs);
-    } catch (error) {
-        return NextResponse.json({ error: 'Failed to fetch logs' }, { status: 500 });
-    }
-}
+export const GET = createNexusLogsHandler({
+    getSession,
+    readLogs: () => prisma.nexusLog.findMany({
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: 30,
+        select: { id: true, level: true, message: true, details: true, campaignId: true, createdAt: true },
+    }),
+});
