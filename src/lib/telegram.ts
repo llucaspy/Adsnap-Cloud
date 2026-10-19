@@ -107,6 +107,7 @@ export async function sendTelegramAlert(
             : undefined
         const res = await fetch(url, {
             method: 'POST',
+            signal: AbortSignal.timeout(10_000),
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 chat_id: chatId,
@@ -124,6 +125,7 @@ export async function sendTelegramAlert(
             // Retry with plain text if markdown fails
             const plainRes = await fetch(url, {
                 method: 'POST',
+                signal: AbortSignal.timeout(10_000),
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     chat_id: chatId,

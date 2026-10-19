@@ -78,6 +78,7 @@ export function Sidebar() {
         { icon: Library, label: 'Books', href: '/books' },
         { icon: Landmark, label: 'Gov Federal', href: '/books/governo' },
         { icon: Archive, label: 'Arquivado', href: '/archive' },
+        { icon: ShieldCheck, label: 'Quarentena', href: '/quarantine' },
     ]
 
     const menuItems = user?.role === 'admin'

@@ -275,7 +275,8 @@ export async function processCampaign(campaignId: string, options: CaptureOption
         await nexusLogStore.addLog('Nexus: Quarentena aplicada.', 'ERROR', `Ultimo erro: ${lastError}`, campaignId)
             .catch(error => console.error('[Nexus] Quarantine log failed:', error));
         alertStore.addAlert('error', 'Campanha em Quarentena', `${attemptMessage} Erro: ${lastError}`, campaignId);
-        sendTelegramAlert('Campanha em Quarentena', `${attemptMessage} Campanha enviada para quarentena.`, `Erro: ${lastError}`, campaignId).catch(() => {});
+        // Structured worker incidents deliver the contextual alert and diagnostic link durably.
+        if (!options.ownership?.jobId) await sendTelegramAlert('Campanha em Quarentena', `${attemptMessage} Campanha enviada para quarentena.`, `Erro: ${lastError}`, campaignId);
 
         return { success: false, error: lastError, quarantined: true, nonRetryable: stoppedForNonRetryable };
     } catch (e) {

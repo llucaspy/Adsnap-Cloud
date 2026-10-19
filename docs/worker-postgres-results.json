@@ -1,14 +1,34 @@
 {
-  "generatedAt": "2026-10-14T19:41:19.373Z",
+  "generatedAt": "2026-10-19T17:44:03.520Z",
   "database": "loopback / adsnap_worker_test",
   "engine": "Real PostgreSQL + Prisma 5.22.0; original hardened functions executed with explicit test client; no environment files or cloud integrations.",
-  "total": 10,
-  "passed": 10,
+  "total": 12,
+  "passed": 12,
   "results": [
+    {
+      "name": "terminal failure is reconciled into an idempotent durable Telegram incident",
+      "passed": true,
+      "durationMs": 187,
+      "evidence": {
+        "persistentIncident": true,
+        "deduplicated": true,
+        "secretsRedacted": true
+      }
+    },
+    {
+      "name": "quarantine retry cannot enqueue a campaign whose failure was already resolved",
+      "passed": true,
+      "durationMs": 191,
+      "evidence": {
+        "resolvedCampaignPreserved": true,
+        "simultaneousRetries": 4,
+        "created": 1
+      }
+    },
     {
       "name": "twenty concurrent enqueues create one active job",
       "passed": true,
-      "durationMs": 235,
+      "durationMs": 217,
       "evidence": {
         "requests": 20,
         "activeJobs": 1
@@ -17,7 +37,7 @@
     {
       "name": "concurrent claims are exclusive even with duplicate historical jobs",
       "passed": true,
-      "durationMs": 89,
+      "durationMs": 214,
       "evidence": {
         "existingJobs": 2,
         "simultaneousClaims": [
@@ -29,7 +49,7 @@
     {
       "name": "campaign update failure rolls job claim back in real PostgreSQL",
       "passed": true,
-      "durationMs": 50,
+      "durationMs": 140,
       "evidence": {
         "status": "QUEUED",
         "attempts": 0
@@ -38,7 +58,7 @@
     {
       "name": "stale finish and retry cannot mutate a newer owner",
       "passed": true,
-      "durationMs": 106,
+      "durationMs": 221,
       "evidence": {
         "status": "PROCESSING",
         "attempts": 2,
@@ -48,7 +68,7 @@
     {
       "name": "stale recovery read cannot resurrect a completed job",
       "passed": true,
-      "durationMs": 76,
+      "durationMs": 187,
       "evidence": {
         "jobAfterRecovery": "SUCCESS",
         "completedBetweenReadAndWrite": true
@@ -57,7 +77,7 @@
     {
       "name": "future job blocks direct legacy capture",
       "passed": true,
-      "durationMs": 86,
+      "durationMs": 109,
       "evidence": {
         "structuredClaims": 0,
         "legacyClaims": 0
@@ -66,7 +86,7 @@
     {
       "name": "unstarted reservation release restores attempt counters and permits a later claim",
       "passed": true,
-      "durationMs": 86,
+      "durationMs": 197,
       "evidence": {
         "releasedJobAttempts": 0,
         "releasedCampaignAttempts": 0,
@@ -77,7 +97,7 @@
     {
       "name": "capture record, campaign and job ACK share one atomic transaction",
       "passed": true,
-      "durationMs": 183,
+      "durationMs": 202,
       "evidence": {
         "captures": 1,
         "jobStatus": "SUCCESS",
@@ -87,7 +107,7 @@
     {
       "name": "closing recovery uses the configured schedule and never reopens manual or quarantined campaigns",
       "passed": true,
-      "durationMs": 98,
+      "durationMs": 1079,
       "evidence": {
         "scheduledJobs": 1,
         "manualJobs": 0,
@@ -97,7 +117,7 @@
     {
       "name": "boundary cleanup cancels only automatic queued jobs and retains manual requests",
       "passed": true,
-      "durationMs": 78,
+      "durationMs": 370,
       "evidence": {
         "automatic": "CANCELLED",
         "manual": "QUEUED"

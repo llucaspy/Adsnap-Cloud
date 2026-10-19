@@ -59,6 +59,33 @@ function summary() { return { success: 0, failed: 0, requeued: 0, deadletter: 0,
 async function main() {
     await prisma.$connect()
     try {
+        await run('terminal failure is reconciled into an idempotent durable Telegram incident', async () => {
+            const campaign = await seed('incident')
+            const job = await prisma.workerJob.create({ data: { campaignId: campaign.id, status: 'FAILED', attempts: 2,
+                maxAttempts: 2, finishedAt: new Date(), lastError: 'Timeout de 120s https://fixture.invalid/?token=incident-secret' } })
+            const redaction = load('src/lib/logRedaction.ts', ['sanitizeLogMessage'])
+            const diagnosis = load('src/lib/captureFailure.ts', ['describeCaptureFailure'], redaction)
+            const notifications = load('src/lib/quarantineNotifications.ts', ['reconcileCaptureIncidents'], { ...redaction, ...diagnosis })
+            await notifications.reconcileCaptureIncidents(); await notifications.reconcileCaptureIncidents()
+            const incident = await prisma.nexusLog.findUnique({ where: { id: `capture-incident-${job.id}` } })
+            assert.equal(incident.level, 'CAPTURE_ALERT_PENDING')
+            assert.equal(JSON.parse(incident.details).jobId, job.id)
+            assert.equal(incident.details.includes('incident-secret'), false)
+            assert.equal(await prisma.nexusLog.count({ where: { id: incident.id } }), 1)
+            return { persistentIncident: true, deduplicated: true, secretsRedacted: true }
+        })
+        await run('quarantine retry cannot enqueue a campaign whose failure was already resolved', async () => {
+            const campaign = await seed('quarantine_retry')
+            await prisma.campaign.update({ where: { id: campaign.id }, data: { status: 'SUCCESS' } })
+            const rejected = await queue.enqueueCaptureJobs([campaign.id], { allowTerminalStatuses: true, requireFailureStatus: true })
+            assert.equal(rejected.created, 0)
+            assert.equal((await prisma.campaign.findUnique({ where: { id: campaign.id } })).status, 'SUCCESS')
+            await prisma.campaign.update({ where: { id: campaign.id }, data: { status: 'QUARANTINE' } })
+            const results = await Promise.all(Array.from({ length: 4 }, () => queue.enqueueCaptureJobs([campaign.id], { allowTerminalStatuses: true, requireFailureStatus: true })))
+            assert.equal(results.reduce((sum, item) => sum + item.created, 0), 1)
+            assert.equal(await prisma.workerJob.count({ where: { campaignId: campaign.id } }), 1)
+            return { resolvedCampaignPreserved: true, simultaneousRetries: 4, created: 1 }
+        })
         await run('twenty concurrent enqueues create one active job', async () => {
             const campaign = await seed('enqueue')
             const responses = await Promise.all(Array.from({ length: 20 }, () => queue.enqueueCaptureJobs([campaign.id])))
@@ -199,6 +226,7 @@ async function main() {
         })
     } finally {
         // Only this invocation's generated fixture IDs; never truncate shared tables.
+        await prisma.nexusLog.deleteMany({ where: { campaignId: { in: campaignIds } } })
         await prisma.capture.deleteMany({ where: { campaignId: { in: campaignIds } } })
         await prisma.workerJob.deleteMany({ where: { campaignId: { in: campaignIds } } })
         await prisma.campaign.deleteMany({ where: { id: { in: campaignIds } } })

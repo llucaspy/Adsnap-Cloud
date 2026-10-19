@@ -25,6 +25,7 @@ function loadWorker(bindings: Record<string, unknown>) {
         isFederalCampaignBoundaryToday: () => false,
         getBrasiliaDayRangeFor: () => ({ start: new Date('2026-10-14T03:00:00Z'), end: new Date('2026-10-15T03:00:00Z') }),
         processPendingGamJobs: async () => {},
+        reconcileCaptureIncidents: async () => {}, dispatchCaptureIncidentAlerts: async () => {},
         ...bindings,
     })
     vm.runInContext(code + '\nmodule.exports={runWorkerCycle};', ctx)
