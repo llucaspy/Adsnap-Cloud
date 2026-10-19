@@ -10,6 +10,7 @@ const ACTIVE_JOB_STATUSES = [WORKER_JOB_STATUS_QUEUED, WORKER_JOB_STATUS_PROCESS
 export type EnqueueCaptureJobsOptions = {
     source?: string; priority?: number; scheduledFor?: Date; timeoutMs?: number
     maxAttempts?: number; payload?: Record<string, unknown>; allowTerminalStatuses?: boolean
+    requireFailureStatus?: boolean
 }
 export type EnqueueCaptureJobsResult = {
     campaignIds: string[]; created: number; skipped: number; storageReady: boolean
@@ -38,8 +39,9 @@ export async function enqueueCaptureJobs(
                 select id from "Campaign"
                 where id = any($1::text[]) and "isArchived" = false
                   and not (status = any($2::text[]))
+                  and ($3::boolean = false or status in ('FAILED', 'QUARANTINE'))
                 order by id for update
-            `, ids, blocked)
+            `, ids, blocked, options.requireFailureStatus === true)
             const eligibleIds = campaigns.map(campaign => campaign.id)
             if (eligibleIds.length === 0) return { campaignIds: [], created: 0, skipped: ids.length, storageReady: true }
             const active = await tx.workerJob.findMany({
@@ -69,7 +71,7 @@ export async function enqueueCaptureJobs(
     } catch (error) {
         if (!isWorkerJobStorageMissing(error)) throw error
         const queued = await prisma.campaign.updateMany({
-            where: { id: { in: ids }, isArchived: false, status: { notIn: blocked } },
+            where: { id: { in: ids }, isArchived: false, status: { notIn: blocked, ...(options.requireFailureStatus ? { in: ['FAILED', 'QUARANTINE'] } : {}) } },
             data: { status: WORKER_JOB_STATUS_QUEUED, lastWorkerError: null },
         })
         return { campaignIds: queued.count ? ids : [], created: 0, skipped: ids.length, storageReady: false }

@@ -20,6 +20,8 @@ import {
     WORKER_JOB_TYPE_CAPTURE,
 } from '../lib/workerJobs'
 import { normalizeCaptureDelaySeconds } from '../lib/captureTiming'
+import { CAPTURE_ATTEMPT_EVENT, type CaptureAttemptEvent } from '../lib/captureFailure'
+import { reconcileCaptureIncidents, dispatchCaptureIncidentAlerts } from '../lib/quarantineNotifications'
 
 const DEFAULT_CAPTURE_BATCH_SIZE = 5
 const MAX_CAPTURE_BATCH_SIZE = 20
@@ -554,27 +556,36 @@ async function processWorkerCaptureJob(job: WorkerJobCampaign, configuredCapture
     const timeoutMs = Math.max(1, Math.min(budgetMs, deriveCaptureTimeoutMs(job.captureDelaySeconds, job.timeoutMs || configuredCaptureTimeoutMs)))
     const ownership = { campaignId: job.id, jobId: job.jobId, runId: job.runId, attempt: job.attempts }
     let captureCompleted = false
+    const event = async (phase: CaptureAttemptEvent['phase'], error?: string) => nexusLogStore.addLog(
+        CAPTURE_ATTEMPT_EVENT, 'SYSTEM', JSON.stringify({ jobId: job.jobId, runId: job.runId,
+            attempt: job.attempts, phase, timeoutMs, ...(error ? { error } : {}) }), job.id)
+    await event('STARTED')
     try {
         const result = await processCampaignWithTimeout(job.id, timeoutMs, ownership)
         captureCompleted = result.success || Boolean(result.quarantined)
         if (result.success) {
             await finishWorkerJob(job, WORKER_JOB_STATUS_SUCCESS)
             summary.success++
+            await event('SUCCESS')
         } else if (result.quarantined) {
             await finishWorkerJob(job, WORKER_JOB_STATUS_FAILED, result.error || 'Campanha em quarentena')
             summary.failed++; summary.quarantine++
+            await event('QUARANTINE', result.error)
         }
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         if (captureCompleted) {
             // Never repeat browser/storage side effects just because the ACK could not be read.
             summary.cycleErrors++; summary.unconfirmed++
+            await event('UNCONFIRMED', message)
             await nexusLogStore.addLog('Nexus Worker: resultado persistido, confirmacao do job indisponivel', 'ERROR',
                 JSON.stringify({ jobId: job.jobId, runId: job.runId, error: message }), job.id)
             return
         }
         if (message.toLowerCase().includes('timeout')) summary.timeout++
+        const lostBefore = summary.ownershipLost
         await retryOrFailWorkerJob(job, message, summary)
+        await event(summary.ownershipLost > lostBefore ? 'UNCONFIRMED' : job.attempts < job.maxAttempts ? 'RETRY' : 'FAILED', message)
     }
 }
 
@@ -660,6 +671,10 @@ async function runWorkerCycle(options: WorkerCycleOptions = {}) {
         await cleanupStuckCampaigns()
         if (targetedCampaignIds.length === 0) await cleanupOffScheduleFederalQueue(now)
     } catch (error) { await recordCycleError('recuperacao de tarefas', error) }
+
+    // Reconcile the previous cycle as well: a worker may have died after persisting a failure.
+    try { await reconcileCaptureIncidents() }
+    catch (error) { await recordCycleError('alertas de quarentena', error) }
 
     if (targetedCampaignIds.length > 0) {
         try {
@@ -845,6 +860,8 @@ async function runWorkerCycle(options: WorkerCycleOptions = {}) {
         await recordCycleError('captura', err)
     }
 
+    try { await reconcileCaptureIncidents(); await dispatchCaptureIncidentAlerts() }
+    catch (error) { await recordCycleError('alertas de quarentena', error) }
     const durationMs = Date.now() - cycleStartedAt
     const cycleStatus = captureCycleStatus(captureSummary)
     const failed = cycleStatus === 'FAILED'

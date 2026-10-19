@@ -24,6 +24,8 @@ function load(file, names, bindings = {}, patch = '') {
         WORKER_JOB_STATUS_PROCESSING: 'PROCESSING', WORKER_JOB_STATUS_SUCCESS: 'SUCCESS', WORKER_JOB_STATUS_FAILED: 'FAILED',
         isWorkerJobStorageMissing: error => error?.code === 'P2021',
         nexusLogStore: { addLog: async (message, type, details) => logs.push({ message, type, details }) },
+        CAPTURE_ATTEMPT_EVENT: 'Nexus: tentativa de captura',
+        reconcileCaptureIncidents: async () => {}, dispatchCaptureIncidentAlerts: async () => {},
         processCampaign: async () => ({ success: true }), processComposition: async () => ({ success: true }),
         processGovernmentReportQueue: async () => {}, processPendingGamJobs: async () => {},
         ...bindings,
@@ -36,6 +38,30 @@ const worker = (names, prisma, extra, patch) => load('src/scripts/worker.ts', na
 const summary = () => ({ claimed: 1, success: 0, failed: 0, timeout: 0, quarantine: 0, requeued: 0,
     deadletter: 0, ownershipLost: 0, cycleErrors: 0, unconfirmed: 0 })
 const job = () => ({ id: 'campaign-1', jobId: 'job-1', runId: 'run-A', attempts: 1, maxAttempts: 2, captureDelaySeconds: 1 })
+
+test('each retry emits an identified start and retry outcome for the same attempt', async () => {
+    const tx = { workerJob: { updateMany: async () => ({ count: 1 }) }, campaign: { updateMany: async () => ({ count: 1 }) } }
+    const state = summary()
+    const { unit, logs } = worker(['processWorkerCaptureJob'], { $transaction: callback => callback(tx) }, {
+        assertCaptureOwnership: async () => {}, processCampaign: async () => ({ success: false, error: 'Timeout de 120s' }),
+    })
+    await unit.processWorkerCaptureJob(job(), null, state)
+    const events = logs.filter(log => log.message === 'Nexus: tentativa de captura').map(log => JSON.parse(log.details))
+    assert.deepEqual(events.map(event => event.phase), ['STARTED', 'RETRY'])
+    for (const event of events) { assert.equal(event.jobId, 'job-1'); assert.equal(event.attempt, 1); assert.equal(event.runId, 'run-A') }
+    assert.equal(state.requeued, 1); assert.equal(state.failed, 0)
+})
+
+test('non-retryable quarantine emits its terminal diagnosis without requeueing', async () => {
+    const state = summary()
+    const { unit, logs } = worker(['processWorkerCaptureJob'], { workerJob: { updateMany: async () => ({ count: 1 }) } }, {
+        processCampaign: async () => ({ success: false, quarantined: true, error: 'Invalid destination' }),
+    })
+    await unit.processWorkerCaptureJob(job(), null, state)
+    const events = logs.filter(log => log.message === 'Nexus: tentativa de captura').map(log => JSON.parse(log.details))
+    assert.deepEqual(events.map(event => event.phase), ['STARTED', 'QUARANTINE'])
+    assert.equal(state.quarantine, 1); assert.equal(state.requeued, 0)
+})
 
 test('integer parser rejects fractions and run ID is unique even within the same GitHub run', () => {
     const { unit } = worker(['readPositiveInt', 'createWorkerRunId'], {}, { process: { env: { GITHUB_RUN_ID: '123' } } })
