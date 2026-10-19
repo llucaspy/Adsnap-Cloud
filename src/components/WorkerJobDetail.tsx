@@ -37,12 +37,12 @@ const card = { border: '1px solid #343434', borderRadius: 12, padding: 18, backg
 
 export function WorkerJobDetail({ item }: { item: WorkerJobDiagnostic }) {
     return <main style={{ color: '#f5f5f5', maxWidth: 1100, margin: '0 auto', padding: '16px 0 40px' }}>
-        <div style={{ display: 'flex', gap: 24, marginBottom: 22 }}><Link href="/quarantine" style={{ color: '#d4d4d4' }}>← Quarentena e falhas</Link><Link href="/workers" style={{ color: '#d4d4d4' }}>Workers</Link></div>
+        <div className="pt-14 lg:pt-0" style={{ display: 'flex', gap: 24, marginBottom: 22 }}><Link href="/quarantine" style={{ color: '#d4d4d4' }}>← Quarentena e falhas</Link><Link href="/workers" style={{ color: '#d4d4d4' }}>Workers</Link></div>
         <p style={{ color: '#a3a3a3', fontSize: 12 }}>DIAGNÓSTICO DA CAPTURA · HORÁRIO DE BRASÍLIA</p>
         <h1 style={{ fontSize: 'clamp(26px, 4vw, 40px)', margin: '10px 0' }}>{item.client}</h1>
         <p style={{ color: '#d4d4d4' }}>PI {item.pi} · {item.campaignName} · {item.formatLabel} · {item.device}</p>
         <p style={{ color: '#a3a3a3', overflowWrap: 'anywhere', fontSize: 12 }}>{item.isLegacy ? 'Campanha legada' : 'Tarefa'}: {item.id}</p>
-        <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, margin: '24px 0' }}>
+        <section className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: 12, margin: '24px 0' }}>
             {[
                 ['Estado da tarefa', item.status], ['Estado da campanha', item.campaignStatus],
                 ['Tentativas', `${item.attempts}${item.maxAttempts ? ` de ${item.maxAttempts}` : ''}`],
@@ -63,6 +63,7 @@ export function WorkerJobDetail({ item }: { item: WorkerJobDiagnostic }) {
             <p style={{ color: '#a3a3a3', lineHeight: 1.6 }}>A página, o formato e o dispositivo mostram a configuração atual da campanha. Parâmetros privados do endereço são omitidos.</p>
             <p style={{ lineHeight: 1.6 }}>Telegram: {item.telegramStatus}</p>
             {item.canRetry && <RetryQuarantinedCapture jobId={item.id} />}
+            {!item.canRetry && ['QUEUED', 'PROCESSING'].includes(item.campaignStatus) && <p style={{ color: '#fde68a', lineHeight: 1.6 }}>A campanha está na fila ou em processamento. Esta ocorrência anterior permanece preservada.</p>}
         </section>}
         {item.attemptEvents && <section style={{ marginBottom: 28 }}>
             <h2 style={{ fontSize: 22 }}>Histórico das tentativas</h2>

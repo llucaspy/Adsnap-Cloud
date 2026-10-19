@@ -26,7 +26,7 @@ export default async function QuarantinePage({ searchParams }: { searchParams: P
     ])
     const href = (next: number) => `/quarantine?${new URLSearchParams({ q, scope: history ? 'history' : 'pending', page: String(next) })}`
     return <div className="mx-auto max-w-6xl space-y-7 text-neutral-100">
-        <header><p className="text-xs tracking-widest text-neutral-400">REVISÃO DE CAPTURAS</p><h1 className="mt-3 text-3xl font-semibold">Quarentena e falhas</h1>
+        <header className="pt-14 lg:pt-0"><p className="text-xs tracking-widest text-neutral-400">REVISÃO DE CAPTURAS</p><h1 className="mt-3 text-3xl font-semibold">Quarentena e falhas</h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-neutral-400">Analise cada tarefa que terminou com erro. Quarentena indica uma falha classificada como não recuperável; as demais esgotaram as tentativas ou foram interrompidas. Horários de Brasília.</p></header>
         <form className="flex flex-wrap items-end gap-3 rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
             <label className="flex-1 text-sm">Cliente, PI ou campanha<input name="q" defaultValue={q} maxLength={120} className="mt-2 block w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2" /></label>
