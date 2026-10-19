@@ -4,7 +4,6 @@ import prisma from '../lib/prisma'
 import { assertCaptureOwnership, CaptureOwnershipLostError, type CaptureOwnership } from '../lib/captureOwnership'
 import { processCampaign, processComposition } from '../lib/captureService'
 import { nexusLogStore } from '../lib/nexusLogStore'
-import { processPendingGamJobs } from '../lib/gamJobProcessor'
 import {
     getBrasiliaDayRangeFor,
     isCampaignFinalDayToday,
@@ -712,12 +711,7 @@ async function runWorkerCycle(options: WorkerCycleOptions = {}) {
         }
     }
 
-    // 5. GAM Ingestion Jobs (supervised draft)
-    try {
-        await processPendingGamJobs()
-    } catch (err) {
-        console.error('[Nexus Worker] Erro nos Jobs GAM:', err)
-    }
+    // GAM imports run exclusively in gam-worker.ts / gam-import.yml.
 
     // 8. Campaign Capture (movido para o final)
     try {

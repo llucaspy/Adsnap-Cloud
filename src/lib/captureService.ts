@@ -11,6 +11,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { assertCaptureOwnership, completeCaptureOwnership, CaptureOwnershipLostError, type CaptureOwnership } from './captureOwnership';
 import { inspectCreativeContent, matchesCaptureDimensions, type CreativeEvidence } from './captureValidation';
+import { launchCaptureBrowser } from './captureBrowser';
+import { resolveCaptureDestination } from './captureNetwork';
 
 export interface CaptureResult {
     success: boolean
@@ -559,6 +561,7 @@ async function renderLayeredCreativeAsset(
     campaignId: string,
 ) {
     throwIfCaptureAborted(signal)
+    await resolveCaptureDestination(creativeDocumentUrl)
     const page = await browser.newPage()
 
     try {
@@ -844,11 +847,12 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
     }
     try {
         options.signal?.addEventListener('abort', closeBrowserOnAbort, { once: true })
+        await resolveCaptureDestination(campaign.url)
         console.log('[Nexus] Iniciando browser...')
         await nexusLogStore.addLog(`Nexus: Lançando browser Playwright (${targetW}x${targetH})`, 'SYSTEM', undefined, campaignId);
         const isMobile = campaign.device === 'mobile' || (targetW === 320 && (targetH === 100 || targetH === 50));
 
-        browser = await chromium.launch({
+        browser = await launchCaptureBrowser({
             headless: true,
             args: [
                 '--no-sandbox',
@@ -1307,7 +1311,7 @@ async function compositeEvidenceFrameImage(
 ): Promise<Buffer> {
     throwIfCaptureAborted(signal)
     const ownsBrowser = !existingBrowser
-    const studioBrowser = existingBrowser || await chromium.launch({
+    const studioBrowser = existingBrowser || await launchCaptureBrowser({
         headless: true,
         args: [
             '--no-sandbox',
@@ -1650,7 +1654,7 @@ async function compositeStudioImage(
 ): Promise<Buffer> {
     throwIfCaptureAborted(signal)
     const ownsBrowser = !existingBrowser
-    const studioBrowser = existingBrowser || await chromium.launch({
+    const studioBrowser = existingBrowser || await launchCaptureBrowser({
         headless: true,
         args: [
             '--no-sandbox',

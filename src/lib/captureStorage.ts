@@ -5,6 +5,7 @@ import { Readable } from 'stream'
 import { google } from 'googleapis'
 import { supabase } from './supabase'
 import prisma from './prisma'
+import { fetchPublicCaptureBuffer } from './captureNetwork'
 
 type StorageProvider = 'supabase' | 'google-drive'
 
@@ -562,9 +563,7 @@ async function fetchRemoteBuffer(url: string) {
     const timeout = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS)
 
     try {
-        const response = await fetch(url, { signal: controller.signal })
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        return Buffer.from(await response.arrayBuffer())
+        return await fetchPublicCaptureBuffer(url, controller.signal)
     } finally {
         clearTimeout(timeout)
     }

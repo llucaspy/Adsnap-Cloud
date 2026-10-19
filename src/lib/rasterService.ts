@@ -1,5 +1,6 @@
 import sharp from 'sharp';
 import { loadCaptureFile } from './captureStorage';
+import { fetchPublicCaptureBuffer } from './captureNetwork';
 
 /**
  * Composites a creative image over a background template using Sharp for pixel-perfect rasterization.
@@ -78,10 +79,7 @@ async function fetchImage(url: string): Promise<Buffer> {
 
     // Default: HTTP Fetch
     try {
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-        const arrayBuffer = await res.arrayBuffer();
-        return Buffer.from(arrayBuffer);
+        return await fetchPublicCaptureBuffer(url);
     } catch (err) {
         console.error(`[RasterService] Failed to fetch image from ${url}:`, err);
         throw err;
