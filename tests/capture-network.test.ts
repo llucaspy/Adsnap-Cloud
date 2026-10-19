@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import http from 'node:http'
 import net from 'node:net'
-import { chromium } from 'playwright'
+import type { Browser } from 'playwright'
 import { CaptureEgressProxy, fetchPublicCaptureBuffer, isPublicCaptureAddress, resolveCaptureDestination } from '../src/lib/captureNetwork'
 import { captureBrowserEnvironment, launchCaptureBrowser } from '../src/lib/captureBrowser'
 
@@ -67,8 +67,9 @@ test('sandboxed production browser renders fixtures and blocks direct, redirecte
     let contacts = 0
     const privateServer = http.createServer((_request, response) => { contacts++; response.end('private') })
     await new Promise<void>(resolve => privateServer.listen(0, '127.0.0.1', resolve))
-    const browser = await launchCaptureBrowser()
+    let browser: Browser | undefined
     try {
+        browser = await launchCaptureBrowser()
         const port = (privateServer.address() as net.AddressInfo).port
         const page = await browser.newPage()
         await page.route('https://fixture.example/redirect', route => route.fulfill({ status: 302, headers: { location: `http://127.0.0.1:${port}/redirect` } }))
@@ -81,7 +82,7 @@ test('sandboxed production browser renders fixtures and blocks direct, redirecte
         await page.goto(`http://127.0.0.1:${port}/direct`).catch(() => {})
         assert.equal(contacts, 0)
     } finally {
-        await browser.close()
+        await browser?.close()
         await new Promise<void>(resolve => privateServer.close(() => resolve()))
     }
 })

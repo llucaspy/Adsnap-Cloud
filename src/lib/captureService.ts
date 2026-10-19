@@ -855,8 +855,6 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         browser = await launchCaptureBrowser({
             headless: true,
             args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
                 '--disable-gpu',
                 '--disable-extensions',
@@ -1314,8 +1312,6 @@ async function compositeEvidenceFrameImage(
     const studioBrowser = existingBrowser || await launchCaptureBrowser({
         headless: true,
         args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
             '--disable-gpu',
             '--disable-extensions',
@@ -1657,8 +1653,6 @@ async function compositeStudioImage(
     const studioBrowser = existingBrowser || await launchCaptureBrowser({
         headless: true,
         args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
             '--disable-gpu',
             '--disable-extensions',
