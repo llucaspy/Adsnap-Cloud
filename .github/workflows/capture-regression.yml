@@ -39,6 +39,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps --only-shell chromium
+      - run: bash .github/scripts/configure-capture-sandbox.sh
       - run: node test-support/prepare-postgres.mjs
       - run: npm test
       - run: node tests/worker-postgres.integration.cjs "$DATABASE_URL"

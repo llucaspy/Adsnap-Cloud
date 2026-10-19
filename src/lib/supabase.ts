@@ -53,6 +53,17 @@ export const getSupabase = () => {
     return supabaseInstance
 }
 
+/** Per-operation transport: cancellation never mutates the shared client's fetch. */
+export function getSupabaseForSignal(signal?: AbortSignal) {
+    if (!signal) return getSupabase()
+    getSupabase() // Reuse credential validation before creating a scoped transport.
+    return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+        auth: { persistSession: false, autoRefreshToken: false },
+        global: { fetch: (input, init) => fetch(input, { ...init,
+            signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal }) },
+    })
+}
+
 // Proxy to maintain compatibility with existing code while being lazy
 export const supabase = new Proxy({} as SupabaseClient, {
     get: (target, prop) => {

@@ -1218,7 +1218,7 @@ async function saveCapture(campaign: any, imageBuffer: Buffer, campaignId: strin
 
         // An attempt owns an immutable object key, so abort cleanup cannot remove older evidence.
         const fileName = `evidence-${randomUUID()}.png`
-        const storedCapture = await uploadCaptureImage(imageBuffer, { campaign, campaignId, fileName })
+        const storedCapture = await uploadCaptureImage(imageBuffer, { campaign, campaignId, fileName, signal: options.signal })
         uploadedUri = storedCapture.uri
         // Cancellation or ownership may change while the provider is uploading.
         throwIfCaptureAborted(options.signal)

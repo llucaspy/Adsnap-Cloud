@@ -9,6 +9,9 @@ Production release authorized by Lucas, conditional on functional and security c
 - Chromium inherits only OS/runtime environment variables, without database, storage or application keys. QUIC and non-proxied WebRTC UDP are disabled. Proxy lifetime follows browser shutdown, including failed launch and abort.
 - Campaign and HTML5 document URLs are checked before navigation. Remote raster and fallback capture downloads validate and pin each redirect, enforce timeout and limit content to 25 MiB.
 - GAM imports use the existing dedicated GAM worker and no longer consume the capture cycle budget.
+- Inspection of the latest production worker found uploads continuing beyond a 43-second capture timeout and subsequent ownership rejection. Capture cancellation now reaches Drive folder/list/create/upload requests, retry sleeps and the scoped Supabase transport. Storage has a 90-second budget, individual Drive requests 30 seconds, and aborted operations never start a fallback upload. A missing folder lock fails instead of creating folders without coordination.
+- Default capture overhead is 120 seconds (plus configured screenshot delay, capped at 180 seconds and always below the lease/cycle budget), covering browser work and bounded storage.
+- Linux runners install an executable-specific AppArmor userns profile before launching the sandboxed browser. The first Linux CI correctly rejected launch without that profile; no no-sandbox fallback was added. The global user namespace restriction remains enabled. Reference: https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md
 
 No database migration, paid dependency, retention deletion or change to commercial capture approval is included.
 
