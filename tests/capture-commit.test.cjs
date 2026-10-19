@@ -60,30 +60,43 @@ function validationBindings() {
     const source = fs.readFileSync(path.resolve(__dirname, '../src/lib/captureValidation.ts'), 'utf8');
     const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
     const context = vm.createContext({module:{exports:{}},exports:{}});
-    vm.runInContext(js + '\nmodule.exports={matchesCaptureDimensions,inspectCreativeContent};', context);
+    vm.runInContext(js + '\nmodule.exports={inspectCreativeContent};', context);
     return context.module.exports;
 }
-test('real browser capture pipeline rejects wrong/empty configured slot, never replaces it with another valid ad, and accepts a white creative', async () => {
+test('real browser capture accepts actual ad sizes without catalog dimensions and refuses empty or unrelated content', async () => {
     const image = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="250"><rect width="300" height="250" fill="white"/></svg>');
     const valid = `<img width="300" height="250" src="${image}">`;
+    const ad = (w, h) => `<img width="${w}" height="${h}" src="data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="${w}" height="${h}" fill="white"/></svg>`)}">`;
     const pages = {
         '/wrong': `<div id="configured" style="width:970px;height:90px"></div><div id="banner">${valid}</div>`,
         '/empty': `<div id="configured" style="width:300px;height:250px"></div><div id="banner">${valid}</div>`,
         '/white': `<div id="configured" style="width:300px;height:250px">${valid}</div>`,
+        '/billboard': `<div id="configured" style="width:970px;height:243px">${ad(973,243)}</div>`,
+        '/superbanner': `<div id="configured" style="width:970px;height:87px">${ad(726,87)}</div>`,
+        '/mobile': `<div id="configured" style="width:375px;height:250px"><iframe style="border:0;width:217px;height:180px" src="data:text/html,${encodeURIComponent(`<body style='margin:0'>${ad(217,180)}</body>`)}"></iframe></div>`,
+        '/no-dimensions': `<div id="configured" style="width:217px;height:180px">${ad(217,180)}</div>`,
+        '/missing-selector': `<div id="banner">${valid}</div>`,
+        '/auto': `<div id="div-gpt-ad-fixture" style="width:217px;height:180px">${ad(217,180)}</div>`,
+        '/editorial': `<p>Editorial content outside an advertising slot</p>${valid}`,
+        '/delayed': `<div id="configured" style="width:217px;height:180px"></div><script>setTimeout(()=>document.querySelector('#configured').innerHTML=${JSON.stringify(ad(217,180))},2500)</script>`,
     };
     const server = http.createServer((request, response) => { response.setHeader('Content-Type','text/html'); response.end(pages[request.url] || 'missing'); });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const address = server.address();
     try {
-        for (const route of ['/wrong','/empty','/white']) {
+        for (const route of Object.keys(pages)) {
             const { api, state } = load({campaign:{url:`http://127.0.0.1:${address.port}${route}`,format:'test',device:'desktop',client:'test',captureDelaySeconds:1},bindings:{chromium:playwright.chromium,devices:playwright.devices,normalizeCaptureDelaySeconds:value=>Math.max(1,value||1),...validationBindings()}});
             // The existing decorative frame is outside this validation/commit integration test.
             api.setFinalImage(async raw => raw);
-            const result = await api._executeCapture('c1',{nexusTimeout:5000,bannerFormats:JSON.stringify([{id:'test',width:300,height:250,selector:'#configured'}])},{ownership});
-            assert.equal(result.success, route==='/white', `${route}: ${result.error||'success'}`);
-            assert.equal(state.uploaded, route==='/white'?1:0);
-            assert.equal(state.created.length, route==='/white'?1:0);
-            if (route==='/white') { const evidence=JSON.parse(state.created[0].auditNotes); assert.equal(evidence.mode,'OBSERVED');assert.equal(evidence.rawPreserved,false);assert.match(evidence.rawSha256,/^[a-f0-9]{64}$/); }
+            const auto = ['/auto','/editorial'].includes(route);
+            const format = {id:'test',width:300,height:250,selector:'#configured'};
+            if(route==='/no-dimensions') { delete format.width; delete format.height; }
+            const result = await api._executeCapture('c1',{nexusTimeout:5000,bannerFormats:JSON.stringify(auto?[]:[format])},{ownership});
+            const success = !['/wrong','/empty','/missing-selector','/editorial'].includes(route);
+            assert.equal(result.success, success, `${route}: ${result.error||'success'}`);
+            assert.equal(state.uploaded, success?1:0, route);
+            assert.equal(state.created.length, success?1:0, route);
+            if (success) { const evidence=JSON.parse(state.created[0].auditNotes); assert.equal(evidence.mode,'OBSERVED');assert.equal(evidence.rawPreserved,false);assert.match(evidence.rawSha256,/^[a-f0-9]{64}$/); }
         }
     } finally { await new Promise(resolve=>server.close(resolve)); }
 });

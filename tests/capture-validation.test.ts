@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test, { before, after } from 'node:test'
 import { chromium, type Browser } from 'playwright'
-import { inspectCreativeContent, matchesCaptureDimensions } from '../src/lib/captureValidation'
+import { inspectCreativeContent } from '../src/lib/captureValidation'
 import http from 'node:http'
 
 let browser: Browser
@@ -17,11 +17,18 @@ async function inspect(html: string, setup?: (page: import('playwright').Page) =
     } finally { await page.close() }
 }
 
-test('strict dimensions reject incompatible formats and invalid input', () => {
-    assert.equal(matchesCaptureDimensions({ width: 970, height: 250 }, 970, 90), false)
-    assert.equal(matchesCaptureDimensions({ width: 386, height: 56 }, 320, 50), false)
-    assert.equal(matchesCaptureDimensions({ width: 301, height: 249 }, 300, 250), true)
-    assert.equal(matchesCaptureDimensions({ width: Infinity, height: 250 }, 300, 250), false)
+test('a smaller rendered ad frame with visible content is accepted inside a larger slot', async () => {
+    const content = `<body style="margin:0"><img width="217" height="180" src="${whiteImage}"></body>`
+    const src = 'data:text/html,' + encodeURIComponent(content)
+    const evidence = await inspect(`<div id="slot"><iframe style="width:217px;height:180px;border:0" src="${src}"></iframe></div>`)
+    assert.equal(evidence.state, 'CONFIRMED')
+})
+
+test('a visible frame positioned outside the selected slot cannot confirm its content', async () => {
+    const content = `<body style="margin:0"><img width="217" height="180" src="${whiteImage}"></body>`
+    const src = 'data:text/html,' + encodeURIComponent(content)
+    const evidence = await inspect(`<div id="slot"><iframe style="position:absolute;left:500px;width:217px;height:180px;border:0" src="${src}"></iframe></div>`)
+    assert.notEqual(evidence.state, 'CONFIRMED')
 })
 test('sized empty container is not a creative', async () => { assert.equal((await inspect('<div id="slot"></div>')).state, 'EMPTY') })
 test('decoded white image is valid without text or pixel entropy', async () => {
