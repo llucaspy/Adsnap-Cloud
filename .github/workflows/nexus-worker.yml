@@ -39,6 +39,9 @@ jobs:
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps --only-shell chromium
 
+      - name: Enable Chromium sandbox for the installed executable
+        run: bash .github/scripts/configure-capture-sandbox.sh
+
       - name: Create .env file
         env:
           ADSNAP_CLOUD_KEYS: ${{ secrets.ADSNAP_CLOUD_KEYS }}

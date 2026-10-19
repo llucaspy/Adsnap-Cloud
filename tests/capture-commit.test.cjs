@@ -26,6 +26,9 @@ function load(overrides = {}) {
     const bindings = {
         module: { exports: {} }, exports: {}, console: { log() {}, warn() {}, error() {} }, Buffer, process: { env: {} },
         setTimeout, clearTimeout, AbortController, Error,
+        // This suite intentionally captures loopback fixtures. Production egress is tested separately.
+        launchCaptureBrowser: options => playwright.chromium.launch(options),
+        resolveCaptureDestination: async () => {},
         createHash: require('node:crypto').createHash,
         randomUUID: require('node:crypto').randomUUID,
         CaptureOwnershipLostError: Lost,

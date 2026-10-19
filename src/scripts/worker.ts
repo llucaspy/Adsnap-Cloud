@@ -4,7 +4,6 @@ import prisma from '../lib/prisma'
 import { assertCaptureOwnership, CaptureOwnershipLostError, type CaptureOwnership } from '../lib/captureOwnership'
 import { processCampaign, processComposition } from '../lib/captureService'
 import { nexusLogStore } from '../lib/nexusLogStore'
-import { processPendingGamJobs } from '../lib/gamJobProcessor'
 import {
     getBrasiliaDayRangeFor,
     isCampaignFinalDayToday,
@@ -26,8 +25,9 @@ const DEFAULT_CAPTURE_BATCH_SIZE = 5
 const MAX_CAPTURE_BATCH_SIZE = 20
 const DEFAULT_CAPTURE_CONCURRENCY = 2
 const MAX_CAPTURE_CONCURRENCY = 4
-const DEFAULT_CAPTURE_OVERHEAD_MS = 40 * 1000
-const MAX_DERIVED_CAPTURE_TIMEOUT_MS = 90 * 1000
+// Includes browser preparation and bounded remote storage, not just screenshot delay.
+const DEFAULT_CAPTURE_OVERHEAD_MS = 120 * 1000
+const MAX_DERIVED_CAPTURE_TIMEOUT_MS = 180 * 1000
 const DEFAULT_CAPTURE_LEASE_MINUTES = 15
 const MAX_WORKER_RUNTIME_MS = 45 * 60 * 1000
 const WORKER_SHUTDOWN_RESERVE_MS = 60 * 1000
@@ -712,12 +712,7 @@ async function runWorkerCycle(options: WorkerCycleOptions = {}) {
         }
     }
 
-    // 5. GAM Ingestion Jobs (supervised draft)
-    try {
-        await processPendingGamJobs()
-    } catch (err) {
-        console.error('[Nexus Worker] Erro nos Jobs GAM:', err)
-    }
+    // GAM imports run exclusively in gam-worker.ts / gam-import.yml.
 
     // 8. Campaign Capture (movido para o final)
     try {

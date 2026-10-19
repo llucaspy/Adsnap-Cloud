@@ -3,8 +3,10 @@ import fs from 'fs/promises'
 import path from 'path'
 import { Readable } from 'stream'
 import { google } from 'googleapis'
-import { supabase } from './supabase'
+import { supabase, getSupabaseForSignal } from './supabase'
+import { setTimeout as waitForStorage } from 'node:timers/promises'
 import prisma from './prisma'
+import { fetchPublicCaptureBuffer } from './captureNetwork'
 
 type StorageProvider = 'supabase' | 'google-drive'
 
@@ -23,6 +25,7 @@ type UploadCaptureInput = {
     campaignId: string
     campaign: CampaignStorageInfo
     fileName?: string
+    signal?: AbortSignal
 }
 
 type StoredCapture = {
@@ -274,20 +277,22 @@ function getErrorStatus(error: unknown) {
     return candidate.response?.status || candidate.code
 }
 
-async function withDriveRetry<T>(operation: () => Promise<T>, label: string): Promise<T> {
+async function withDriveRetry<T>(operation: () => Promise<T>, label: string, signal?: AbortSignal): Promise<T> {
     let lastError: unknown
 
     for (let attempt = 0; attempt < 4; attempt++) {
+        signal?.throwIfAborted()
         try {
             return await operation()
         } catch (error) {
+            signal?.throwIfAborted()
             lastError = error
             const status = getErrorStatus(error)
             if (!status || !RETRYABLE_STATUS.has(status) || attempt === 3) break
 
             const delay = Math.min(8_000, 500 * 2 ** attempt) + Math.floor(Math.random() * 250)
             console.warn(`[CaptureStorage] Google Drive retry ${attempt + 1}/3 em ${label}. Status: ${status}. Delay: ${delay}ms`)
-            await new Promise(resolve => setTimeout(resolve, delay))
+            await waitForStorage(delay, undefined, { signal })
         }
     }
 
@@ -335,7 +340,7 @@ function chooseCanonicalDriveFolder(folders: DriveFolderCandidate[]) {
     return foldersWithId[0]?.id || null
 }
 
-async function listDriveFoldersByName(drive: DriveClient, safeName: string, parent: string) {
+async function listDriveFoldersByName(drive: DriveClient, safeName: string, parent: string, signal?: AbortSignal) {
     const folders: DriveFolderCandidate[] = []
     let pageToken: string | undefined
 
@@ -349,7 +354,7 @@ async function listDriveFoldersByName(drive: DriveClient, safeName: string, pare
             supportsAllDrives: true,
             includeItemsFromAllDrives: true,
             orderBy: 'createdTime',
-        }), 'listar pasta')
+        }, { signal, timeout: HTTP_TIMEOUT_MS }), 'listar pasta', signal)
 
         folders.push(...(response.data.files || []))
         pageToken = response.data.nextPageToken || undefined
@@ -358,7 +363,7 @@ async function listDriveFoldersByName(drive: DriveClient, safeName: string, pare
     return folders
 }
 
-async function createDriveFolder(drive: DriveClient, safeName: string, parent: string) {
+async function createDriveFolder(drive: DriveClient, safeName: string, parent: string, signal?: AbortSignal) {
     const created = await withDriveRetry(() => drive.files.create({
         requestBody: {
             name: safeName,
@@ -371,7 +376,7 @@ async function createDriveFolder(drive: DriveClient, safeName: string, parent: s
         },
         fields: 'id, name, createdTime',
         supportsAllDrives: true,
-    }), 'criar pasta')
+    }, { signal, timeout: HTTP_TIMEOUT_MS }), 'criar pasta', signal)
 
     const createdId = created.data.id
     if (!createdId) throw new Error(`Google Drive nao retornou ID para a pasta ${safeName}`)
@@ -387,52 +392,43 @@ function logDriveFolderDuplicates(safeName: string, parent: string, folders: Dri
     )
 }
 
-async function resolveExistingDriveFolderId(drive: DriveClient, safeName: string, parent: string) {
-    const folders = await listDriveFoldersByName(drive, safeName, parent)
+async function resolveExistingDriveFolderId(drive: DriveClient, safeName: string, parent: string, signal?: AbortSignal) {
+    const folders = await listDriveFoldersByName(drive, safeName, parent, signal)
     const canonicalId = chooseCanonicalDriveFolder(folders)
     logDriveFolderDuplicates(safeName, parent, folders, canonicalId)
     return canonicalId
 }
 
-async function resolveOrCreateDriveFolderId(drive: DriveClient, safeName: string, parent: string) {
-    const existingId = await resolveExistingDriveFolderId(drive, safeName, parent)
+async function resolveOrCreateDriveFolderId(drive: DriveClient, safeName: string, parent: string, signal?: AbortSignal) {
+    const existingId = await resolveExistingDriveFolderId(drive, safeName, parent, signal)
     if (existingId) return existingId
 
-    const createdId = await createDriveFolder(drive, safeName, parent)
-    await new Promise(resolve => setTimeout(resolve, DRIVE_FOLDER_CREATE_SETTLE_MS))
+    const createdId = await createDriveFolder(drive, safeName, parent, signal)
+    await waitForStorage(DRIVE_FOLDER_CREATE_SETTLE_MS, undefined, { signal })
 
-    const folders = await listDriveFoldersByName(drive, safeName, parent)
+    const folders = await listDriveFoldersByName(drive, safeName, parent, signal)
     const canonicalId = chooseCanonicalDriveFolder(folders) || createdId
     logDriveFolderDuplicates(safeName, parent, folders, canonicalId)
 
     return canonicalId
 }
 
-async function withDriveFolderLock<T>(cacheKey: string, operation: () => Promise<T>) {
+async function withDriveFolderLock<T>(cacheKey: string, operation: () => Promise<T>, signal?: AbortSignal) {
     const lockKey = driveFolderLockKey(cacheKey)
-    let lockAcquired = false
-
-    try {
-        return await prisma.$transaction(async tx => {
+    signal?.throwIfAborted()
+    return prisma.$transaction(async tx => {
+            await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '3s'")
             await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockKey})`
-            lockAcquired = true
+            signal?.throwIfAborted()
             return operation()
         }, {
             maxWait: 15_000,
             timeout: 90_000,
         })
-    } catch (error) {
-        if (lockAcquired) throw error
-
-        console.warn(
-            `[CaptureStorage] Nao foi possivel usar trava Postgres para pasta do Drive (${cacheKey}). ` +
-            'Seguindo com resolucao direta.'
-        )
-        return operation()
-    }
 }
 
-async function ensureDriveFolder(name: string, parentId?: string) {
+async function ensureDriveFolder(name: string, parentId?: string, signal?: AbortSignal) {
+    signal?.throwIfAborted()
     const drive = await getDriveClient()
     const safeName = sanitizeSegment(name, 'Adsnap Cloud')
     const parent = parentId || 'root'
@@ -440,7 +436,7 @@ async function ensureDriveFolder(name: string, parentId?: string) {
     const cached = driveFolderCache.get(cacheKey)
     if (cached) return cached
 
-    const existingId = await resolveExistingDriveFolderId(drive, safeName, parent)
+    const existingId = await resolveExistingDriveFolderId(drive, safeName, parent, signal)
     if (existingId) {
         driveFolderCache.set(cacheKey, existingId)
         return existingId
@@ -450,20 +446,20 @@ async function ensureDriveFolder(name: string, parentId?: string) {
         const lockedCached = driveFolderCache.get(cacheKey)
         if (lockedCached) return lockedCached
 
-        const folderId = await resolveOrCreateDriveFolderId(drive, safeName, parent)
+        const folderId = await resolveOrCreateDriveFolderId(drive, safeName, parent, signal)
         driveFolderCache.set(cacheKey, folderId)
         return folderId
-    })
+    }, signal)
 }
 
-async function ensureDriveCaptureFolder(campaign: CampaignStorageInfo, folderSegments = captureFolderSegments(campaign)) {
+async function ensureDriveCaptureFolder(campaign: CampaignStorageInfo, folderSegments = captureFolderSegments(campaign), signal?: AbortSignal) {
     let parentId = (process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID || process.env.NEXUS_GOOGLE_DRIVE_ROOT_FOLDER_ID || '').trim()
     if (!parentId) {
-        parentId = await ensureDriveFolder(process.env.GOOGLE_DRIVE_ROOT_FOLDER_NAME || 'Adsnap Cloud')
+        parentId = await ensureDriveFolder(process.env.GOOGLE_DRIVE_ROOT_FOLDER_NAME || 'Adsnap Cloud', undefined, signal)
     }
 
     for (const segment of folderSegments) {
-        parentId = await ensureDriveFolder(segment, parentId)
+        parentId = await ensureDriveFolder(segment, parentId, signal)
     }
 
     return parentId
@@ -472,7 +468,8 @@ async function ensureDriveCaptureFolder(campaign: CampaignStorageInfo, folderSeg
 async function uploadToSupabase(imageBuffer: Buffer, input: UploadCaptureInput): Promise<StoredCapture> {
     const storagePath = buildStoragePath(input)
 
-    const { error: uploadError } = await supabase.storage
+    input.signal?.throwIfAborted()
+    const { error: uploadError } = await getSupabaseForSignal(input.signal).storage
         .from('screenshots')
         .upload(storagePath, imageBuffer, {
             contentType: 'image/png',
@@ -499,7 +496,7 @@ async function uploadToSupabase(imageBuffer: Buffer, input: UploadCaptureInput):
 async function uploadToGoogleDrive(imageBuffer: Buffer, input: UploadCaptureInput): Promise<StoredCapture> {
     const drive = await getDriveClient()
     const folderSegments = captureFolderSegments(input.campaign)
-    const parentId = await ensureDriveCaptureFolder(input.campaign, folderSegments)
+    const parentId = await ensureDriveCaptureFolder(input.campaign, folderSegments, input.signal)
     const fileName = sanitizeFileName(input.fileName || defaultCaptureFileName(input), 'captura.png')
     const storagePath = [...folderSegments, fileName].join('/')
     const checksum = crypto.createHash('sha256').update(imageBuffer).digest('hex')
@@ -523,7 +520,7 @@ async function uploadToGoogleDrive(imageBuffer: Buffer, input: UploadCaptureInpu
         },
         fields: 'id, name, size, md5Checksum, webViewLink',
         supportsAllDrives: true,
-    }), 'upload de captura')
+    }, { signal: input.signal, timeout: HTTP_TIMEOUT_MS }), 'upload de captura', input.signal)
 
     const fileId = created.data.id
     if (!fileId) throw new Error('Google Drive nao retornou ID do arquivo enviado')
@@ -539,11 +536,15 @@ async function uploadToGoogleDrive(imageBuffer: Buffer, input: UploadCaptureInpu
 }
 
 export async function uploadCaptureImage(imageBuffer: Buffer, input: UploadCaptureInput): Promise<StoredCapture> {
+    const deadline = AbortSignal.timeout(90_000)
+    input = { ...input, signal: input.signal ? AbortSignal.any([input.signal, deadline]) : deadline }
+    input.signal!.throwIfAborted()
     const provider = getCaptureStorageProvider()
     if (provider === 'google-drive') {
         try {
             return await uploadToGoogleDrive(imageBuffer, input)
         } catch (error) {
+            input.signal!.throwIfAborted()
             if (!shouldFallbackToSupabase()) throw error
 
             const fallback = await uploadToSupabase(imageBuffer, input)
@@ -562,9 +563,7 @@ async function fetchRemoteBuffer(url: string) {
     const timeout = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS)
 
     try {
-        const response = await fetch(url, { signal: controller.signal })
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        return Buffer.from(await response.arrayBuffer())
+        return await fetchPublicCaptureBuffer(url, controller.signal)
     } finally {
         clearTimeout(timeout)
     }

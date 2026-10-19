@@ -1,16 +1,11 @@
 import bcrypt from 'bcryptjs'
 import { SignJWT, jwtVerify } from 'jose'
 import { cookies } from 'next/headers'
+import { getJwtSecret } from './sessionSecret'
 
 const SALT_ROUNDS = 12
 const SESSION_COOKIE = 'adsnap_session'
 const JWT_EXPIRY = '24h'
-
-function getJwtSecret() {
-    // Preserve the deployed signing configuration until AUTH_SECRET is provisioned.
-    // Removing this legacy fallback requires a separately verified environment rollout.
-    return new TextEncoder().encode(process.env.AUTH_SECRET || 'adsnap-v2-secret-key-change-in-production-2026')
-}
 
 // --- Password Utilities ---
 
