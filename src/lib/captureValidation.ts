@@ -6,11 +6,15 @@ export type CreativeEvidence = {
     reason: string
 }
 
-/** Evidence policy: dimensions must match within 2%, allowing 2 CSS pixels of rounding. */
-export function matchesCaptureDimensions(box: { width: number; height: number }, width: number, height: number) {
-    return [box.width, box.height, width, height].every(value => Number.isFinite(value) && value > 0)
-        && Math.abs(box.width - width) <= Math.max(2, width * 0.02)
-        && Math.abs(box.height - height) <= Math.max(2, height * 0.02)
+type VisibleBox = { x: number; y: number; width: number; height: number }
+
+/** Visibility within the selected slot, independent of any registered format or expected size. */
+function frameIsVisibleInSlot(box: VisibleBox, slot: VisibleBox) {
+    const area = box.width * box.height
+    if (area < Math.max(64, slot.width * slot.height * .02)) return false
+    const width = Math.max(0, Math.min(box.x + box.width, slot.x + slot.width) - Math.max(box.x, slot.x))
+    const height = Math.max(0, Math.min(box.y + box.height, slot.y + slot.height) - Math.max(box.y, slot.y))
+    return width * height >= area * .9
 }
 
 /** Runs in the browser. Presence/decoded content is evidence; PNG size and OCR are not. */
@@ -223,7 +227,7 @@ export async function inspectCreativeContent(locator: Locator): Promise<Creative
             try {
                 if ((await frameElement.evaluate(inspectCreativeDom)).reason === 'SLOT_NOT_VISIBLE') continue
                 const box = await frameElement.boundingBox()
-                if (!slotBox || !box || !matchesCaptureDimensions(box, slotBox.width, slotBox.height)) continue
+                if (!slotBox || !box || !frameIsVisibleInSlot(box, slotBox)) continue
                 const nested = await inspectFrame(child, depth + 1)
                 if (nested.state === 'CONFIRMED') return nested
             } finally { await frameElement.dispose() }
@@ -235,7 +239,7 @@ export async function inspectCreativeContent(locator: Locator): Promise<Creative
             if ((await handle.evaluate(inspectCreativeDom)).reason === 'SLOT_NOT_VISIBLE') continue
             const box = await handle.boundingBox()
             if (!box || box.width < 20 || box.height < 20) continue
-            if (!slotBox || !matchesCaptureDimensions(box, slotBox.width, slotBox.height)) continue
+            if (!slotBox || !frameIsVisibleInSlot(box, slotBox)) continue
             const frame = await handle.contentFrame()
             if (!frame || frame.isDetached()) { uncertain = true; continue }
             const result = await inspectFrame(frame, 0)

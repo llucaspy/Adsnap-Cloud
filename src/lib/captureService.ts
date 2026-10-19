@@ -10,7 +10,7 @@ import { getFormatLabelMap, resolveFormatLabel } from './formatLabels';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { assertCaptureOwnership, completeCaptureOwnership, CaptureOwnershipLostError, type CaptureOwnership } from './captureOwnership';
-import { inspectCreativeContent, matchesCaptureDimensions, type CreativeEvidence } from './captureValidation';
+import { inspectCreativeContent, type CreativeEvidence } from './captureValidation';
 import { launchCaptureBrowser } from './captureBrowser';
 import { resolveCaptureDestination } from './captureNetwork';
 
@@ -115,7 +115,7 @@ const FAST_SCROLL_SETTLE_MS = readPositiveMsEnv('NEXUS_FAST_SCROLL_SETTLE_MS', 3
 const FAST_SCREENSHOT_TIMEOUT_MS = readPositiveMsEnv('NEXUS_FAST_SCREENSHOT_TIMEOUT_MS', 2_500, 10_000)
 const FAST_FRAME_SETTLE_MS = readPositiveMsEnv('NEXUS_FAST_FRAME_SETTLE_MS', 100, 1_000)
 const FAST_FRAME_TIMEOUT_MS = readPositiveMsEnv('NEXUS_FAST_FRAME_TIMEOUT_MS', 3_000, 10_000)
-const MULTI_SIZE_SLOT_TIMEOUT_MS = readPositiveMsEnv('NEXUS_MULTI_SIZE_SLOT_TIMEOUT_MS', 8_000, 15_000)
+const CREATIVE_READY_TIMEOUT_MS = readPositiveMsEnv('NEXUS_CREATIVE_READY_TIMEOUT_MS', 8_000, 15_000)
 const MOBILE_CAPTURE_VIEWPORT = { width: 375, height: 667 }
 const DESKTOP_CAPTURE_VIEWPORT = { width: 1920, height: 928 }
 
@@ -318,114 +318,44 @@ interface BannerCandidate {
 
 // Script run INSIDE the browser to find the best candidate
 const FIND_BANNER_SCRIPT = `
-    ([targetW, targetH]) => {
+    () => {
         const candidates = [];
-        
-        // Helper to check visibility
-        function isVisible(el) {
-            const style = window.getComputedStyle(el);
-            return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
-        }
-
-        // 1. Scan common elements
+        const roots = '[id^="div-gpt-ad-"], [id^="google_ads_iframe"], [data-google-query-id], ins.adsbygoogle, [data-ad-slot], [id*="banner"], [class*="ad-slot"]';
         const elements = document.querySelectorAll('iframe, img, div[id*="google"], ins, div[class*="ad"], div[id*="banner"]');
-        
         elements.forEach((el, domIndex) => {
-            if (!isVisible(el)) return;
-            
+            const style = getComputedStyle(el);
             const rect = el.getBoundingClientRect();
-            const width = rect.width;
-            const height = rect.height;
-            
-            if (width < 20 || height < 20) return;
-
-            const wDiff = Math.abs(width - targetW) / targetW;
-            const hDiff = Math.abs(height - targetH) / targetH;
-            
-            if (Math.abs(width - targetW) <= Math.max(2, targetW * 0.02)
-                && Math.abs(height - targetH) <= Math.max(2, targetH * 0.02)) {
-                // Calculate distance from center (prefer more central ads)
-                const centerX = rect.x + width / 2;
-                const centerY = rect.y + height / 2;
-                const distanceC = Math.abs(centerX - window.innerWidth / 2);
-                
-                candidates.push({
-                    element: el,
-                    domIndex,
-                    rect: {
-                        x: rect.x + window.scrollX,
-                        y: rect.y + window.scrollY,
-                        width: width,
-                        height: height
-                    },
-                    score: wDiff + hDiff + (distanceC / window.innerWidth) * 0.1 // Size match + centrality
-                });
-            }
+            if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0 || rect.width < 20 || rect.height < 20) return;
+            if (/cookie|consent|notification/i.test(el.id)) return;
+            const adRoot = el.closest(roots);
+            const standaloneImage = el.tagName === 'IMG' && document.images.length === 1 && !document.body.textContent.trim();
+            if (!adRoot && !standaloneImage) return;
+            const priority = el.tagName === 'IFRAME' ? 0 : el === adRoot ? 1 : 2;
+            const centerDistance = Math.abs(rect.x + rect.width / 2 - innerWidth / 2) / innerWidth;
+            candidates.push({ domIndex, tag: el.tagName, rect, score: priority + centerDistance * .1 });
         });
-
-        // 2. Sort by best score (lowest is better)
         candidates.sort((a, b) => a.score - b.score);
-
-        // Return top 5 candidates
-        return candidates.slice(0, 5).map(c => ({
-            found: true,
-            x: c.rect.x,
-            y: c.rect.y,
-            width: c.rect.width,
-            height: c.rect.height,
-            selector: c.element.tagName,
-            domIndex: c.domIndex
-        }));
+        return candidates.slice(0, 10).map(c => ({ found: true, x: c.rect.x + scrollX, y: c.rect.y + scrollY,
+            width: c.rect.width, height: c.rect.height, selector: c.tag, domIndex: c.domIndex }));
     }
 `;
 
-interface MeasuredAdBox {
-    source: string;
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-    nodeIndex?: number | null;
-}
-
-const measureAdBoxesInPage = new Function('el', `
-    const boxes = [];
-    const nodes = Array.from(el.querySelectorAll('iframe, img, ins, canvas, video'));
-    nodes.push(el);
-
-    for (let index = 0; index < nodes.length; index++) {
-        const target = nodes[index];
-        const rect = target.getBoundingClientRect();
-        const style = window.getComputedStyle(target);
-        const isVisible = rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
-
-        if (!isVisible) continue;
-
-        boxes.push({
-            source: target === el ? 'selector' : target.tagName.toLowerCase() + '#' + (index + 1),
-            nodeIndex: target === el ? null : index,
-            x: rect.x + window.scrollX,
-            y: rect.y + window.scrollY,
-            width: rect.width,
-            height: rect.height
-        });
-    }
-
-    return boxes;
-`) as (el: Element) => MeasuredAdBox[];
-
-function matchesExpectedDimension(box: MeasuredAdBox, targetW: number, targetH: number) {
-    return matchesCaptureDimensions(box, targetW, targetH);
-}
-
-async function validateCreative(locator: Locator, width: number, height: number) {
-    const box = await locator.boundingBox()
-    if (!box || !matchesCaptureDimensions(box, width, height)) {
-        throw new Error(`TARGET_DIMENSION_MISMATCH: esperado ${width}x${height}`)
-    }
+async function validateCreative(locator: Locator) {
     const evidence = await inspectCreativeContent(locator)
     if (evidence.state !== 'CONFIRMED') throw new Error(`${evidence.reason}: criativo requer nova verificacao`)
     return evidence
+}
+
+async function waitForCreative(locator: Locator, signal?: AbortSignal) {
+    const startedAt = Date.now()
+    let lastError: unknown
+    while (true) {
+        throwIfCaptureAborted(signal)
+        try { return await validateCreative(locator) } catch (error) { lastError = error }
+        const remaining = CREATIVE_READY_TIMEOUT_MS - (Date.now() - startedAt)
+        if (remaining <= 0) throw lastError
+        await abortableDelay(Math.min(250, remaining), signal)
+    }
 }
 
 function evidenceMetadata(raw: Buffer, final: Buffer, modified: boolean, validation: CreativeEvidence): CaptureEvidenceMetadata {
@@ -433,48 +363,6 @@ function evidenceMetadata(raw: Buffer, final: Buffer, modified: boolean, validat
         mode: modified ? 'MODIFIED_PREVIEW' : 'OBSERVED', rawPreserved: false,
         rawSha256: createHash('sha256').update(raw).digest('hex'),
         finalSha256: createHash('sha256').update(final).digest('hex'), validation,
-    }
-}
-
-function describeMeasuredBoxes(boxes: MeasuredAdBox[]) {
-    return boxes
-        .map(box => `${box.source}:${Math.round(box.width)}x${Math.round(box.height)}`)
-        .join(', ') || 'sem boxes visiveis';
-}
-
-async function waitForExpectedDimensionInSlot(
-    locator: Locator,
-    targetW: number,
-    targetH: number,
-    maxWaitMs: number,
-    signal?: AbortSignal,
-) {
-    const startedAt = Date.now();
-    let measuredBoxes: MeasuredAdBox[] = [];
-
-    while (true) {
-        throwIfCaptureAborted(signal);
-        measuredBoxes = await locator.evaluate(measureAdBoxesInPage);
-        const matchingBox = measuredBoxes.find(candidate => matchesExpectedDimension(candidate, targetW, targetH));
-
-        if (matchingBox) {
-            return {
-                matchingBox,
-                measuredBoxes,
-                waitedMs: Date.now() - startedAt,
-            };
-        }
-
-        const elapsedMs = Date.now() - startedAt;
-        if (elapsedMs >= maxWaitMs) {
-            return {
-                matchingBox: null,
-                measuredBoxes,
-                waitedMs: elapsedMs,
-            };
-        }
-
-        await abortableDelay(Math.min(250, maxWaitMs - elapsedMs), signal);
     }
 }
 
@@ -800,46 +688,15 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
     console.log('[Nexus] Campanha encontrada:', campaign.client, '-', campaign.format)
     await nexusLogStore.addLog(`Nexus: Processando ${campaign.client} - Formato: ${campaign.format}`, 'INFO', undefined, campaignId);
 
-    // Parse Settings Formats
-    let bannerConfig = null;
-    let targetW = 0;
-    let targetH = 0;
-
+    // The catalog supplies only a selector and display label. Its dimensions never gate capture.
+    let bannerConfig: { label?: string; selector?: string } | undefined;
     try {
         const formats = JSON.parse(settings.bannerFormats || '[]');
-        bannerConfig = formats.find((f: any) => f.id === campaign.format);
-
-        if (bannerConfig) {
-            console.log(`[Nexus] Formato configurado detectado: ${bannerConfig.label} (${bannerConfig.selector})`);
-            targetW = bannerConfig.width;
-            targetH = bannerConfig.height;
-        } else {
-            // Legacy/Fallback parsing
-            console.log('[Nexus] Formato configurado não encontrado (ou legado). Tentando parsing manual...');
-            const dims = campaign.format.toLowerCase().split('x').map(Number);
-            if (dims.length === 2 && !isNaN(dims[0]) && !isNaN(dims[1])) {
-                targetW = dims[0];
-                targetH = dims[1];
-            }
-            await nexusLogStore.addLog(`Nexus: Formato '${campaign.format}' não configurado. Fallback dimensões: ${targetW}x${targetH}`, 'SYSTEM', undefined, campaignId);
-        }
-    } catch (e) {
-        console.error('[Nexus] Erro ao processar formatos:', e);
-        const dims = campaign.format.toLowerCase().split('x').map(Number);
-        targetW = dims[0];
-        targetH = dims[1];
+        if (Array.isArray(formats)) bannerConfig = formats.find((format: { id?: string }) => format.id === campaign.format);
+    } catch {
+        await nexusLogStore.addLog('Nexus: Catalogo de formatos indisponivel; usando deteccao de anuncios', 'INFO', undefined, campaignId);
     }
-
-    if (![targetW, targetH].every(value => Number.isFinite(value) && value > 0)) {
-        const error = `Formato inválido ou não configurado: ${campaign.format}`;
-        await nexusLogStore.addLog(`Nexus: ${error}`, 'ERROR', undefined, campaignId);
-        throw new Error(error);
-    }
-
-    const campaignForStorage = {
-        ...campaign,
-        formatLabel: `${targetW}x${targetH}`,
-    };
+    const campaignForStorage = { ...campaign, formatLabel: bannerConfig?.label || campaign.format };
 
     let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
     const closeBrowserOnAbort = () => {
@@ -849,8 +706,8 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         options.signal?.addEventListener('abort', closeBrowserOnAbort, { once: true })
         await resolveCaptureDestination(campaign.url)
         console.log('[Nexus] Iniciando browser...')
-        await nexusLogStore.addLog(`Nexus: Lançando browser Playwright (${targetW}x${targetH})`, 'SYSTEM', undefined, campaignId);
-        const isMobile = campaign.device === 'mobile' || (targetW === 320 && (targetH === 100 || targetH === 50));
+        await nexusLogStore.addLog('Nexus: Lancando browser Playwright', 'SYSTEM', undefined, campaignId);
+        const isMobile = campaign.device === 'mobile';
 
         browser = await launchCaptureBrowser({
             headless: true,
@@ -913,9 +770,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
 
         await removeKnownBlockedElementsBeforeScreenshot(page, campaignId, options.signal)
 
-        // WARM-UP: Smart Scroll
-        // Sempre realiza o scroll para mobile para garantir o carregamento de banners lazy-load (ex: Metrópoles)
-        // O usuário confirmou que 320x100 funciona, vamos garantir que 320x50 siga o mesmo fluxo robusto
+        // Warm up lazy-loaded ad slots using the campaign's registered device.
         if (!bannerConfig?.selector && isMobile) {
             console.log('[Nexus] Realizando scroll de aquecimento (Lazy Load Check)...');
             await nexusLogStore.addLog('Nexus: Realizando scroll para carregar anúncios (Lazy Load)', 'SYSTEM', undefined, campaignId);
@@ -966,9 +821,6 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         let selectorMismatchError: string | null = null;
         if (bannerConfig && bannerConfig.selector) {
             const selectorCandidates = [bannerConfig.selector];
-            if (targetW === 300 && targetH === 250 && bannerConfig.selector.includes('home-quadrado-0')) {
-                selectorCandidates.push(bannerConfig.selector.replace('home-quadrado-0', 'home-quadrado-1'));
-            }
 
             for (const selector of selectorCandidates) {
                 throwIfCaptureAborted(options.signal)
@@ -989,62 +841,15 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
     
                     await locator.waitFor({ state: 'visible', timeout: FAST_SELECTOR_VISIBLE_TIMEOUT_MS });
     
-                    if (standaloneCreativeAssetUrl) {
-                        console.log(`[Nexus] Injetando asset autenticado do GAM no slot (${targetW}x${targetH})`);
-                        await injectCreativeAsset(locator, standaloneCreativeAssetUrl, targetW, targetH);
-                        await nexusLogStore.addLog('Nexus: Criativo autenticado injetado no slot', 'SUCCESS', standaloneCreativeAssetUrl, campaignId);
-                    }
-    
                     const box = await locator.boundingBox();
-    
-                    if (box && (box.width < 10 || box.height < 10)) {
-                        console.log('[Nexus] Dimensões pequenas. Buscando iframe...');
-                        const frameLocator = locator.locator('iframe').first();
-                        if (await frameLocator.count() > 0) {
-                            await frameLocator.waitFor({ state: 'visible', timeout: FAST_SELECTOR_VISIBLE_TIMEOUT_MS });
-                        }
-                    }
-    
-                    let measuredBoxes = await locator.evaluate(measureAdBoxesInPage);
-                    let matchingBox: MeasuredAdBox | null = measuredBoxes.find(candidate => matchesExpectedDimension(candidate, targetW, targetH)) || null;
-                    let selectorDimensionWaitMs = 0;
-
-                    if (!matchingBox) {
-                        const initialMeasured = describeMeasuredBoxes(measuredBoxes);
-                        const configuredDelayMs = normalizeCaptureDelaySeconds(campaign.captureDelaySeconds) * 1000;
-                        const maxSlotWaitMs = Math.min(MULTI_SIZE_SLOT_TIMEOUT_MS, Math.max(configuredDelayMs, 1_500));
-
-                        console.log(`[Nexus] Slot multi-size ainda nao exibiu ${targetW}x${targetH}. Medido: ${initialMeasured}`);
-                        await nexusLogStore.addLog(
-                            'Nexus: Conferindo dimensao do slot configurado',
-                            'INFO',
-                            `Esperado ${targetW}x${targetH}; medido agora: ${initialMeasured}; janela: ${maxSlotWaitMs / 1000}s`,
-                            campaignId,
-                        );
-
-                        const waitedMeasurement = await waitForExpectedDimensionInSlot(
-                            locator,
-                            targetW,
-                            targetH,
-                            maxSlotWaitMs,
-                            options.signal,
-                        );
-
-                        matchingBox = waitedMeasurement.matchingBox;
-                        measuredBoxes = waitedMeasurement.measuredBoxes;
-                        selectorDimensionWaitMs = waitedMeasurement.waitedMs;
-                    }
-    
-                    if (!matchingBox) {
-                        throw new Error(`TARGET_DIMENSION_MISMATCH: esperado ${targetW}x${targetH}; medido ${describeMeasuredBoxes(measuredBoxes)}`)
-                    }
-                    const captureAnchorBox = matchingBox
-                    let creativeLocator = matchingBox.nodeIndex == null
-                        ? locator : locator.locator('iframe, img, ins, canvas, video').nth(matchingBox.nodeIndex)
-                    let creativeEvidence: CreativeEvidence = { state: 'INCONCLUSIVE', reason: 'AWAITING_CAPTURE_DELAY' }
-
-                    console.log(`[Nexus] Seletor validado! ${matchingBox.source} (${Math.round(matchingBox.width)}x${Math.round(matchingBox.height)})`);
-                    await nexusLogStore.addLog('Nexus: Seletor validado com dimensao correta', 'INFO', `Dim: ${Math.round(matchingBox.width)}x${Math.round(matchingBox.height)} | Esperado: ${targetW}x${targetH}`, campaignId);
+                    if (!box) throw new Error('SLOT_NOT_VISIBLE');
+                    const captureAnchorBox = { y: box.y + await page.evaluate(() => scrollY), height: box.height };
+                    // Measured geometry is used only for presentation of explicit modified previews.
+                    const slotWidth = Math.max(1, Math.round(box.width));
+                    const slotHeight = Math.max(1, Math.round(box.height));
+                    let creativeLocator = locator;
+                    let creativeEvidence: CreativeEvidence = { state: 'INCONCLUSIVE', reason: 'AWAITING_CONTENT' };
+                    await nexusLogStore.addLog('Nexus: Seletor localizado; aguardando conteudo visivel', 'INFO', undefined, campaignId);
 
                     const viewportHeight = isMobile ? MOBILE_CAPTURE_VIEWPORT.height : DESKTOP_CAPTURE_VIEWPORT.height;
                     const targetScrollY = Math.max(0, captureAnchorBox.y + (captureAnchorBox.height / 2) - (viewportHeight / 2));
@@ -1053,7 +858,8 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                     await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
 
                     if (standaloneCreativeAssetUrl) {
-                        await injectCreativeAsset(locator, standaloneCreativeAssetUrl, targetW, targetH);
+                        await injectCreativeAsset(locator, standaloneCreativeAssetUrl, slotWidth, slotHeight);
+                        await nexusLogStore.addLog('Nexus: Criativo autenticado injetado no slot', 'SUCCESS', standaloneCreativeAssetUrl, campaignId);
                         creativeLocator = locator.locator('img[data-adsnap-creative="true"]').first()
                         await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
                     }
@@ -1065,34 +871,37 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                         const renderedCreative = await renderLayeredCreativeAsset(
                             browser,
                             layeredCreativeDocumentUrl,
-                            targetW,
-                            targetH,
+                            slotWidth,
+                            slotHeight,
                             campaign.captureDelaySeconds,
                             options.signal,
                             campaignId,
                         );
                         const renderedDataUrl = `data:image/png;base64,${renderedCreative.toString('base64')}`;
-                        await injectCreativeAsset(locator, renderedDataUrl, targetW, targetH);
+                        await injectCreativeAsset(locator, renderedDataUrl, slotWidth, slotHeight);
                         creativeLocator = locator.locator('img[data-adsnap-creative="true"]').first()
                         await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
                         await nexusLogStore.addLog(
                             'Nexus: Criativo HTML5 renderizado e fixado no slot',
                             'SUCCESS',
-                            `${targetW}x${targetH}`,
+                            `${slotWidth}x${slotHeight}`,
                             campaignId,
                         );
                         captureDelaySeconds = 0;
                         screenshotAnimations = 'disabled';
                     }
 
+                    creativeEvidence = await waitForCreative(creativeLocator, options.signal);
+                    const readyBox = await locator.boundingBox();
+                    if (readyBox) await page.evaluate(y => scrollTo(0, y), Math.max(0, readyBox.y + await page.evaluate(() => scrollY) + readyBox.height / 2 - viewportHeight / 2));
                     const screenshotBuffer = await captureScreenshotAfterConfiguredDelay(
                         page,
                         campaignId,
                         captureDelaySeconds,
                         options.signal,
                         screenshotAnimations,
-                        selectorDimensionWaitMs,
-                        async () => { creativeEvidence = await validateCreative(creativeLocator, targetW, targetH) },
+                        0,
+                        async () => { creativeEvidence = await validateCreative(creativeLocator) },
                     );
                     const finalImage = await prepareFinalCaptureImage(screenshotBuffer, campaign.url, isMobile, browser, options.signal);
                     await browser.close();
@@ -1116,7 +925,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         console.log('[Nexus] Iniciando Auto-Detecção...')
         await nexusLogStore.addLog('Nexus: Iniciando script de detecção automática', 'SYSTEM', undefined, campaignId);
 
-        const candidates = await page.evaluate<BannerCandidate[]>(eval(FIND_BANNER_SCRIPT), [targetW, targetH]);
+        const candidates = await page.evaluate<BannerCandidate[]>(eval(FIND_BANNER_SCRIPT));
         throwIfCaptureAborted(options.signal)
 
         if (!candidates || candidates.length === 0) {
@@ -1146,7 +955,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
 
                 if (candidate.domIndex == null) continue
                 const candidateLocator = page.locator('iframe, img, div[id*="google"], ins, div[class*="ad"], div[id*="banner"]').nth(candidate.domIndex)
-                creativeEvidence = await validateCreative(candidateLocator, targetW, targetH)
+                creativeEvidence = await waitForCreative(candidateLocator, options.signal)
                 bestCandidate = candidate
                 bestLocator = candidateLocator
                 break
@@ -1177,7 +986,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         console.log('[Nexus] Aguardando delay configurado para screenshot final...')
         const selectedLocator = bestLocator
         const screenshotBuffer = await captureScreenshotAfterConfiguredDelay(page, campaignId, campaign.captureDelaySeconds, options.signal,
-            'allow', 0, async () => { creativeEvidence = await validateCreative(selectedLocator, targetW, targetH) });
+            'allow', 0, async () => { creativeEvidence = await validateCreative(selectedLocator) });
         await nexusLogStore.addLog('Nexus: Print capturado. Aplicando moldura obrigatoria...', 'SYSTEM', undefined, campaignId);
 
         const finalImage = await prepareFinalCaptureImage(screenshotBuffer, campaign.url, isMobile, browser, options.signal);
