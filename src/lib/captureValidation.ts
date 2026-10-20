@@ -2,7 +2,7 @@ import type { Frame, Locator } from 'playwright'
 
 export type CreativeEvidence = {
     state: 'CONFIRMED' | 'EMPTY' | 'INCONCLUSIVE'
-    kind?: 'IMAGE' | 'CANVAS' | 'VIDEO' | 'TEXT' | 'FRAME'
+    kind?: 'IMAGE' | 'BACKGROUND' | 'CANVAS' | 'VIDEO' | 'TEXT' | 'FRAME'
     reason: string
 }
 
@@ -50,6 +50,7 @@ export function inspectCreativeDom(element: Element): CreativeEvidence {
     const slotArea = element.getBoundingClientRect().width * element.getBoundingClientRect().height
     let uncertain = false
     let unreadableImage = false
+    let backgroundImage = false
     for (const node of nodes) {
         if (!visible(node, element)) continue
         const rect = node.getBoundingClientRect()
@@ -93,7 +94,11 @@ export function inspectCreativeDom(element: Element): CreativeEvidence {
         } else if (node instanceof HTMLIFrameElement) {
             uncertain = true // Inspected separately with Playwright, including cross-origin frames.
         }
-        if (window.getComputedStyle(node).backgroundImage !== 'none') uncertain = true
+        const background = window.getComputedStyle(node).backgroundImage
+        if (background !== 'none') {
+            uncertain = true
+            if (substantialMedia && /^url\(/.test(background)) backgroundImage = true
+        }
     }
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
     while (walker.nextNode()) {
@@ -110,7 +115,7 @@ export function inspectCreativeDom(element: Element): CreativeEvidence {
         }
     }
     return uncertain
-        ? { state: 'INCONCLUSIVE', reason: unreadableImage ? 'IMAGE_UNREADABLE_PIXELS' : 'CREATIVE_NOT_CONFIRMED' }
+        ? { state: 'INCONCLUSIVE', reason: unreadableImage ? 'IMAGE_UNREADABLE_PIXELS' : backgroundImage ? 'BACKGROUND_IMAGE_AWAITING_VALIDATION' : 'CREATIVE_NOT_CONFIRMED' }
         : { state: 'EMPTY', reason: 'SLOT_HAS_NO_CREATIVE' }
 }
 
@@ -200,9 +205,52 @@ async function verifyTaintedImages(locator: Locator, slotBox: { width: number; h
     return false
 }
 
+/** HTML5 creatives often paint every layer with CSS background images, with no IMG tags.
+ * Validate a visible layer's decoded pixels using a temporary image in the same document.
+ * This keeps its CSP/cookies/network policy and always removes the probe before capture. */
+async function verifyBackgroundImages(locator: Locator): Promise<boolean> {
+    const candidates = await locator.evaluate(element => [element, ...Array.from(element.querySelectorAll('*'))]
+        .flatMap((node, index) => {
+            const value = getComputedStyle(node).backgroundImage
+            const match = value.match(/^url\((?:"([^"]+)"|'([^']+)'|([^)]*))\)$/)
+            return match ? [{ index, source: match[1] || match[2] || match[3] }] : []
+        }).slice(0, 24))
+    let probed = 0
+    for (const candidate of candidates) {
+        const target = candidate.index === 0 ? locator : locator.locator('*').nth(candidate.index - 1)
+        if ((await target.evaluate(inspectCreativeDom)).reason !== 'BACKGROUND_IMAGE_AWAITING_VALIDATION') continue
+        if (++probed > 4) break
+        const key = `css-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        const probe = await target.evaluateHandle(async (element, input) => {
+            const image = element.ownerDocument.createElement('img')
+            image.dataset.adsnapCssProbe = input.key
+            image.style.cssText = `position:fixed!important;left:0!important;top:0!important;width:${Math.min(64, innerWidth)}px!important;height:${Math.min(64, innerHeight)}px!important;max-width:none!important;max-height:none!important;display:block!important;visibility:visible!important;opacity:1!important;filter:none!important;transform:none!important;border:0!important;z-index:2147483647!important;pointer-events:none!important;`
+            element.ownerDocument.body.appendChild(image)
+            image.src = input.source
+            await Promise.race([image.decode().catch(() => {}), new Promise(resolve => setTimeout(resolve, 1_200))])
+            return image
+        }, { key, source: candidate.source })
+        try {
+            const direct = await probe.evaluate(inspectCreativeDom)
+            if (direct.state === 'CONFIRMED') return true
+            if (direct.reason === 'IMAGE_UNREADABLE_PIXELS') {
+                const probeLocator = locator.locator(`xpath=ancestor-or-self::body[1]//img[@data-adsnap-css-probe="${key}"]`)
+                if (await verifyTaintedImages(probeLocator, await probeLocator.boundingBox())) return true
+            }
+        } finally {
+            await probe.evaluate(element => element.remove()).catch(() => {})
+            await probe.dispose()
+        }
+    }
+    return false
+}
+
 export async function inspectCreativeContent(locator: Locator): Promise<CreativeEvidence> {
     const direct = await locator.evaluate(inspectCreativeDom)
     if (direct.state === 'CONFIRMED') return direct
+    if (direct.reason === 'BACKGROUND_IMAGE_AWAITING_VALIDATION' && await verifyBackgroundImages(locator)) {
+        return { state: 'CONFIRMED', kind: 'BACKGROUND', reason: 'BACKGROUND_IMAGE_PIXELS_CONFIRMED' }
+    }
     if (direct.reason === 'SLOT_NOT_VISIBLE') return direct
     const slotBox = await locator.boundingBox()
     if (direct.reason === 'IMAGE_UNREADABLE_PIXELS' && await verifyTaintedImages(locator, slotBox)) {
@@ -219,6 +267,9 @@ export async function inspectCreativeContent(locator: Locator): Promise<Creative
         if (frame.isDetached() || depth > 3 || ++inspectedFrames > 12) return { state: 'INCONCLUSIVE', reason: 'FRAME_LIMIT' }
         const result = await frame.locator('body').evaluate(inspectCreativeDom, undefined, { timeout: 1_000 })
         if (result.state === 'CONFIRMED') return { ...result, kind: 'FRAME', reason: `FRAME_${result.reason}` }
+        if (result.reason === 'BACKGROUND_IMAGE_AWAITING_VALIDATION' && await verifyBackgroundImages(frame.locator('body'))) {
+            return { state: 'CONFIRMED', kind: 'FRAME', reason: 'FRAME_BACKGROUND_IMAGE_PIXELS_CONFIRMED' }
+        }
         if (result.reason === 'IMAGE_UNREADABLE_PIXELS' && await verifyTaintedImages(frame.locator('body'), slotBox)) {
             return { state: 'CONFIRMED', kind: 'FRAME', reason: 'FRAME_IMAGE_RENDERED_OPACITY_CONFIRMED' }
         }
