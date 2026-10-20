@@ -29,6 +29,7 @@ function load(overrides = {}) {
         // This suite intentionally captures loopback fixtures. Production egress is tested separately.
         launchCaptureBrowser: options => playwright.chromium.launch(options),
         resolveCaptureDestination: async () => {},
+        resolveConfiguredCaptureSlot: require('../src/lib/captureTarget.ts').resolveConfiguredCaptureSlot,
         createHash: require('node:crypto').createHash,
         randomUUID: require('node:crypto').randomUUID,
         CaptureOwnershipLostError: Lost,

@@ -13,6 +13,7 @@ import { assertCaptureOwnership, completeCaptureOwnership, CaptureOwnershipLostE
 import { inspectCreativeContent, type CreativeEvidence } from './captureValidation';
 import { launchCaptureBrowser } from './captureBrowser';
 import { resolveCaptureDestination } from './captureNetwork';
+import { resolveConfiguredCaptureSlot } from './captureTarget';
 
 export interface CaptureResult {
     success: boolean
@@ -821,7 +822,11 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
         // ====================================================
         let selectorMismatchError: string | null = null;
         if (bannerConfig && bannerConfig.selector) {
-            const selectorCandidates = [bannerConfig.selector];
+            const resolved = await resolveConfiguredCaptureSlot(page, bannerConfig.selector, isMobile)
+            const selectorCandidates = [resolved.selector];
+            if (resolved.selector !== bannerConfig.selector) await nexusLogStore.addLog(
+                'Nexus: Alvo ajustado pela identidade do slot GPT da pagina', 'INFO',
+                JSON.stringify({ configured: bannerConfig.selector, selected: resolved.selector, reason: resolved.reason }), campaignId)
 
             for (const selector of selectorCandidates) {
                 throwIfCaptureAborted(options.signal)

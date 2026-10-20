@@ -31,6 +31,68 @@ test('a visible frame positioned outside the selected slot cannot confirm its co
     assert.notEqual(evidence.state, 'CONFIRMED')
 })
 test('sized empty container is not a creative', async () => { assert.equal((await inspect('<div id="slot"></div>')).state, 'EMPTY') })
+
+test('HTML5 CSS background layers are confirmed and the original document is restored', async () => {
+    const page = await browser.newPage()
+    try {
+        await page.setContent(`<body style="margin:0"><div id="slot" style='width:300px;height:250px;background-image:url("${whiteImage}")'></div></body>`)
+        const before = await page.locator('html').evaluate(element => element.outerHTML)
+        const evidence = await inspectCreativeContent(page.locator('#slot'))
+        assert.equal(evidence.state, 'CONFIRMED', JSON.stringify(evidence))
+        assert.equal(evidence.kind, 'BACKGROUND')
+        assert.equal(await page.locator('html').evaluate(element => element.outerHTML), before)
+    } finally { await page.close() }
+})
+
+test('hidden, clipped, transparent and broken CSS backgrounds do not validate an empty slot', async () => {
+    const transparent = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="250"></svg>')
+    for (const layer of [
+        `<div style='width:300px;height:250px;opacity:0;background-image:url("${whiteImage}")'></div>`,
+        `<div style='position:absolute;left:1000px;width:300px;height:250px;background-image:url("${whiteImage}")'></div>`,
+        `<div style='width:300px;height:250px;background:green url("${transparent}")'></div>`,
+        '<div style="width:300px;height:250px;background:red url(data:image/png;base64,broken)"></div>',
+    ]) {
+        const evidence = await inspect(`<div id="slot" style="position:relative;overflow:hidden">${layer}</div>`)
+        assert.notEqual(evidence.state, 'CONFIRMED', JSON.stringify(evidence))
+    }
+})
+
+test('CSS background creatives inside a nested frame are recognized', async () => {
+    const content = `<body style="margin:0"><div style='width:300px;height:250px;background-image:url("${whiteImage}")'></div></body>`
+    const evidence = await inspect(`<div id="slot"><iframe style="border:0;width:300px;height:250px" src="data:text/html,${encodeURIComponent(content)}"></iframe></div>`)
+    assert.equal(evidence.state, 'CONFIRMED', JSON.stringify(evidence))
+    assert.match(evidence.reason, /BACKGROUND/)
+})
+
+test('cross-origin CSS backgrounds respect CSP, reject transparent assets and remove their probes', async () => {
+    const images = http.createServer((request, response) => {
+        response.setHeader('Content-Type', 'image/svg+xml')
+        response.end(`<svg xmlns="http://www.w3.org/2000/svg" width="300" height="250">${request.url === '/white' ? '<rect width="300" height="250" fill="white"/>' : ''}</svg>`)
+    })
+    await new Promise<void>(resolve => images.listen(0, '127.0.0.1', resolve))
+    const origin = `http://127.0.0.1:${(images.address() as import('node:net').AddressInfo).port}`
+    const pages = http.createServer((request, response) => {
+        response.setHeader('Content-Type', 'text/html')
+        response.setHeader('Content-Security-Policy', "default-src 'none'; img-src http:; style-src 'unsafe-inline'")
+        response.end(`<html><body style="margin:0"><div id="slot" style="width:300px;height:250px;background:green url('${origin}${request.url}')"></div></body></html>`)
+    })
+    await new Promise<void>(resolve => pages.listen(0, '127.0.0.1', resolve))
+    try {
+        for (const asset of ['/white', '/transparent']) {
+            const page = await browser.newPage()
+            try {
+                await page.goto(`http://127.0.0.1:${(pages.address() as import('node:net').AddressInfo).port}${asset}`, { waitUntil: 'load' })
+                const before = await page.locator('html').evaluate(element => element.outerHTML)
+                const result = await inspectCreativeContent(page.locator('#slot'))
+                assert.equal(result.state === 'CONFIRMED', asset === '/white', JSON.stringify(result))
+                // Playwright screenshot cleanup can leave an inert empty style attribute
+                // on HTML. All content and meaningful styles must remain identical.
+                const after = await page.locator('html').evaluate(element => element.outerHTML)
+                assert.equal(after.replace('<html style="">', '<html>'), before.replace('<html style="">', '<html>'))
+            } finally { await page.close() }
+        }
+    } finally { await Promise.all([new Promise<void>(resolve => images.close(() => resolve())), new Promise<void>(resolve => pages.close(() => resolve()))]) }
+})
 test('decoded white image is valid without text or pixel entropy', async () => {
     assert.equal((await inspect(`<div id="slot"><img src="${whiteImage}" width="300" height="250"></div>`)).state, 'CONFIRMED')
 })
