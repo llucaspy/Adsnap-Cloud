@@ -13,6 +13,7 @@ Os registros de interrupção pelo painel constituem outro resultado: não demon
 - A retomada usa o token efêmero do próprio job com actions:write, apenas na main. Não exige novo segredo ou serviço externo.
 - Retomadas direcionadas consomem somente tarefas existentes. Não recriam pedidos concluídos ou cancelados durante a espera pelo runner.
 - O escopo global permanece global, sem truncar a fila ao limite da consulta de inspeção.
+- O grupo de concorrência preserva até 100 execuções aguardando (queue: max). Assim, um novo pedido direcionado não substitui silenciosamente uma retomada global que já estava pendente.
 - Uma cadeia tem até 12 retomadas. Erro de despacho ou limite atingido com pendências torna o passo visivelmente falho, em vez de indicar conclusão.
 - O cron permanece a cada 15 minutos, deslocado dos minutos de maior concentração. Isso não é garantia de pontualidade do provedor nem substitui a validação de cobertura diária.
 

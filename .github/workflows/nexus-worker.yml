@@ -21,6 +21,7 @@ on:
 concurrency:
   group: nexus-worker-main
   cancel-in-progress: false
+  queue: max
 
 jobs:
   nexus-capture:
