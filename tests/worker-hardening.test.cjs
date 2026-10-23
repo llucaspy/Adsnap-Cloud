@@ -205,3 +205,35 @@ test('capture claim DB outage produces FAILED final log and rejects CI run', asy
     assert.equal(final.type, 'ERROR'); assert.equal(JSON.parse(final.details).cycleStatus, 'FAILED')
     assert.equal(disconnected, true)
 })
+
+test('draining advances the due cutoff as earlier batches complete', async () => {
+    const clock = { now: Date.now() }; const cutoffs = []
+    class ClockDate extends Date {
+        constructor(...args) { super(...(args.length ? args : [clock.now])) }
+        static now() { return clock.now }
+    }
+    const prisma = { campaign: { findMany: async () => [] } }
+    const patch = ['cleanupStuckWorkerJobs','cleanupStuckCampaigns','cleanupOffScheduleFederalQueue','backfillQueuedCaptureJobs','queueFinalDayRecoveryCaptures']
+        .map(name => `${name} = async () => {};`).join('\n') + `
+        claimWorkerJobBatch = async (_run, _size, cutoff) => {
+            cutoffs.push(cutoff.getTime()); return cutoffs.length < 3 ? [{}] : [];
+        };
+        processWorkerCaptureJob = async (_job, _timeout, state) => { clock.now += 60_000; state.success++; };
+    `
+    const {unit} = worker(['runWorkerCycle'], prisma, { Date:ClockDate, clock, cutoffs }, patch)
+    await unit.runWorkerCycle({drainQueue:true})
+    assert.equal(cutoffs.length,3)
+    assert.equal(cutoffs[1]-cutoffs[0],60_000)
+    assert.equal(cutoffs[2]-cutoffs[1],60_000)
+})
+
+test('continuation never recreates a cancelled or already completed targeted job', async () => {
+    const prisma = {campaign:{findMany:async()=>[]}}
+    const patch = ['cleanupStuckWorkerJobs','cleanupStuckCampaigns','cleanupOffScheduleFederalQueue','backfillQueuedCaptureJobs','queueFinalDayRecoveryCaptures']
+        .map(name=>`${name} = async () => {};`).join('\n') + '\nclaimWorkerJobBatch = async () => [];'
+    const {unit} = worker(['runWorkerCycle'],prisma,{
+        process:{env:{TARGET_CAMPAIGN_IDS:'old-request',CONTINUATION_DEPTH:'1'}},
+        enqueueCaptureJobs:async()=>{throw Error('continuation recreated an old request')},
+    },patch)
+    await unit.runWorkerCycle({drainQueue:true})
+})

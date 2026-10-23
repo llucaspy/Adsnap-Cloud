@@ -2,13 +2,18 @@ name: Nexus Engine Worker
 
 on:
   schedule:
-    - cron: '*/15 * * * *' # Roda a cada 15 minutos
+    - cron: '7,22,37,52 * * * *' # Evita os minutos de maior concentracao de agendamentos
     - cron: '0 3 1 * *' # Limpeza mensal
   workflow_dispatch:
     inputs:
       campaign_ids:
         description: 'IDs de campanhas para captura direcionada (separados por virgula)'
         required: false
+        type: string
+      continuation_depth:
+        description: 'Contador interno de retomadas automaticas (limite 12)'
+        required: false
+        default: '0'
         type: string
   repository_dispatch: # Permite gatilhos externos via API
     types: [nexus-trigger]
@@ -19,6 +24,9 @@ concurrency:
 
 jobs:
   nexus-capture:
+    permissions:
+      contents: read
+      actions: write
     runs-on: ubuntu-latest
     if: github.event.schedule != '0 3 1 * *'
     timeout-minutes: 30
@@ -78,6 +86,15 @@ jobs:
           GITHUB_ACTIONS: "true"
           TARGET_CAMPAIGN_IDS: ${{ inputs.campaign_ids || github.event.client_payload.campaign_ids || '' }}
           NEXUS_WORKER_MAX_RUNTIME_MS: '900000'
+          CONTINUATION_DEPTH: ${{ inputs.continuation_depth || '0' }}
+
+      - name: Resume pending captures
+        if: ${{ !cancelled() }}
+        run: npx tsx src/scripts/continue-worker.ts
+        env:
+          WORKER_DISPATCH_TOKEN: ${{ github.token }}
+          TARGET_CAMPAIGN_IDS: ${{ inputs.campaign_ids || github.event.client_payload.campaign_ids || '' }}
+          CONTINUATION_DEPTH: ${{ inputs.continuation_depth || '0' }}
 
       - name: Run Storage Monitor
         run: npm run monitor
