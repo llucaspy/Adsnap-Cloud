@@ -59,6 +59,22 @@ function summary() { return { success: 0, failed: 0, requeued: 0, deadletter: 0,
 async function main() {
     await prisma.$connect()
     try {
+        await run('continuation finds deferred retries but excludes cancelled, completed and exhausted jobs', async () => {
+            const continuation = load('src/lib/workerContinuation.ts', ['pendingCaptureCampaignIds'])
+            const fixtures = []
+            for (const label of ['pending', 'cancelled', 'completed', 'exhausted', 'archived', 'owned', 'far_future']) {
+                const c = await seed('continuation_' + label); fixtures.push(c)
+                await queue.enqueueCaptureJobs([c.id])
+                if (label === 'cancelled' || label === 'completed') await prisma.workerJob.updateMany({where:{campaignId:c.id},data:{status:label==='cancelled'?'FAILED':'SUCCESS'}})
+                if (label === 'exhausted') await prisma.workerJob.updateMany({where:{campaignId:c.id},data:{attempts:2}})
+                if (label === 'archived') await prisma.campaign.update({where:{id:c.id},data:{isArchived:true}})
+                if (label === 'owned') await prisma.workerJob.create({data:{campaignId:c.id,status:'PROCESSING'}})
+                if (label === 'far_future' || label === 'pending') await prisma.workerJob.updateMany({where:{campaignId:c.id},data:{scheduledFor:new Date(Date.now()+(label==='pending'?45_000:3600_000))}})
+            }
+            const ids = await continuation.pendingCaptureCampaignIds(prisma, fixtures.map(c=>c.id))
+            assert.deepEqual(Array.from(ids), [fixtures[0].id])
+            return { pendingRetryFound:true, ineligibleExcluded:6 }
+        })
         await run('terminal failure is reconciled into an idempotent durable Telegram incident', async () => {
             const campaign = await seed('incident')
             const job = await prisma.workerJob.create({ data: { campaignId: campaign.id, status: 'FAILED', attempts: 2,

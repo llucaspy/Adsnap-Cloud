@@ -676,7 +676,9 @@ async function runWorkerCycle(options: WorkerCycleOptions = {}) {
     try { await reconcileCaptureIncidents() }
     catch (error) { await recordCycleError('alertas de quarentena', error) }
 
-    if (targetedCampaignIds.length > 0) {
+    // A continuation consumes existing jobs only; it must never recreate work
+    // completed or cancelled between the dispatch and the next runner starting.
+    if (targetedCampaignIds.length > 0 && Number(process.env.CONTINUATION_DEPTH || 0) === 0) {
         try {
             await enqueueCaptureJobs(targetedCampaignIds, {
                 source: 'worker-targeted-dispatch', priority: 25, allowTerminalStatuses: true,
@@ -750,7 +752,8 @@ async function runWorkerCycle(options: WorkerCycleOptions = {}) {
 
             // Reserve only slots that can start immediately; no idle jobs consume a lease.
             const claimCapacity = Math.min(captureBatchSize, captureConcurrency)
-            const workerJobs = await claimWorkerJobBatch(runId, claimCapacity, captureCutoff, targetedCampaignIds)
+            // Retries and new requests can become due while earlier batches run.
+            const workerJobs = await claimWorkerJobBatch(runId, claimCapacity, new Date(), targetedCampaignIds)
             captureSummary.claimed += workerJobs.length
             captureSummary.jobsClaimed += workerJobs.length
 
