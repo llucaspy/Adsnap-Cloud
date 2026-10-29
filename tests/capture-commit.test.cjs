@@ -75,14 +75,16 @@ function validationBindings() {
 test('authoritative HTML5 document is rendered as an explicitly modified preview with confirmed content', async () => {
     const server=http.createServer((_request,response)=>{response.setHeader('Content-Type','text/html');response.end('<div id="configured" style="width:300px;height:250px"></div>')});
     await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-    const address=server.address(); let packageAgent='';
+    const address=server.address(); let packageAgent='', packageClip;
     try {
         const launch=async options=>{
             const browser=await playwright.chromium.launch(options), newPage=browser.newPage.bind(browser);
             browser.newPage=async options=>{
                 packageAgent=options.userAgent;
                 const page=await newPage(options);
-                await page.route('https://cdn.00px.net/**',route=>route.fulfill({contentType:'text/html',body:route.request().url().includes('/empty/')?'<body></body>':`<body style="margin:0"><img width="300" height="250" src="data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="250"><rect width="300" height="250" fill="blue"/></svg>')}"></body>`}));
+                const screenshot=page.screenshot.bind(page);
+                page.screenshot=options=>{packageClip=options.clip;return screenshot(options)};
+                await page.route('https://cdn.00px.net/**',route=>route.fulfill({contentType:'text/html',body:route.request().url().includes('/empty/')?'<body></body>':`<body style="margin:0"><div id="banner" style="width:300px;height:600px"><img width="300" height="600" src="data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="600"><rect width="300" height="600" fill="blue"/></svg>')}"></div></body>`}));
                 return page;
             };
             return browser;
@@ -92,6 +94,7 @@ test('authoritative HTML5 document is rendered as an explicitly modified preview
         const result=await api._executeCapture('c1',{nexusTimeout:5000,bannerFormats:JSON.stringify([{id:'test',selector:'#configured'}])},{ownership});
         assert.equal(result.success,true,result.error);assert.equal(state.uploaded,1);
         assert.match(packageAgent,/Chrome\/[\d.]+/);assert.equal(packageAgent.includes('HeadlessChrome'),false);
+        assert.equal(packageClip.width,300);assert.equal(packageClip.height,600);
         const evidence=JSON.parse(state.created[0].auditNotes);
         assert.equal(evidence.mode,'MODIFIED_PREVIEW');assert.equal(evidence.validation.state,'CONFIRMED');
         assert.match(evidence.finalSha256,/^[a-f0-9]{64}$/);

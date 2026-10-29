@@ -485,6 +485,15 @@ async function renderLayeredCreativeAsset(
             null,
             { timeout: FAST_SELECTOR_VISIBLE_TIMEOUT_MS },
         ).catch(() => null)
+        // The portal placeholder can still have its loading height. Measure the
+        // original HTML5 root itself; no format catalog or expected dimensions.
+        const rootBox = await page.locator('#banner').first().boundingBox({ timeout: 1_000 }).catch(() => null)
+        if (rootBox && rootBox.width > 1 && rootBox.height > 1) {
+            width = Math.ceil(rootBox.width)
+            height = Math.ceil(rootBox.height)
+        }
+        if (width > 4096 || height > 4096 || width * height > 8_000_000) throw new Error('CREATIVE_DOCUMENT_TOO_LARGE')
+        await page.setViewportSize({ width, height })
         await page.addStyleTag({
             content: `
                 html, body {
@@ -504,12 +513,13 @@ async function renderLayeredCreativeAsset(
 
         throwIfCaptureAborted(signal)
         await waitForCreative(page.locator('body'), signal)
-        return await page.screenshot({
+        const buffer = await page.screenshot({
             type: 'png',
             clip: { x: 0, y: 0, width, height },
             animations: 'allow',
             timeout: FAST_SCREENSHOT_TIMEOUT_MS,
         })
+        return { buffer, width, height }
     } finally {
         await page.close().catch(() => null)
     }
@@ -900,14 +910,14 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                             options.signal,
                             campaignId,
                         );
-                        const renderedDataUrl = `data:image/png;base64,${renderedCreative.toString('base64')}`;
-                        await injectCreativeAsset(locator, renderedDataUrl, slotWidth, slotHeight);
+                        const renderedDataUrl = `data:image/png;base64,${renderedCreative.buffer.toString('base64')}`;
+                        await injectCreativeAsset(locator, renderedDataUrl, renderedCreative.width, renderedCreative.height);
                         creativeLocator = locator.locator('img[data-adsnap-creative="true"]').first()
                         await abortableDelay(FAST_SCROLL_SETTLE_MS, options.signal);
                         await nexusLogStore.addLog(
                             'Nexus: Criativo HTML5 renderizado e fixado no slot',
                             'SUCCESS',
-                            `${slotWidth}x${slotHeight}`,
+                            `${renderedCreative.width}x${renderedCreative.height}`,
                             campaignId,
                         );
                         captureDelaySeconds = 0;
