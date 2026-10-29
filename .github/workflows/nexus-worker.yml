@@ -15,6 +15,15 @@ on:
         required: false
         default: '0'
         type: string
+      diagnose_network:
+        description: 'Somente diagnostico de rede; nao executa capturas nem altera a fila'
+        required: false
+        default: false
+        type: boolean
+      creative_document_url:
+        description: 'Pacote publico HTML5 para comparacao de disponibilidade no diagnostico'
+        required: false
+        type: string
   repository_dispatch: # Permite gatilhos externos via API
     types: [nexus-trigger]
 
@@ -82,6 +91,7 @@ jobs:
           GITHUB_ACTIONS: "true"
 
       - name: Run Nexus Worker
+        if: ${{ inputs.diagnose_network != true }}
         run: npm run worker
         env:
           GITHUB_ACTIONS: "true"
@@ -89,8 +99,16 @@ jobs:
           NEXUS_WORKER_MAX_RUNTIME_MS: '900000'
           CONTINUATION_DEPTH: ${{ inputs.continuation_depth || '0' }}
 
+      - name: Diagnose creative network
+        if: ${{ inputs.diagnose_network == true }}
+        timeout-minutes: 4
+        run: npx tsx src/scripts/diagnose-creative.ts
+        env:
+          TARGET_CAMPAIGN_IDS: ${{ inputs.campaign_ids }}
+          CREATIVE_DOCUMENT_URL: ${{ inputs.creative_document_url }}
+
       - name: Resume pending captures
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && inputs.diagnose_network != true }}
         run: npx tsx src/scripts/continue-worker.ts
         env:
           WORKER_DISPATCH_TOKEN: ${{ github.token }}
@@ -98,6 +116,7 @@ jobs:
           CONTINUATION_DEPTH: ${{ inputs.continuation_depth || '0' }}
 
       - name: Run Storage Monitor
+        if: ${{ inputs.diagnose_network != true }}
         run: npm run monitor
 
   monthly-cleanup:

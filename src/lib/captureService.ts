@@ -433,10 +433,17 @@ async function injectCreativeAsset(locator: Locator, assetUrl: string, width: nu
     });
 }
 
+function desktopCaptureUserAgent(browser: ChromiumBrowser) {
+    return `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${browser.version()} Safari/537.36`
+}
+
 function getLayeredCreativeDocumentUrl(assetUrl: string) {
     try {
         const url = new URL(assetUrl)
-        if (!/(^|\.)00px\.net$/i.test(url.hostname)) return undefined
+        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password
+            || !/(^|\.)00px\.net$/i.test(url.hostname)) return undefined
+        // GAM may expose the complete HTML5 document instead of one image layer.
+        if (/^\/rocket\/[\w-]+\/index\.html$/i.test(url.pathname)) return `${url.origin}${url.pathname}`
         const match = url.pathname.match(/^\/rocket\/([^/]+)\/(?:resources\/)?[^/]+\.(?:png|jpe?g|webp)$/i)
         if (!match) return undefined
 
@@ -457,7 +464,7 @@ async function renderLayeredCreativeAsset(
 ) {
     throwIfCaptureAborted(signal)
     await resolveCaptureDestination(creativeDocumentUrl)
-    const page = await browser.newPage()
+    const page = await browser.newPage({ userAgent: desktopCaptureUserAgent(browser) })
 
     try {
         await nexusLogStore.addLog(
@@ -468,10 +475,11 @@ async function renderLayeredCreativeAsset(
         )
 
         await page.setViewportSize({ width, height })
-        await page.goto(creativeDocumentUrl, {
+        const response = await page.goto(creativeDocumentUrl, {
             waitUntil: 'domcontentloaded',
             timeout: FAST_CAPTURE_NAVIGATION_TIMEOUT_MS,
         })
+        if (!response?.ok()) throw new Error(`CREATIVE_DOCUMENT_HTTP_${response?.status() || 'UNAVAILABLE'}`)
         await page.waitForFunction(
             () => Array.from(document.images).every((img) => img.complete && img.naturalWidth > 0),
             null,
@@ -495,6 +503,7 @@ async function renderLayeredCreativeAsset(
         }
 
         throwIfCaptureAborted(signal)
+        await waitForCreative(page.locator('body'), signal)
         return await page.screenshot({
             type: 'png',
             clip: { x: 0, y: 0, width, height },
@@ -744,7 +753,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
             viewport: DESKTOP_CAPTURE_VIEWPORT,
             // Use a desktop Chrome profile, as mobile already uses a device profile.
             // Some creative servers reject the default HeadlessChrome UA with HTTP 403.
-            userAgent: `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${browser.version()} Safari/537.36`,
+            userAgent: desktopCaptureUserAgent(browser),
             timezoneId: 'America/Sao_Paulo',
             serviceWorkers: 'block',
         });
