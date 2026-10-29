@@ -80,13 +80,24 @@ test('real browser capture accepts actual ad sizes without catalog dimensions an
         '/auto': `<div id="div-gpt-ad-fixture" style="width:217px;height:180px">${ad(217,180)}</div>`,
         '/editorial': `<p>Editorial content outside an advertising slot</p>${valid}`,
         '/delayed': `<div id="configured" style="width:217px;height:180px"></div><script>setTimeout(()=>document.querySelector('#configured').innerHTML=${JSON.stringify(ad(217,180))},2500)</script>`,
+        '/desktop-agent': `<div id="configured" style="width:300px;height:250px">${valid}</div>`,
+        '/mobile-agent': `<div id="configured" style="width:300px;height:250px">${valid}</div>`,
+        '/shifted-slot': `<div id="spacer" style="height:1800px"></div><div id="configured" style="width:300px;height:250px">${valid}</div><div style="height:2000px"></div><script>const observer=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting)){observer.disconnect();setTimeout(()=>document.querySelector('#spacer').style.height='3800px',450)}});observer.observe(document.querySelector('#configured'));</script>`,
     };
-    const server = http.createServer((request, response) => { response.setHeader('Content-Type','text/html'); response.end(pages[request.url] || 'missing'); });
+    const server = http.createServer((request, response) => {
+        response.setHeader('Content-Type','text/html');
+        const ua = request.headers['user-agent'] || '';
+        if ((request.url === '/desktop-agent' && (/HeadlessChrome/.test(ua) || !/Chrome\/[\d.]+/.test(ua)))
+            || (request.url === '/mobile-agent' && !/iPhone/.test(ua))) {
+            response.writeHead(403); response.end('creative server denied browser profile'); return;
+        }
+        response.end(pages[request.url] || 'missing');
+    });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const address = server.address();
     try {
         for (const route of Object.keys(pages)) {
-            const { api, state } = load({campaign:{url:`http://127.0.0.1:${address.port}${route}`,format:'test',device:'desktop',client:'test',captureDelaySeconds:1},bindings:{chromium:playwright.chromium,devices:playwright.devices,normalizeCaptureDelaySeconds:value=>Math.max(1,value||1),...validationBindings()}});
+            const { api, state } = load({campaign:{url:`http://127.0.0.1:${address.port}${route}`,format:'test',device:route==='/mobile-agent'?'mobile':'desktop',client:'test',captureDelaySeconds:1},bindings:{chromium:playwright.chromium,devices:playwright.devices,normalizeCaptureDelaySeconds:value=>Math.max(1,value||1),...validationBindings()}});
             // The existing decorative frame is outside this validation/commit integration test.
             api.setFinalImage(async raw => raw);
             const auto = ['/auto','/editorial'].includes(route);

@@ -356,6 +356,11 @@ async function waitForCreative(locator: Locator, signal?: AbortSignal) {
         try { return await validateCreative(locator) } catch (error) { lastError = error }
         const remaining = CREATIVE_READY_TIMEOUT_MS - (Date.now() - startedAt)
         if (remaining <= 0) throw lastError
+        // Publisher lazy loading can move this same slot after the first scroll.
+        // Reposition it without relaxing visibility or selecting another advertisement.
+        if (lastError instanceof Error && lastError.message.startsWith('SLOT_NOT_VISIBLE')) {
+            await locator.scrollIntoViewIfNeeded({ timeout: Math.min(1_000, remaining) }).catch(() => null)
+        }
         await abortableDelay(Math.min(250, remaining), signal)
     }
 }
@@ -737,6 +742,9 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
             serviceWorkers: 'block',
         } : {
             viewport: DESKTOP_CAPTURE_VIEWPORT,
+            // Use a desktop Chrome profile, as mobile already uses a device profile.
+            // Some creative servers reject the default HeadlessChrome UA with HTTP 403.
+            userAgent: `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${browser.version()} Safari/537.36`,
             timezoneId: 'America/Sao_Paulo',
             serviceWorkers: 'block',
         });
@@ -907,7 +915,7 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                         options.signal,
                         screenshotAnimations,
                         0,
-                        async () => { creativeEvidence = await validateCreative(creativeLocator) },
+                        async () => { creativeEvidence = await waitForCreative(creativeLocator, options.signal) },
                     );
                     const finalImage = await prepareFinalCaptureImage(screenshotBuffer, campaign.url, isMobile, browser, options.signal);
                     await browser.close();
