@@ -17,3 +17,7 @@ Este caminho produz MODIFIED_PREVIEW: o criativo original é renderizado e coloc
 ## Validação
 
 As fixtures verificam documento reconhecido, recusa de outros hosts e credenciais na URL, renderização real com evidência MODIFIED_PREVIEW e recusa de pacote vazio sem upload nem SUCCESS. A validação de produção será registrada separadamente depois da comparação de rede e do reprocessamento direcionado.
+
+O diagnóstico na nuvem foi concluído na execução 40958120491: cdn.00px.net retornou o bootstrap JavaScript com HTTP 200, o carregador 00px.net retornou HTTP 403/HTML e o pacote original retornou HTTP 200 com IMAGE_DECODED. O diagnóstico não alterou a fila nem criou capturas.
+
+O renderizador mede agora o retângulo do #banner no próprio HTML5, em vez de conservar a altura provisória do slot do portal. A fixture usa um placeholder de 300x250 e documento real de 300x600 e confirma rasterização integral de 300x600; o pacote vazio continua recusado. Isso usa geometria observada do documento, sem catálogo de dimensões. A reprodução ao vivo do Halfpage por esse caminho passou com MODIFIED_PREVIEW e IMAGE_DECODED.
