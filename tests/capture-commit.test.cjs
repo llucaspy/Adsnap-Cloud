@@ -25,7 +25,7 @@ function load(overrides = {}) {
     };
     const bindings = {
         module: { exports: {} }, exports: {}, console: { log() {}, warn() {}, error() {} }, Buffer, process: { env: {} },
-        setTimeout, clearTimeout, AbortController, Error,
+        setTimeout, clearTimeout, AbortController, Error, URL,
         // This suite intentionally captures loopback fixtures. Production egress is tested separately.
         launchCaptureBrowser: options => playwright.chromium.launch(options),
         resolveCaptureDestination: async () => {},
@@ -44,11 +44,18 @@ function load(overrides = {}) {
         ...overrides.bindings,
     };
     const context = vm.createContext(bindings);
-    vm.runInContext(compiled + '\nmodule.exports={saveCapture,assertCaptureMayWrite,processCampaign,_executeCapture,setCapture:handler=>{_executeCapture=handler},setFinalImage:handler=>{prepareFinalCaptureImage=handler}};', context);
+    vm.runInContext(compiled + '\nmodule.exports={saveCapture,assertCaptureMayWrite,processCampaign,_executeCapture,getLayeredCreativeDocumentUrl,setCapture:handler=>{_executeCapture=handler},setFinalImage:handler=>{prepareFinalCaptureImage=handler}};', context);
     return { api: context.module.exports, state, Lost };
 }
 const ownership = { campaignId: 'c1', runId: 'run-1', jobId: 'job-1', attempt: 1 };
 const metadata = { mode: 'OBSERVED', rawSha256: 'raw-digest', finalSha256: 'final-digest', rawPreserved: false, validation: { state: 'CONFIRMED', reason: 'IMAGE_DECODED' } };
+
+test('HTML5 package selection preserves the authoritative document and rejects unrelated hosts and credentials', () => {
+    const {api}=load();
+    assert.equal(api.getLayeredCreativeDocumentUrl('https://cdn.00px.net/rocket/243864/index.html?t=cache'),'https://cdn.00px.net/rocket/243864/index.html');
+    assert.equal(api.getLayeredCreativeDocumentUrl('https://cdn.00px.net/rocket/243864/resources/layer.png'),'https://cdn.00px.net/rocket/243864/index.html');
+    for(const url of ['https://unrelated.invalid/rocket/243864/index.html','https://00px.net.evil.invalid/rocket/243864/index.html','https://user:password@cdn.00px.net/rocket/243864/index.html']) assert.equal(api.getLayeredCreativeDocumentUrl(url),undefined);
+});
 
 test('capture and campaign success plus queue ACK commit under the same ownership fence', async () => {
     const { api, state } = load();
@@ -64,6 +71,36 @@ function validationBindings() {
     vm.runInContext(js + '\nmodule.exports={inspectCreativeContent};', context);
     return context.module.exports;
 }
+
+test('authoritative HTML5 document is rendered as an explicitly modified preview with confirmed content', async () => {
+    const server=http.createServer((_request,response)=>{response.setHeader('Content-Type','text/html');response.end('<div id="configured" style="width:300px;height:250px"></div>')});
+    await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+    const address=server.address(); let packageAgent='';
+    try {
+        const launch=async options=>{
+            const browser=await playwright.chromium.launch(options), newPage=browser.newPage.bind(browser);
+            browser.newPage=async options=>{
+                packageAgent=options.userAgent;
+                const page=await newPage(options);
+                await page.route('https://cdn.00px.net/**',route=>route.fulfill({contentType:'text/html',body:route.request().url().includes('/empty/')?'<body></body>':`<body style="margin:0"><img width="300" height="250" src="data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="250"><rect width="300" height="250" fill="blue"/></svg>')}"></body>`}));
+                return page;
+            };
+            return browser;
+        };
+        const {api,state}=load({campaign:{url:`http://127.0.0.1:${address.port}`,format:'test',device:'desktop',client:'test',captureDelaySeconds:1,compositionBox:{creativeAssetUrl:'https://cdn.00px.net/rocket/fixture/index.html'}},bindings:{launchCaptureBrowser:launch,devices:playwright.devices,normalizeCaptureDelaySeconds:()=>1,...validationBindings()}});
+        api.setFinalImage(async raw=>raw);
+        const result=await api._executeCapture('c1',{nexusTimeout:5000,bannerFormats:JSON.stringify([{id:'test',selector:'#configured'}])},{ownership});
+        assert.equal(result.success,true,result.error);assert.equal(state.uploaded,1);
+        assert.match(packageAgent,/Chrome\/[\d.]+/);assert.equal(packageAgent.includes('HeadlessChrome'),false);
+        const evidence=JSON.parse(state.created[0].auditNotes);
+        assert.equal(evidence.mode,'MODIFIED_PREVIEW');assert.equal(evidence.validation.state,'CONFIRMED');
+        assert.match(evidence.finalSha256,/^[a-f0-9]{64}$/);
+        const empty=load({campaign:{url:`http://127.0.0.1:${address.port}`,format:'test',device:'desktop',client:'test',captureDelaySeconds:1,compositionBox:{creativeAssetUrl:'https://cdn.00px.net/rocket/empty/index.html'}},bindings:{launchCaptureBrowser:launch,devices:playwright.devices,normalizeCaptureDelaySeconds:()=>1,...validationBindings()}});
+        empty.api.setFinalImage(async raw=>raw);
+        const rejected=await empty.api._executeCapture('c1',{nexusTimeout:5000,bannerFormats:JSON.stringify([{id:'test',selector:'#configured'}])},{ownership});
+        assert.equal(rejected.success,false);assert.equal(empty.state.uploaded,0);assert.equal(empty.state.created.length,0);
+    }finally{await new Promise(resolve=>server.close(resolve))}
+});
 test('real browser capture accepts actual ad sizes without catalog dimensions and refuses empty or unrelated content', async () => {
     const image = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="250"><rect width="300" height="250" fill="white"/></svg>');
     const valid = `<img width="300" height="250" src="${image}">`;
