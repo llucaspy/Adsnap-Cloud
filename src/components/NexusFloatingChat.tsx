@@ -243,8 +243,21 @@ export function NexusFloatingChat() {
     const isLoginPage = pathname?.startsWith('/login')
     const [isOpen, setIsOpen] = useState(false)
     const [chatMode, setChatMode] = useState('support')
-    const codexMode = chatMode === 'personal'
-    const supportMode = chatMode === 'support' && !isLoginPage
+    const [isOwner, setIsOwner] = useState(false)
+    const codexMode = chatMode === 'personal' && isOwner
+    const supportMode = (chatMode === 'support' || (chatMode === 'personal' && !isOwner)) && !isLoginPage
+    useEffect(() => {
+        if (!isOpen || isLoginPage) return
+        const controller = new AbortController()
+        void fetch('/api/support', { credentials: 'same-origin', cache: 'no-store', signal: controller.signal })
+            .then(response => response.ok ? response.json() : null).then(result => {
+                if (controller.signal.aborted) return
+                const owner = result?.viewer?.isOwner === true
+                setIsOwner(owner)
+                if (!owner) setChatMode(mode => mode === 'personal' ? 'support' : mode)
+            }).catch(() => { if (!controller.signal.aborted) setIsOwner(false) })
+        return () => controller.abort()
+    }, [isOpen, isLoginPage])
     const [messages, setMessages] = useState<FloatingMessage[]>([initialMessage()])
     const [input, setInput] = useState('')
     const [isPending, startTransition] = useTransition()
@@ -356,13 +369,13 @@ export function NexusFloatingChat() {
                                     <NexusChatMark compact />
                                     <div className="min-w-0">
                                         <div className="flex items-center gap-2">
-                                            <p className="text-sm font-semibold truncate" style={{ color: '#ffffff' }}>{supportMode ? 'Codex · Adsnap' : codexMode ? 'Codex pessoal' : 'Nexus'}</p>
+                                            <p className="text-sm font-semibold truncate" style={{ color: '#ffffff' }}>{supportMode ? 'Nexus · Adsnap' : codexMode ? 'Codex pessoal' : 'Nexus'}</p>
                                         </div>
-                                        <p className="text-[11px] truncate" style={{ color: '#a3a3a3' }}>{supportMode ? 'Atendimento e diagnóstico' : codexMode ? 'Código no seu computador' : 'Central de operacao'}</p>
+                                        <p className="text-[11px] truncate" style={{ color: '#a3a3a3' }}>{supportMode ? 'Guardião do sistema · campanhas e prints' : codexMode ? 'Código no seu computador' : 'Central de operacao'}</p>
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-1">
-                                    {!isLoginPage && <select aria-label="Modo do chat" value={chatMode} onChange={e => setChatMode(e.target.value)} className="w-28 px-1 h-8 text-xs text-neutral-300 bg-neutral-900 border border-white/10 rounded-lg"><option value="support">Suporte Adsnap</option><option value="commands">Comandos</option><option value="personal">Codex pessoal</option></select>}
+                                    {!isLoginPage && <select aria-label="Modo do chat" value={chatMode} onChange={e => setChatMode(e.target.value)} className="w-28 px-1 h-8 text-xs text-neutral-300 bg-neutral-900 border border-white/10 rounded-lg"><option value="support">Suporte Adsnap</option><option value="commands">Comandos</option>{isOwner && <option value="personal">Codex pessoal</option>}</select>}
                                     {!codexMode && !supportMode && <button type="button" onClick={clearConversation} className="w-8 h-8 flex items-center justify-center" style={{ color: '#a3a3a3', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8 }} title="Limpar conversa" aria-label="Limpar conversa">
                                         <Trash2 size={14} />
                                     </button>}

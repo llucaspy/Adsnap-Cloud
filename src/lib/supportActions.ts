@@ -2,11 +2,13 @@ import { Prisma, type PrismaClient } from '@prisma/client'
 import { randomUUID } from 'node:crypto'
 import { createSupportStore, SupportError, type SupportIdentity } from './supportStore'
 import { getCampaignDateKey, getBrasiliaClock } from './campaignSchedule'
+import { getNexusAccess, publicNexusAction } from './nexusPolicy'
 
 export function createSupportActions(db: PrismaClient, trigger: (ids: string[]) => Promise<boolean>) {
     const store = createSupportStore(db)
     async function confirm(actionId: string, identity: SupportIdentity) {
         await store.liveUser(identity)
+        const access = await getNexusAccess(db, identity.userId)
         const result = await db.$transaction(async tx => {
             await tx.$queryRaw`SELECT id FROM "SupportAction" WHERE id = ${actionId} FOR UPDATE`
             const action = await tx.supportAction.findFirst({ where: { id: actionId, turn: { status: 'SUCCESS', conversation: { userId: identity.userId, user: { isActive: true } } } } })
@@ -50,7 +52,7 @@ export function createSupportActions(db: PrismaClient, trigger: (ids: string[]) 
             return { action: updated, campaignIds: ids }
         }, { maxWait: 10000, timeout: 15000 })
         const dispatched = result.campaignIds.length ? await trigger(result.campaignIds).catch(() => false) : null
-        return { action: result.action, dispatched }
+        return { action: publicNexusAction(result.action, access?.isOwner === true), dispatched }
     }
     async function refresh(conversationId: string, identity: SupportIdentity) {
         await store.owned(conversationId, identity)

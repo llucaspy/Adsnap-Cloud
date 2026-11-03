@@ -17,7 +17,7 @@ async function api<T>(path: string, body?: object, signal?: AbortSignal): Promis
 }
 
 const actionLabels: Record<string, string> = { RETRY_CAPTURE: 'Reprocessar capturas', VERIFIED_PREVIEW: 'Autorizar prévias modificadas', TECHNICAL_REVIEW: 'Registrar análise técnica' }
-const stateLabels: Record<string, string> = { PENDING: 'Aguardando sua confirmação', QUEUED: 'Acompanhando a fila de capturas', SUCCESS: 'Capturas concluídas', FAILED: 'Há falhas; solicite um novo diagnóstico', REVIEW_REQUIRED: 'Análise técnica registrada' }
+const stateLabels: Record<string, string> = { PENDING: 'Aguardando sua confirmação', QUEUED: 'Acompanhando a fila de capturas', SUCCESS: 'Capturas concluídas', FAILED: 'Há falhas; solicite um novo diagnóstico', REVIEW_REQUIRED: 'Ocorrência interna registrada · restrita ao erro informado', ANALYZING: 'Ocorrência em análise interna', INTERNAL_REVIEW: 'Análise interna registrada · requer validação técnica', VALIDATION_REQUIRED: 'Correção interna preparada · aguardando validação' }
 
 export function SupportChatPanel() {
     const [summaries, setSummaries] = useState<Summary[]>([])
@@ -105,7 +105,7 @@ export function SupportChatPanel() {
             </div>
         </div>
         <div className="flex-1 overflow-y-auto min-h-0 p-5 space-y-3" aria-live="polite">
-            {!conversation?.turns.length && <p className="text-sm text-neutral-400">Descreva o problema e informe o PI ou a campanha. Posso consultar tentativas, explicar falhas e preparar reprocessamentos. O histórico fica salvo na sua conta do Adsnap.</p>}
+            {!conversation?.turns.length && <p className="text-sm text-neutral-400">Sou Nexus, o guardião do Adsnap. Ajudo com campanhas, cadastro, prints e tutoriais. Informe o PI ou descreva o que precisa; vou consultar os dados e orientar a solução. O histórico fica salvo na sua conta.</p>}
             {conversation?.turns.map(turn => <div key={turn.id} className="space-y-3">
                 <div className="ml-6 bg-neutral-700 rounded-lg p-3 text-sm whitespace-pre-wrap break-words">{turn.userText}</div>
                 {turn.assistantText && <div className="mr-3 bg-white/5 rounded-lg p-3 text-sm break-words"><ReactMarkdown skipHtml components={{

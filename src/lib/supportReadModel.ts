@@ -2,6 +2,8 @@ import { Prisma, type PrismaClient } from '@prisma/client'
 import { getBrasiliaClock, getBrasiliaDayRangeFor, getCampaignDateKey } from './campaignSchedule'
 import { SupportError, supportText } from './supportStore'
 import { createFormatLabelMap, resolveFormatLabel } from './formatLabels'
+import { getNexusAccess, nexusAuthority } from './nexusPolicy'
+import { describeCaptureFailure } from './captureFailure'
 
 type Flight = { flightStart: Date | null; flightEnd: Date | null; adOpsStatus: string; status: string }
 export function supportFlightState(c: Flight, now = new Date()) {
@@ -40,12 +42,12 @@ function queryWhere(input: Record<string, unknown>): Prisma.CampaignWhereInput {
 
 export function createSupportReadModel(db: PrismaClient, userId: string) {
     async function user() {
-        const current = await db.user.findUnique({ where: { id: userId }, select: { id: true, name: true, role: true, isActive: true } })
-        if (!current?.isActive || !['user', 'admin'].includes(current.role)) throw new SupportError('Entre novamente para consultar o sistema.', 401)
-        return current
+        const access = await getNexusAccess(db, userId)
+        if (!access) throw new SupportError('Entre novamente para consultar o sistema.', 401)
+        return access
     }
     return async (name: string, input: Record<string, unknown> = {}) => {
-        const current = await user()
+        const { user: current, isOwner } = await user()
         const now = new Date()
         if (name === 'adsnap_system_overview') {
             const today = getBrasiliaDayRangeFor(now)
@@ -63,11 +65,11 @@ export function createSupportReadModel(db: PrismaClient, userId: string) {
             const formatCounts = (rows: typeof active) => [...new Set(rows.map(c => c.format))].sort().map(format => ({ formatId: format, label: resolveFormatLabel(labels, format), records: rows.filter(c => c.format === format).length }))
             const pis = (rows: typeof active) => new Set(rows.map(c => c.pi.trim() || c.id)).size
             const countBy = (rows: typeof active, key: 'format' | 'device' | 'status') => Object.fromEntries([...new Set(rows.map(c => c[key]))].sort().map(value => [value, rows.filter(c => c[key] === value).length]))
-            return { asOf: now.toISOString(), timezone: 'America/Sao_Paulo', definition, viewer: current,
+            return { asOf: now.toISOString(), timezone: 'America/Sao_Paulo', definition, viewer: current, authority: nexusAuthority(isOwner),
                 campaigns: { registeredPis: pis(data.campaigns), registeredFormatRecords: data.campaigns.length, activePis: pis(active), activeFormatRecords: active.length, noDatesRecords: data.campaigns.filter(c => supportFlightState(c, now) === 'NO_DATES').length, upcomingRecords: data.campaigns.filter(c => supportFlightState(c, now) === 'UPCOMING').length, formats: formatCounts(data.campaigns), activeFormats: formatCounts(active), devices: countBy(data.campaigns, 'device'), captureStates: countBy(data.campaigns, 'status') },
                 captures: { scope: 'Todos os prints persistidos, incluindo campanhas arquivadas e montagens; não confundir SUCCESS com prova de exibição observada: consulte mode e validation.', allTimeByStatus: data.captures, todayByStatus: data.capturesToday, todayStart: today.start, todayEndExclusive: today.end }, jobsByStatus: data.jobs,
-                supportExecutor: data.executor ? { ...data.executor, online: data.executor.lockedUntil > now && now.getTime() - data.executor.heartbeatAt.getTime() < 45000 } : null,
-                capabilities: 'Consultas em tempo real de campanhas, formatos, prints e auditorias, filas, erros e seu perfil. Ações operacionais exigem confirmação. Consulta de fontes autorizadas para bugs. Sem acesso direto a GAM/Drive, senhas ou outras conversas. Estado de fila não comprova processo worker online.' }
+                supportExecutor: data.executor ? { ...(isOwner ? data.executor : { state: data.executor.state }), online: data.executor.lockedUntil > now && now.getTime() - data.executor.heartbeatAt.getTime() < 45000 } : null,
+                capabilities: isOwner ? 'Você é a conta principal: suporte, fontes autorizadas, configurações e ocorrências técnicas internas. Sem credenciais ou conversas de terceiros.' : 'Suporte operacional de campanhas, cadastro, prints e tutoriais. Sem código-fonte, APIs, configurações internas ou dados críticos. Falhas internas podem ser encaminhadas sem expor detalhes técnicos.' }
         }
         const formats = await db.settings.findUnique({ where: { id: 1 }, select: { bannerFormats: true } })
         const labels = createFormatLabelMap(formats?.bannerFormats)
@@ -90,7 +92,7 @@ export function createSupportReadModel(db: PrismaClient, userId: string) {
             return { asOf: now, total, nextOffset: offset + limit < total ? offset + limit : null, items: items.map(({ auditNotes, aiDiagnostic, ...item }) => {
                 let mode: string | null = null, validation: string | null = null
                 try { const notes = JSON.parse(auditNotes || '{}'); mode = typeof notes.mode === 'string' ? clean(notes.mode) : null; validation = typeof notes.validation?.state === 'string' ? clean(notes.validation.state) : null } catch { /* historical metadata */ }
-                return { ...item, campaign: formatRecord(item.campaign), aiDiagnostic: clean(aiDiagnostic), mode, validation, book: `/books/${encodeURIComponent(item.campaign.pi)}` }
+                return { ...item, campaign: formatRecord(item.campaign), aiDiagnostic: isOwner ? clean(aiDiagnostic) : null, mode: ['MODIFIED_PREVIEW', 'OBSERVED', 'NATIVE', 'ASSEMBLY'].includes(mode || '') ? mode : null, validation: ['VERIFIED', 'CONFIRMED', 'PASSED', 'FAILED', 'UNCONFIRMED', 'SUCCESS'].includes(validation || '') ? validation : null, book: `/books/${encodeURIComponent(item.campaign.pi)}` }
             }) }
         }
         if (name === 'adsnap_worker_status') {
@@ -102,10 +104,11 @@ export function createSupportReadModel(db: PrismaClient, userId: string) {
                 db.campaign.findMany({ where: { isArchived: false, status: 'PROCESSING' }, take: 50, select: { id: true, pi: true, format: true, processingStartedAt: true, processingHeartbeatAt: true, lockedUntil: true } }),
                 db.campaign.findMany({ where: { ...queryWhere({ ...input, status: undefined }), lastWorkerError: { not: null } }, take: 20, orderBy: { updatedAt: 'desc' }, select: { id: true, pi: true, client: true, format: true, status: true, lastWorkerError: true, updatedAt: true } }),
             ])
+            if (!isOwner) return { asOf: now, counts, total, nextOffset: offset + limit < total ? offset + limit : null, jobs: jobs.map(j => ({ status: j.status, attempts: j.attempts, createdAt: j.createdAt, finishedAt: j.finishedAt, campaign: j.campaign ? formatRecord(j.campaign) : null })), recentErrors: recentErrors.map(c => { const hint = describeCaptureFailure(c.lastWorkerError); return { id: c.id, pi: c.pi, client: c.client, format: resolveFormatLabel(labels, c.format), status: c.status, category: hint.category, suggestion: hint.suggestion } }), warning: 'Consulta operacional. A fila histórica não comprova que uma captura está sendo executada agora.' }
             return { asOf: now, counts, total, nextOffset: offset + limit < total ? offset + limit : null, jobs: jobs.map(j => ({ ...j, campaign: j.campaign ? formatRecord(j.campaign) : null, lastError: clean(j.lastError), leaseExpired: j.lockedUntil ? j.lockedUntil <= now : null })), processing: processing.map(formatRecord), recentErrors: recentErrors.map(c => ({ ...formatRecord(c), lastWorkerError: clean(c.lastWorkerError) })), warning: 'Jobs históricos e fila não provam que um processo está online. Avalie heartbeat, lease e horário. Processing e erros são amostras limitadas a 50 e 20; counts é o total global.' }
         }
         if (name === 'adsnap_system_settings') {
-            if (current.role !== 'admin') return { viewer: current, error: 'Configurações administrativas exigem perfil admin. Você pode consultar campanhas, prints e workers.' }
+            if (!isOwner) return { viewer: current, error: 'Esse acesso é exclusivo da conta principal. Você pode consultar campanhas e prints.' }
             const settings = await db.settings.findUnique({ where: { id: 1 }, select: { nexusMaxRetries: true, nexusTimeout: true, nexusDelay: true, autoCleanupDays: true, performanceMode: true, feedPollingRate: true, maintenanceMode: true, bannerFormats: true, telegramAlertsEnabled: true, governmentReportAutoSend: true, governmentReportTime: true, updatedAt: true } })
             const users = await db.user.groupBy({ by: ['role', 'isActive'], _count: { _all: true } })
             return { asOf: now, viewer: current, settings, usersByRoleAndActive: users }

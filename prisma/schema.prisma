@@ -144,6 +144,15 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   supportConversations SupportConversation[]
+  nexusPolicy SupportPolicy?
+}
+
+model SupportPolicy {
+  id          String @id
+  ownerUserId String @unique
+  owner       User @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  version     String
+  updatedAt   DateTime @updatedAt
 }
 
 model SupportConversation {
