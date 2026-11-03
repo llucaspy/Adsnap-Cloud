@@ -16,6 +16,7 @@ import {
     X,
 } from 'lucide-react'
 import { submitNexusAssistantMessage, type NexusAssistantResponse } from '@/app/nexus/actions'
+import { CodexPersonalPanel } from './CodexPersonalPanel'
 
 type FloatingMessage = {
     id: string
@@ -240,10 +241,23 @@ export function NexusFloatingChat() {
     const pathname = usePathname()
     const isLoginPage = pathname?.startsWith('/login')
     const [isOpen, setIsOpen] = useState(false)
+    const [codexMode, setCodexMode] = useState(false)
     const [messages, setMessages] = useState<FloatingMessage[]>([initialMessage()])
     const [input, setInput] = useState('')
     const [isPending, startTransition] = useTransition()
     const bottomRef = useRef<HTMLDivElement | null>(null)
+
+    useEffect(() => {
+        function paired() {
+            if (!isLoginPage && new URLSearchParams(window.location.hash.slice(1)).has('codex-pair')) {
+                setCodexMode(true)
+                setIsOpen(true)
+            }
+        }
+        paired()
+        window.addEventListener('hashchange', paired)
+        return () => window.removeEventListener('hashchange', paired)
+    }, [isLoginPage])
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -339,16 +353,17 @@ export function NexusFloatingChat() {
                                     <NexusChatMark compact />
                                     <div className="min-w-0">
                                         <div className="flex items-center gap-2">
-                                            <p className="text-sm font-semibold truncate" style={{ color: '#ffffff' }}>Nexus</p>
-                                            <span className="px-2 py-0.5 text-[10px] font-semibold" style={{ color: '#22c55e', background: 'rgba(34,197,94,0.12)', borderRadius: 999 }}>online</span>
+                                            <p className="text-sm font-semibold truncate" style={{ color: '#ffffff' }}>{codexMode ? 'Codex pessoal' : 'Nexus'}</p>
+                                            {!codexMode && <span className="px-2 py-0.5 text-[10px] font-semibold" style={{ color: '#22c55e', background: 'rgba(34,197,94,0.12)', borderRadius: 999 }}>online</span>}
                                         </div>
-                                        <p className="text-[11px] truncate" style={{ color: '#a3a3a3' }}>Central de operacao</p>
+                                        <p className="text-[11px] truncate" style={{ color: '#a3a3a3' }}>{codexMode ? 'Código no seu computador' : 'Central de operacao'}</p>
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-1">
-                                    <button type="button" onClick={clearConversation} className="w-8 h-8 flex items-center justify-center" style={{ color: '#a3a3a3', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8 }} title="Limpar conversa" aria-label="Limpar conversa">
+                                    {!isLoginPage && <button type="button" onClick={() => setCodexMode(current => !current)} className="px-2 h-8 text-xs text-neutral-300 border border-white/10 rounded-lg">{codexMode ? 'Voltar ao Nexus' : 'Codex pessoal'}</button>}
+                                    {!codexMode && <button type="button" onClick={clearConversation} className="w-8 h-8 flex items-center justify-center" style={{ color: '#a3a3a3', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8 }} title="Limpar conversa" aria-label="Limpar conversa">
                                         <Trash2 size={14} />
-                                    </button>
+                                    </button>}
                                     <Link href="/nexus" className="w-8 h-8 flex items-center justify-center" style={{ color: '#a3a3a3', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8 }} title="Abrir Nexus">
                                         <Maximize2 size={14} />
                                     </Link>
@@ -358,6 +373,7 @@ export function NexusFloatingChat() {
                                 </div>
                             </header>
 
+                            {codexMode && !isLoginPage ? <CodexPersonalPanel /> : <>
                             <div className="relative flex-1 overflow-y-auto p-5 space-y-4">
                                 <AnimatePresence initial={false}>
                                     {messages.map(message => (
@@ -416,6 +432,7 @@ export function NexusFloatingChat() {
                                     </button>
                                 </div>
                             </form>
+                            </>}
                         </div>
                     </motion.section>
                 )}
