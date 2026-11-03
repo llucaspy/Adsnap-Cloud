@@ -1,0 +1,87 @@
+import dotenv from 'dotenv'
+import { readFile, realpath } from 'node:fs/promises'
+import { resolve, sep } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import prisma from '../lib/prisma'
+import { createSupportStore } from '../lib/supportStore'
+import { createSupportTools, SUPPORT_TOOLS, SUPPORT_SOURCE_FILES } from '../lib/supportTools'
+import { redactLogText } from '../lib/logRedaction'
+import { PersonalAgent } from '../../scripts/codex-personal/bridge.mjs'
+import { runSharedCodex } from '../../scripts/codex-personal/shared-runtime.mjs'
+
+dotenv.config({ path: process.env.ADSNAP_SUPPORT_ENV_FILE || '.env.local' })
+const root = resolve(process.cwd())
+const store = createSupportStore(prisma)
+const runId = randomUUID()
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+async function readSource(file: string, start: number) {
+    if (!SUPPORT_SOURCE_FILES.includes(file)) throw new Error('Source not allowed')
+    const path = await realpath(resolve(root, file))
+    const realRoot = await realpath(root)
+    if (!path.startsWith(realRoot + sep)) throw new Error('Source outside repository')
+    const text = await readFile(path, 'utf8')
+    if (start === 0) return text.slice(0, 500000)
+    return redactLogText(text.split(/\r?\n/).slice(start - 1, start + 119).map((line, i) => `${start + i}: ${line}`).join('\n'), 10000)
+}
+
+async function main() {
+    const probe = new PersonalAgent()
+    let plan: string
+    try { plan = (await probe.ready()).plan } finally { probe.close() }
+    if (!await store.heartbeat(runId, 'ONLINE', plan)) throw new Error('Outro executor do atendimento está ativo.')
+    console.log(JSON.stringify({ supportExecutor: 'started', auth: 'chatgpt', plan, paidApi: false }))
+    let active: { id: string; controller: AbortController } | null = null
+    let state = 'ONLINE', pausedUntil = 0, stopping = false, updating = false
+    const timer = setInterval(async () => {
+        if (updating) return
+        updating = true
+        try {
+            if (!await store.heartbeat(runId, state, plan)) { stopping = true; active?.controller.abort() }
+            const current = active
+            if (current && !await store.renew(current.id, runId)) current.controller.abort()
+        } catch { stopping = true; active?.controller.abort() }
+        finally { updating = false }
+    }, 15000)
+    const stop = () => { stopping = true; active?.controller.abort() }
+    process.once('SIGINT', stop); process.once('SIGTERM', stop)
+    try {
+        while (!stopping) {
+            if (Date.now() < pausedUntil) { await wait(5000); continue }
+            state = 'ONLINE'
+            const turn = await store.claim(runId)
+            if (!turn) { if (process.argv.includes('--once')) break; await wait(5000); continue }
+            const controller = new AbortController()
+            active = { id: turn.id, controller }; state = 'BUSY'
+            const timeout = setTimeout(() => controller.abort(), 180000)
+            try {
+                const history = await prisma.supportTurn.findMany({ where: { conversationId: turn.conversationId, createdAt: { lte: turn.createdAt } }, orderBy: { createdAt: 'desc' }, take: 12, select: { userText: true, assistantText: true, status: true, actions: { select: { type: true, status: true, result: true } } } })
+                const messages = history.reverse().flatMap(t => [
+                    { role: 'user', text: t.userText },
+                    ...(t.assistantText ? [{ role: 'assistant', text: t.assistantText.slice(0, 6000) }] : []),
+                    ...(t.actions.length ? [{ role: 'system-data', text: JSON.stringify(t.actions) }] : []),
+                ]).reverse().filter((() => { let remaining = 30000; return (m: { text: string }) => { remaining -= m.text.length; return remaining >= 0 } })()).reverse()
+                const executeTool = createSupportTools(prisma, turn.id, runId, readSource)
+                const result = await runSharedCodex({ messages, tools: SUPPORT_TOOLS, executeTool, signal: controller.signal,
+                    onReady: async (account: { plan: string }) => { plan = account.plan; if (!await store.heartbeat(runId, 'BUSY', plan)) throw new Error('Executor perdeu a posse.') },
+                })
+                await store.finish(turn.id, runId, result.answer)
+                console.log(JSON.stringify({ supportTurn: turn.id, status: 'SUCCESS' }))
+            } catch (error) {
+                const limited = !!(error as Error & { limited?: boolean }).limited
+                const message = limited ? 'O limite do plano foi atingido. O atendimento está pausado; nenhuma API paga foi utilizada.'
+                    : 'A análise não foi concluída. Confira as ações e o estado do executor antes de solicitar outra tentativa.'
+                await store.finish(turn.id, runId, message, false).catch(() => {})
+                if (limited) { state = 'LIMITED'; pausedUntil = Date.now() + 15 * 60000 }
+                console.error(JSON.stringify({ supportTurn: turn.id, status: 'FAILED', limited }))
+            } finally { clearTimeout(timeout); active = null }
+            if (process.argv.includes('--once')) break
+        }
+    } finally {
+        clearInterval(timer)
+        await prisma.supportExecutor.updateMany({ where: { id: 'codex-plus', runId }, data: { state: 'OFFLINE', lockedUntil: new Date(), heartbeatAt: new Date() } }).catch(() => {})
+        await prisma.$disconnect()
+    }
+}
+
+main().catch(async () => { console.error('O executor não iniciou. Confira a conexão de dados, o schema e o login ChatGPT do Codex. Nenhuma API paga foi utilizada.'); await prisma.$disconnect(); process.exitCode = 1 })

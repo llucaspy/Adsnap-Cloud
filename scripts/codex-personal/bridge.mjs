@@ -13,7 +13,7 @@ const MAX_MESSAGE = 16000
 const MAX_BODY = 20000
 const TTL = 8 * 60 * 60 * 1000
 
-export function codexLaunch() {
+export function codexLaunch(extraConfig = []) {
     // Resolve the installed official CLI without invoking a shell or reading credentials.
     const require = createRequire(import.meta.url)
     const bases = [process.env.APPDATA && join(process.env.APPDATA, 'npm/node_modules'),
@@ -37,7 +37,7 @@ export function codexLaunch() {
     }
     return spawn(process.execPath, [launcher, 'app-server', '--stdio',
         '-c', 'forced_login_method="chatgpt"', '-c', 'model_provider="openai"',
-        '-c', 'shell_environment_policy.inherit="none"'], {
+        '-c', 'shell_environment_policy.inherit="none"', ...extraConfig.flatMap(value => ['-c', value])], {
         stdio: ['pipe', 'pipe', 'pipe'], env, windowsHide: true,
     })
 }

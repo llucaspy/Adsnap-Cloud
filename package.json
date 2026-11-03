@@ -10,8 +10,10 @@
     "test": "node --import tsx --test --test-concurrency=2 tests/*.test.ts tests/*.test.cjs",
     "test:worker:postgres": "node tests/worker-postgres.integration.cjs",
     "typecheck:worker": "tsc -p tests/tsconfig.worker.json --noEmit --incremental false",
+    "typecheck:support": "tsc -p tests/tsconfig.support.json --noEmit --incremental false",
     "worker": "tsx src/scripts/worker.ts",
     "codex:personal": "node scripts/codex-personal/bridge.mjs",
+    "codex:support": "tsx src/scripts/support-worker.ts",
     "monitor": "tsx src/scripts/monitor-storage.ts",
     "monthly-cleanup": "tsx src/scripts/monthly-cleanup.ts",
     "postinstall": "prisma generate"
@@ -48,6 +50,7 @@
     "three": "^0.183.2"
   },
   "devDependencies": {
+    "@openai/codex": "0.166.0",
     "@playwright/test": "^1.58.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
