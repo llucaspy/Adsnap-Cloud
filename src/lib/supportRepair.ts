@@ -26,8 +26,10 @@ export function validateRepairEdits(value: unknown): Edit[] {
 }
 
 export function applyRepairText(source: string, before: string, after: string) {
-    if (!source.includes(before) || source.indexOf(before) !== source.lastIndexOf(before)) throw new Error('Trecho da correção não é único na fonte atual.')
-    return source.replace(before, () => after)
+    const newline = source.includes('\r\n') ? '\r\n' : '\n'
+    const match = before.replace(/\r?\n/g, newline), replacement = after.replace(/\r?\n/g, newline)
+    if (!source.includes(match) || source.indexOf(match) !== source.lastIndexOf(match)) throw new Error('Trecho da correção não é único na fonte atual.')
+    return source.replace(match, () => replacement)
 }
 
 export async function stageSupportRepairCandidate(root: string, actionId: string, input: unknown, destinationRoot = resolve(homedir(), '.adsnap-support', 'repairs')) {

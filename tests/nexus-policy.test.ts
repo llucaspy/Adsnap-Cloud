@@ -28,6 +28,7 @@ test('candidate substitutions require a unique exact source match and preserve l
     assert.throws(() => applyRepairText('a a', 'a', 'b'), /único/)
     assert.throws(() => applyRepairText('abc', 'missing', 'b'), /único/)
     assert.equal(applyRepairText('const slot = slots[0]', 'slots[0]', '$& literal'), 'const slot = $& literal')
+    assert.equal(applyRepairText('outside\r\nconst slot = slots[0]\r\nreturn slot\r\nend', 'const slot = slots[0]\nreturn slot', 'const slot = slots.at(0)\nreturn slot'), 'outside\r\nconst slot = slots.at(0)\r\nreturn slot\r\nend')
 })
 
 test('non-owner responses cannot relay fenced source, implementation paths, API routes or secret names', () => {
