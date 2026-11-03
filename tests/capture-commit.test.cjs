@@ -30,6 +30,7 @@ function load(overrides = {}) {
         launchCaptureBrowser: options => playwright.chromium.launch(options),
         resolveCaptureDestination: async () => {},
         resolveConfiguredCaptureSlot: require('../src/lib/captureTarget.ts').resolveConfiguredCaptureSlot,
+        discoverSpacePackage: require('../src/lib/spaceCreativePackage.ts').discoverSpacePackage,
         createHash: require('node:crypto').createHash,
         randomUUID: require('node:crypto').randomUUID,
         CaptureOwnershipLostError: Lost,
@@ -84,7 +85,7 @@ test('authoritative HTML5 document is rendered as an explicitly modified preview
                 const page=await newPage(options);
                 const screenshot=page.screenshot.bind(page);
                 page.screenshot=options=>{packageClip=options.clip;return screenshot(options)};
-                await page.route('https://cdn.00px.net/**',route=>route.fulfill({contentType:'text/html',body:route.request().url().includes('/empty/')?'<body></body>':`<body style="margin:0"><div id="banner" style="width:300px;height:600px"><img width="300" height="600" src="data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="600"><rect width="300" height="600" fill="blue"/></svg>')}"></div></body>`}));
+                await page.route('https://cdn.00px.net/**',route=>route.fulfill({contentType:'text/html',body:route.request().url().includes('/empty/')?'<body></body>':`<body style="margin:0"><div id="palco" style="width:300px;height:600px"><img width="300" height="600" src="data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="600"><rect width="300" height="600" fill="blue"/></svg>')}"></div></body>`}));
                 return page;
             };
             return browser;
@@ -102,6 +103,46 @@ test('authoritative HTML5 document is rendered as an explicitly modified preview
         empty.api.setFinalImage(async raw=>raw);
         const rejected=await empty.api._executeCapture('c1',{nexusTimeout:5000,bannerFormats:JSON.stringify([{id:'test',selector:'#configured'}])},{ownership});
         assert.equal(rejected.success,false);assert.equal(empty.state.uploaded,0);assert.equal(empty.state.created.length,0);
+    }finally{await new Promise(resolve=>server.close(resolve))}
+});
+
+test('opt-in package recovery follows the current preview and never uses another slot or bypasses consent', async () => {
+    const token=cr=>Buffer.from(JSON.stringify({ca:1,cr,pl:45})).toString('base64');
+    const frame=cr=>`<script src="https://cdn.00px.net/static/space.fixture.min.js"></script><script src="https://00px.net/target/${token(cr)}/planet.js"></script>`;
+    const server=http.createServer((request,response)=>{
+        const cr=Number(new URL(request.url,'http://fixture.invalid').searchParams.get('cr'));
+        response.setHeader('Content-Type','text/html');
+        response.end(`<div id="configured" style="width:300px;height:250px"><iframe style="border:0;width:300px;height:250px" src="data:text/html,${encodeURIComponent(frame(cr))}"></iframe></div><iframe src="data:text/html,${encodeURIComponent(frame(999))}"></iframe>`);
+    });
+    await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const address=server.address();
+    try {
+        for(const [cr,optIn] of [[23,true],[24,true],[26,true],[25,false]]) {
+            let discoveries=0;const requests=[];
+            const launch=async options=>{
+                const browser=await playwright.chromium.launch(options);
+                const newContext=browser.newContext.bind(browser);
+                browser.newContext=async options=>{
+                    const context=await newContext(options);
+                    await context.route('https://**.00px.net/**',route=>route.fulfill(route.request().url().includes('/rocket/')
+                        ?{contentType:'text/html',body:`<div id="banner" style="width:300px;height:250px"><img width="300" height="250" src="data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="250"><rect width="300" height="250" fill="blue"/></svg>')}"></div>`}
+                        :{contentType:'text/javascript',body:''}));
+                    await context.route('https://00px.net/**',route=>route.fulfill({status:403,contentType:'text/html',body:'Forbidden'}));
+                    return context;
+                };
+                return browser;
+            };
+            const discover=async(locator,signal)=>{discoveries++;return require('../src/lib/spaceCreativePackage.ts').discoverSpacePackage(locator,signal,async url=>{
+                requests.push(url);
+                if(url.includes('/target/')){assert.ok(url.includes(token(cr)));if(cr===24)throw Error('Capture download HTTP 403');if(cr===26)return Buffer.alloc(0);return Buffer.from(`space.x.setToken('${token(cr)}').setUrl('https://cdn.00px.net/rocket/${cr}/index.html');`)}
+                assert.equal(url,`https://cdn.00px.net/rocket/${cr}/index.html`);return Buffer.from(`<base href="https://cdn.00px.net/rocket/${cr}/"><div id="palco"></div>`);
+            })};
+            const {api,state}=load({campaign:{url:`http://127.0.0.1:${address.port}/?cr=${cr}&google_preview=fixture&creativeId=${100+cr}&lineItemId=77`,format:'test',device:'desktop',client:'test',captureDelaySeconds:1,compositionBox:{allowVerifiedPackagePreview:optIn}},bindings:{launchCaptureBrowser:launch,discoverSpacePackage:discover,devices:playwright.devices,normalizeCaptureDelaySeconds:()=>1,...validationBindings()}});
+            api.setFinalImage(async raw=>raw);
+            const result=await api._executeCapture('c1',{nexusTimeout:5000,bannerFormats:JSON.stringify([{id:'test',selector:'#configured'}])},{ownership});
+            assert.equal(result.success,optIn,result.error);
+            if(optIn){const meta=JSON.parse(state.created[0].auditNotes);assert.equal(meta.mode,'MODIFIED_PREVIEW');assert.equal(meta.packagePreview.creativeId,String(cr));assert.equal(meta.packagePreview.googleCreativeId,String(100+cr));assert.equal(requests.length,cr===23?1:2);assert.equal(meta.packagePreview.source,cr===23?'SELECTED_SLOT_LOADER':'SELECTED_SLOT_CREATIVE_ID')}
+            else {assert.equal(discoveries,0);assert.equal(state.uploaded,0);assert.equal(state.created.length,0)}
+        }
     }finally{await new Promise(resolve=>server.close(resolve))}
 });
 test('real browser capture accepts actual ad sizes without catalog dimensions and refuses empty or unrelated content', async () => {

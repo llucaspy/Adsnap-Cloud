@@ -4,6 +4,7 @@ import { launchCaptureBrowser } from '../lib/captureBrowser'
 import { fetchPublicCaptureBuffer } from '../lib/captureNetwork'
 import { inspectCreativeContent } from '../lib/captureValidation'
 import { nexusLogStore } from '../lib/nexusLogStore'
+import { discoverSpacePackage } from '../lib/spaceCreativePackage'
 
 async function main() {
     const ids = (process.env.TARGET_CAMPAIGN_IDS || '').split(',').filter(Boolean)
@@ -31,19 +32,21 @@ async function main() {
             await page.waitForTimeout(10_000)
             const network = responses.filter(r => requests.has(r.id)).map(r => ({ host: requests.get(r.id), status: r.status, mime: r.mime, length: r.length }))
             const evidence = await inspectCreativeContent(page.locator('#div-gpt-ad-home-destaque-1')).catch(() => null)
+            const packageDiscovery = await discoverSpacePackage(page.locator('#div-gpt-ad-home-destaque-1'), AbortSignal.timeout(15_000))
+            const packageDocument = asset || packageDiscovery?.documentUrl
             let packageResult: object | undefined
-            if (asset) {
+            if (packageDocument) {
                 let download: object
-                try { download = { bytes: (await fetchPublicCaptureBuffer(asset, AbortSignal.timeout(20_000))).length } }
+                try { download = { bytes: (await fetchPublicCaptureBuffer(packageDocument, AbortSignal.timeout(20_000))).length } }
                 catch { download = { failed: true } }
                 const assetPage = await context.newPage()
                 try {
-                    const response = await assetPage.goto(asset, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+                    const response = await assetPage.goto(packageDocument, { waitUntil: 'domcontentloaded', timeout: 30_000 })
                     await assetPage.waitForTimeout(3_000)
                     packageResult = { download, status: response?.status(), evidence: await inspectCreativeContent(assetPage.locator('body')) }
                 } finally { await assetPage.close() }
             }
-            const details = JSON.stringify({ campaignId: campaign.id, network, evidence, packageResult })
+            const details = JSON.stringify({ campaignId: campaign.id, network, evidence, packageDiscovery, packageResult })
             await nexusLogStore.addLog('Nexus: diagnostico de rede do criativo', 'SYSTEM', details, campaign.id)
             console.log(details)
             await page.close()
