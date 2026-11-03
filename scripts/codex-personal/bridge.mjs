@@ -122,7 +122,8 @@ export class PersonalAgent {
         if (account?.type !== 'chatgpt') throw new Error('Use codex login com sua conta ChatGPT. Este conector não aceita chave de API.')
         if (!this.model) {
             const { data } = await this.rpc.request('model/list', { limit: 100 })
-            const model = data?.find(model => model.isDefault)?.model
+            const selectedModel = data?.find(model => model.isDefault)
+            const model = selectedModel?.model
             if (!model) throw new Error('O Codex não informou um modelo disponível para esta conta ChatGPT.')
             const { config } = await this.rpc.request('config/read', { includeLayers: false })
             // Personal coding sessions must not inherit the operator's Supabase, email or browser connections.
@@ -134,6 +135,7 @@ export class PersonalAgent {
                 web_search: 'disabled',
             }
             this.model = model
+            this.supportEffort = selectedModel.supportedReasoningEfforts?.some(option => option.reasoningEffort === 'low') ? 'low' : selectedModel.defaultReasoningEffort
         }
         return { authenticated: true, plan: account.planType, personal: true }
     }
