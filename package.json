@@ -11,6 +11,7 @@
     "test:worker:postgres": "node tests/worker-postgres.integration.cjs",
     "typecheck:worker": "tsc -p tests/tsconfig.worker.json --noEmit --incremental false",
     "worker": "tsx src/scripts/worker.ts",
+    "codex:personal": "node scripts/codex-personal/bridge.mjs",
     "monitor": "tsx src/scripts/monitor-storage.ts",
     "monthly-cleanup": "tsx src/scripts/monthly-cleanup.ts",
     "postinstall": "prisma generate"
