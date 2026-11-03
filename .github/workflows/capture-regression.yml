@@ -43,7 +43,9 @@ jobs:
       - run: node test-support/prepare-postgres.mjs
       - run: npm test
       - run: node tests/worker-postgres.integration.cjs "$DATABASE_URL"
+      - run: node --import tsx tests/support-store.integration.cjs "$DATABASE_URL"
       - run: npm run typecheck:worker
+      - run: npm run typecheck:support
       - run: npm run build
       - run: node test-support/seed-worker-ui.mjs
       - name: Verify worker pages with synthetic fixtures
@@ -56,3 +58,4 @@ jobs:
             sleep 1
           done
           node test-support/worker-ui-smoke.mjs
+          node --import tsx test-support/support-ui-smoke.mjs

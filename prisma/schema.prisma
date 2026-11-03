@@ -143,6 +143,61 @@ model User {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  supportConversations SupportConversation[]
+}
+
+model SupportConversation {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  turns     SupportTurn[]
+
+  @@index([userId, updatedAt])
+}
+
+model SupportTurn {
+  id             String   @id @default(uuid())
+  conversationId String
+  conversation   SupportConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  requestKey     String
+  userText       String
+  assistantText  String   @default("")
+  status         String   @default("QUEUED")
+  claimRunId     String?
+  lockedUntil    DateTime?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime @default(now())
+  actions        SupportAction[]
+
+  @@unique([conversationId, requestKey])
+  @@index([status, createdAt])
+}
+
+model SupportAction {
+  id          String @id @default(uuid())
+  turnId      String
+  turn        SupportTurn @relation(fields: [turnId], references: [id], onDelete: Cascade)
+  type        String
+  status      String @default("PENDING")
+  payload     Json
+  result      Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([turnId, status])
+}
+
+model SupportExecutor {
+  id          String @id
+  runId       String
+  state       String
+  plan        String
+  heartbeatAt DateTime
+  lockedUntil DateTime
 }
 
 model NexusLog {

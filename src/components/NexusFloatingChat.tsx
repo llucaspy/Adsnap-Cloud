@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { submitNexusAssistantMessage, type NexusAssistantResponse } from '@/app/nexus/actions'
 import { CodexPersonalPanel } from './CodexPersonalPanel'
+import { SupportChatPanel } from './SupportChatPanel'
 
 type FloatingMessage = {
     id: string
@@ -241,7 +242,9 @@ export function NexusFloatingChat() {
     const pathname = usePathname()
     const isLoginPage = pathname?.startsWith('/login')
     const [isOpen, setIsOpen] = useState(false)
-    const [codexMode, setCodexMode] = useState(false)
+    const [chatMode, setChatMode] = useState('support')
+    const codexMode = chatMode === 'personal'
+    const supportMode = chatMode === 'support' && !isLoginPage
     const [messages, setMessages] = useState<FloatingMessage[]>([initialMessage()])
     const [input, setInput] = useState('')
     const [isPending, startTransition] = useTransition()
@@ -250,7 +253,7 @@ export function NexusFloatingChat() {
     useEffect(() => {
         function paired() {
             if (!isLoginPage && new URLSearchParams(window.location.hash.slice(1)).has('codex-pair')) {
-                setCodexMode(true)
+                setChatMode('personal')
                 setIsOpen(true)
             }
         }
@@ -353,27 +356,26 @@ export function NexusFloatingChat() {
                                     <NexusChatMark compact />
                                     <div className="min-w-0">
                                         <div className="flex items-center gap-2">
-                                            <p className="text-sm font-semibold truncate" style={{ color: '#ffffff' }}>{codexMode ? 'Codex pessoal' : 'Nexus'}</p>
-                                            {!codexMode && <span className="px-2 py-0.5 text-[10px] font-semibold" style={{ color: '#22c55e', background: 'rgba(34,197,94,0.12)', borderRadius: 999 }}>online</span>}
+                                            <p className="text-sm font-semibold truncate" style={{ color: '#ffffff' }}>{supportMode ? 'Codex · Adsnap' : codexMode ? 'Codex pessoal' : 'Nexus'}</p>
                                         </div>
-                                        <p className="text-[11px] truncate" style={{ color: '#a3a3a3' }}>{codexMode ? 'Código no seu computador' : 'Central de operacao'}</p>
+                                        <p className="text-[11px] truncate" style={{ color: '#a3a3a3' }}>{supportMode ? 'Atendimento e diagnóstico' : codexMode ? 'Código no seu computador' : 'Central de operacao'}</p>
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-1">
-                                    {!isLoginPage && <button type="button" onClick={() => setCodexMode(current => !current)} className="px-2 h-8 text-xs text-neutral-300 border border-white/10 rounded-lg">{codexMode ? 'Voltar ao Nexus' : 'Codex pessoal'}</button>}
-                                    {!codexMode && <button type="button" onClick={clearConversation} className="w-8 h-8 flex items-center justify-center" style={{ color: '#a3a3a3', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8 }} title="Limpar conversa" aria-label="Limpar conversa">
+                                    {!isLoginPage && <select aria-label="Modo do chat" value={chatMode} onChange={e => setChatMode(e.target.value)} className="w-28 px-1 h-8 text-xs text-neutral-300 bg-neutral-900 border border-white/10 rounded-lg"><option value="support">Suporte Adsnap</option><option value="commands">Comandos</option><option value="personal">Codex pessoal</option></select>}
+                                    {!codexMode && !supportMode && <button type="button" onClick={clearConversation} className="w-8 h-8 flex items-center justify-center" style={{ color: '#a3a3a3', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8 }} title="Limpar conversa" aria-label="Limpar conversa">
                                         <Trash2 size={14} />
                                     </button>}
-                                    <Link href="/nexus" className="w-8 h-8 flex items-center justify-center" style={{ color: '#a3a3a3', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8 }} title="Abrir Nexus">
+                                    {!supportMode && !codexMode && <Link href="/nexus" className="w-8 h-8 flex items-center justify-center" style={{ color: '#a3a3a3', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8 }} title="Abrir Nexus">
                                         <Maximize2 size={14} />
-                                    </Link>
+                                    </Link>}
                                     <button type="button" onClick={() => setIsOpen(false)} className="w-8 h-8 flex items-center justify-center" style={{ color: '#a3a3a3', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8 }} title="Minimizar">
                                         <Minus size={14} />
                                     </button>
                                 </div>
                             </header>
 
-                            {codexMode && !isLoginPage ? <CodexPersonalPanel /> : <>
+                            {supportMode ? <SupportChatPanel /> : codexMode && !isLoginPage ? <CodexPersonalPanel /> : <>
                             <div className="relative flex-1 overflow-y-auto p-5 space-y-4">
                                 <AnimatePresence initial={false}>
                                     {messages.map(message => (
