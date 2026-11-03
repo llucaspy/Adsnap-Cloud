@@ -4,16 +4,22 @@ import { describeCaptureFailure } from './captureFailure'
 import { GAM_JOB_LEVELS } from './gamJobStatus'
 import { getBrasiliaClock, getCampaignDateKey } from './campaignSchedule'
 import { createSupportReadModel } from './supportReadModel'
+import { getNexusAccess, NEXUS_PUBLIC_GUIDE } from './nexusPolicy'
+
+const ownerOnlyTools = new Set(['adsnap_system_settings', 'adsnap_read_source', 'adsnap_search_source', 'adsnap_internal_cases'])
+export function supportToolsForOwner(isOwner: boolean) { return SUPPORT_TOOLS.filter(tool => isOwner || !ownerOnlyTools.has(tool.name)) }
 
 const filters = { query: { type: 'string', maxLength: 100 }, pi: { type: 'string', description: 'PI exato; prefira este filtro a query para contagens de um PI.' }, campaignId: { type: 'string' }, status: { type: 'string' }, format: { type: 'string' }, device: { type: 'string' }, archived: { type: 'boolean' }, offset: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 50 } }
 const period = { from: { type: 'string', description: 'ISO 8601, inclusive' }, to: { type: 'string', description: 'ISO 8601, exclusivo' } }
 
 export const SUPPORT_TOOLS = [
+    { name: 'adsnap_usage_guide', description: 'Tutorial oficial do Nexus para cadastro de campanhas/Order GAM, consulta de books e solução de problemas de prints. Conteúdo de uso, sem fonte ou detalhes internos.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+    { name: 'adsnap_internal_cases', description: 'Somente devls: consulta ocorrências técnicas internas de suporte e escopo de correção autorizado. Não executa código nem publica modificações.', inputSchema: { type: 'object', properties: { offset: { type: 'integer', minimum: 0 } }, additionalProperties: false } },
     { name: 'adsnap_system_overview', description: 'Panorama atual completo: contagem exata de PIs em veiculação, registros de formatos, dispositivos, prints por status hoje/histórico, fila, executor e perfil real do usuário. Não confundir registros de formatos com campanhas agrupadas por PI.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
     { name: 'adsnap_list_campaigns', description: 'Lista paginada de todas as campanhas e formatos com totais exatos, voo, agendamento e número de prints. Para todas use query vazia ou omitida. flightState ACTIVE significa em veiculação na data de Brasília; não é status do print. Use nextOffset para continuar.', inputSchema: { type: 'object', properties: { ...filters, flightState: { type: 'string', enum: ['ACTIVE', 'UPCOMING', 'FINISHED', 'NO_DATES', 'INACTIVE'] } }, additionalProperties: false } },
     { name: 'adsnap_list_captures', description: 'Consulta prints reais e totais por campanha, PI, formato, status e período. Inclui auditoria, modo e link do book. Sem imagem binária; não afirme ter visto o print. Use paginação; nunca conte só uma página como total.', inputSchema: { type: 'object', properties: { ...filters, ...period }, additionalProperties: false } },
     { name: 'adsnap_worker_status', description: 'Consulta fila e tentativas reais dos workers, timestamps, leases, heartbeats e falhas recentes. Filtros de PI/campanha/status/período e paginação. Fila vazia não comprova processo online.', inputSchema: { type: 'object', properties: { ...filters, ...period }, additionalProperties: false } },
-    { name: 'adsnap_system_settings', description: 'Consulta configurações operacionais sem segredos e totais de usuários por perfil; somente admin. Retorna o perfil atual e recusa dados administrativos para usuário comum.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+    { name: 'adsnap_system_settings', description: 'Somente devls: consulta configurações operacionais sem credenciais e totais de usuários por perfil. Ser admin não concede este acesso.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
     { name: 'adsnap_search_campaigns', description: 'Busca campanhas reais por PI, cliente ou nome. Retorna no máximo 12 registros, sem links de preview.', inputSchema: { type: 'object', properties: { query: { type: 'string', maxLength: 100 } }, required: ['query'], additionalProperties: false } },
     { name: 'adsnap_diagnose_campaign', description: 'Consulta status atual, últimas tentativas e capturas de uma campanha. Motivos são evidências ou hipóteses, nunca confirmação inventada.', inputSchema: { type: 'object', properties: { campaignId: { type: 'string' } }, required: ['campaignId'], additionalProperties: false } },
     { name: 'adsnap_diagnose_registration', description: 'Consulta cadastros GAM recentes por Order, PI, cliente ou nome, inclusive quando a campanha ainda não foi criada. Query vazia retorna os recentes. Não acessa credenciais nem renova login.', inputSchema: { type: 'object', properties: { query: { type: 'string', maxLength: 100 } }, required: ['query'], additionalProperties: false } },
@@ -29,6 +35,7 @@ export const SUPPORT_SOURCE_FILES = [
     'src/scripts/worker.ts', 'docs/CORRECAO-DETRAN-20261103.md',
     'prisma/schema.prisma', 'src/lib/supportReadModel.ts', 'src/lib/supportTools.ts',
     'src/scripts/support-worker.ts', 'docs/CODEX-SUPORTE-COMPARTILHADO.md',
+    'src/lib/nexusPolicy.ts', 'src/lib/supportRepair.ts',
 ]
 
 export function createSupportTools(db: PrismaClient, turnId: string, runId: string, readSource: (file: string, start: number) => Promise<string>) {
@@ -39,6 +46,15 @@ export function createSupportTools(db: PrismaClient, turnId: string, runId: stri
         if (++count > 20) throw new SupportError('Limite de consultas desta resposta atingido.')
         const turn = await db.supportTurn.findFirst({ where: { id: turnId, claimRunId: runId, status: 'RUNNING', lockedUntil: { gt: new Date() }, conversation: { user: { isActive: true, role: { in: ['user', 'admin'] } } } }, include: { conversation: { select: { userId: true } } } })
         if (!turn) throw new SupportError('Solicitação expirada.')
+        const access = await getNexusAccess(db, turn.conversation.userId)
+        if (!access) throw new SupportError('Solicitação expirada.')
+        if (ownerOnlyTools.has(name) && !access.isOwner) throw new SupportError('Esse acesso é exclusivo da conta principal.', 403)
+        if (name === 'adsnap_usage_guide') return NEXUS_PUBLIC_GUIDE
+        if (name === 'adsnap_internal_cases') {
+            const offset = Number(input.offset || 0)
+            if (!Number.isInteger(offset) || offset < 0 || offset > 100000) throw new SupportError('Página inválida.')
+            return db.supportAction.findMany({ where: { type: 'TECHNICAL_REVIEW' }, skip: offset, take: 20, orderBy: { createdAt: 'desc' }, select: { id: true, status: true, payload: true, result: true, createdAt: true } })
+        }
         if (['adsnap_system_overview', 'adsnap_list_campaigns', 'adsnap_list_captures', 'adsnap_worker_status', 'adsnap_system_settings'].includes(name)) return createSupportReadModel(db, turn.conversation.userId)(name, input)
         if (name === 'adsnap_search_campaigns') {
             const query = supportText(input.query, 100)
@@ -57,8 +73,9 @@ export function createSupportTools(db: PrismaClient, turnId: string, runId: stri
             let compatiblePreview = false
             try { const parsed = new URL(url); compatiblePreview = parsed.protocol === 'https:' && !parsed.username && !parsed.password && parsed.searchParams.has('google_preview') && /^\d+$/.test(parsed.searchParams.get('creativeId') || '') && /^\d+$/.test(parsed.searchParams.get('lineItemId') || '') } catch { /* invalid historical URL */ }
             const cleanError = lastWorkerError ? supportText(lastWorkerError.slice(0, 1200), 1200) : null
-            return { ...summary, canRetry, canProposeVerifiedPreview: canRetry && compatiblePreview && ['FAILED', 'QUARANTINE'].includes(c.status) && /CREATIVE_NOT_CONFIRMED|SLOT_HAS_NO_CREATIVE/.test(lastWorkerError || '') && !workerJobs.some(j => ['QUEUED', 'PROCESSING'].includes(j.status)), hint: describeCaptureFailure(cleanError), lastError: cleanError,
-                jobs: workerJobs.map(j => ({ ...j, lastError: j.lastError ? supportText(j.lastError.slice(0, 1200), 1200) : null })),
+            const hint = describeCaptureFailure(cleanError)
+            return { ...summary, canRetry, canProposeVerifiedPreview: canRetry && compatiblePreview && ['FAILED', 'QUARANTINE'].includes(c.status) && /CREATIVE_NOT_CONFIRMED|SLOT_HAS_NO_CREATIVE/.test(lastWorkerError || '') && !workerJobs.some(j => ['QUEUED', 'PROCESSING'].includes(j.status)), hint: access.isOwner ? hint : { category: hint.category, suggestion: hint.suggestion }, lastError: access.isOwner ? cleanError : null,
+                jobs: workerJobs.map(j => access.isOwner ? { ...j, lastError: j.lastError ? supportText(j.lastError.slice(0, 1200), 1200) : null } : { status: j.status, attempts: j.attempts, createdAt: j.createdAt }),
                 captures: captures.map(({ auditNotes, ...cap }) => {
                     let mode: string | null = null, validation: string | null = null
                     try { const notes = JSON.parse(auditNotes || '{}'); mode = typeof notes.mode === 'string' ? notes.mode : null; validation = typeof notes.validation?.state === 'string' ? notes.validation.state : null } catch { /* historical metadata */ }
@@ -74,11 +91,11 @@ export function createSupportTools(db: PrismaClient, turnId: string, runId: stri
                 let details: Record<string, unknown> = {}
                 try { details = JSON.parse(log.details || '{}') } catch { /* historical plain-text log */ }
                 const executions = Array.isArray(details.executionLogs) ? details.executionLogs : []
-                return { id: log.id, status: log.level, createdAt: log.createdAt, message: clean(log.message),
+                return { id: log.id, status: log.level, createdAt: log.createdAt, message: access.isOwner ? clean(log.message) : 'Consulte o andamento do cadastro e os avisos na área de campanhas.',
                     orderId: clean(details.orderId, 50), pi: clean(details.pi, 100), client: clean(details.client), campaignName: clean(details.campaignName),
                     formats: Array.isArray(details.mediaEntries) ? details.mediaEntries.length : 0,
                     blocked: Array.isArray(details.blockedItems) ? details.blockedItems.length : 0,
-                    recentEvents: executions.slice(-4).map(event => clean(event?.message, 700)),
+                    recentEvents: access.isOwner ? executions.slice(-4).map(event => clean(event?.message, 700)) : [],
                 }
             }).filter(log => !query || [log.orderId, log.pi, log.client, log.campaignName].some(field => field.toLowerCase().includes(query))).slice(0, 8)
         }
@@ -104,7 +121,7 @@ export function createSupportTools(db: PrismaClient, turnId: string, runId: stri
             const ids = Array.isArray(input.campaignIds) ? input.campaignIds.filter((v): v is string => typeof v === 'string') : []
             if (ids.some(id => !diagnosed.has(id))) throw new SupportError('Consulte o diagnóstico das campanhas nesta resposta antes de propor uma operação.')
             const action = await store.propose(turnId, runId, String(input.type), ids, String(input.reason))
-            return { actionId: action.id, status: action.status, requiresUserConfirmation: true, message: 'Proposta disponível no chat. Nenhuma operação foi executada.' }
+            return { actionId: action.id, status: action.status, requiresUserConfirmation: action.status === 'PENDING', message: action.type === 'TECHNICAL_REVIEW' ? 'Ocorrência técnica interna vinculada ao relato. Nenhuma correção ou publicação foi executada.' : 'Proposta disponível no chat. Nenhuma operação foi executada.' }
         }
         throw new SupportError('Ferramenta não autorizada.')
     }

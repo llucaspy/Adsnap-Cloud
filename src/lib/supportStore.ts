@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from '@prisma/client'
 import { randomUUID } from 'node:crypto'
 import { redactLogText } from './logRedaction'
+import { getNexusAccess, NEXUS_REPAIR_SCOPE, publicNexusAction, nexusReply } from './nexusPolicy'
 
 export const SUPPORT_EXECUTOR = 'codex-plus'
 export const SUPPORT_LEASE_MS = 120_000
@@ -50,10 +51,11 @@ export function createSupportStore(db: PrismaClient) {
     }
     async function read(id: string, identity: SupportIdentity) {
         const conversation = await owned(id, identity)
+        const access = await getNexusAccess(db, identity.userId)
         // A dead executor never silently replays a turn that may already have taken actions.
         await db.supportTurn.updateMany({ where: { conversationId: id, status: 'RUNNING', lockedUntil: { lt: new Date() } }, data: { status: 'FAILED', finishedAt: new Date(), assistantText: 'A execução foi interrompida. Confira as ações registradas antes de solicitar outra tentativa.' } })
         const turns = await db.supportTurn.findMany({ where: { conversationId: id }, orderBy: { createdAt: 'desc' }, take: 40, include: { actions: { orderBy: { createdAt: 'asc' } } } })
-        return { ...conversation, turns: turns.reverse().map(t => ({ id: t.id, userText: t.userText, assistantText: t.assistantText, status: t.status, createdAt: t.createdAt, actions: t.status === 'SUCCESS' ? t.actions : [] })) }
+        return { ...conversation, turns: turns.reverse().map(t => ({ id: t.id, userText: t.userText, assistantText: nexusReply(t.assistantText, access?.isOwner === true), status: t.status, createdAt: t.createdAt, actions: t.status === 'SUCCESS' ? t.actions.map(action => publicNexusAction(action, access?.isOwner === true)) : [] })) }
     }
     async function submit(id: string, identity: SupportIdentity, requestKey: string, input: unknown) {
         await owned(id, identity)
@@ -105,10 +107,13 @@ export function createSupportStore(db: PrismaClient) {
         return result.count === 1
     }
     async function finish(id: string, runId: string, answer: string, success = true) {
+        const identity = await db.supportTurn.findUnique({ where: { id }, select: { conversation: { select: { userId: true } } } })
+        const access = identity ? await getNexusAccess(db, identity.conversation.userId) : null
+        if (!access) throw new SupportError('A conta não está disponível.', 401)
         await db.$transaction(async tx => {
             await tx.$queryRaw`SELECT id FROM "SupportExecutor" WHERE id = ${SUPPORT_EXECUTOR} FOR UPDATE`
             if (!await tx.supportExecutor.count({ where: { id: SUPPORT_EXECUTOR, runId, lockedUntil: { gt: new Date() } } })) throw new SupportError('Executor perdeu a posse.', 409)
-            const result = await tx.supportTurn.updateMany({ where: { id, claimRunId: runId, status: 'RUNNING', lockedUntil: { gt: new Date() } }, data: { assistantText: redactLogText(answer, 20000), status: success ? 'SUCCESS' : 'FAILED', finishedAt: new Date(), lockedUntil: null } })
+            const result = await tx.supportTurn.updateMany({ where: { id, claimRunId: runId, status: 'RUNNING', lockedUntil: { gt: new Date() } }, data: { assistantText: redactLogText(nexusReply(answer, access.isOwner), 20000), status: success ? 'SUCCESS' : 'FAILED', finishedAt: new Date(), lockedUntil: null } })
             if (!result.count) throw new SupportError('A execução perdeu a posse desta solicitação.', 409)
         })
     }
@@ -120,10 +125,18 @@ export function createSupportStore(db: PrismaClient) {
             await tx.$queryRaw`SELECT id FROM "SupportTurn" WHERE id = ${turnId} FOR UPDATE`
             const turn = await tx.supportTurn.findFirst({ where: { id: turnId, claimRunId: runId, status: 'RUNNING', lockedUntil: { gt: new Date() }, conversation: { user: { isActive: true } } } })
             if (!turn) throw new SupportError('Solicitação expirada.', 409)
-            const payload = { campaignIds: ids, reason: supportText(reason, 1500) }
+            const conversation = await tx.supportConversation.findUniqueOrThrow({ where: { id: turn.conversationId }, select: { userId: true } })
+            const access = await getNexusAccess(db, conversation.userId)
+            if (!access) throw new SupportError('Solicitação expirada.', 409)
+            if (type === 'TECHNICAL_REVIEW' && !access.isOwner) {
+                if (!access.policyVersion || !ids.length) throw new SupportError('A análise interna exige um erro de captura vinculado a uma campanha diagnosticada.')
+                const failures = await tx.campaign.count({ where: { id: { in: ids }, isArchived: false, OR: [{ status: { in: ['FAILED', 'QUARANTINE'] } }, { lastWorkerError: { not: null } }] } })
+                if (failures !== ids.length) throw new SupportError('Não há falha de captura registrada em todas as campanhas indicadas.')
+            }
+            const payload = { campaignIds: ids, reason: supportText(reason, 1500), ...(type === 'TECHNICAL_REVIEW' ? { scope: NEXUS_REPAIR_SCOPE, policyVersion: access.policyVersion, internalOnly: true, correctionAuthorized: !!access.policyVersion, origin: 'capture-incident' } : {}) }
             const existing = await tx.supportAction.findFirst({ where: { turnId, type } })
             if (existing) return existing
-            return tx.supportAction.create({ data: { id: randomUUID(), turnId, type, payload: payload as Prisma.InputJsonValue } })
+            return tx.supportAction.create({ data: { id: randomUUID(), turnId, type, status: type === 'TECHNICAL_REVIEW' ? 'REVIEW_REQUIRED' : 'PENDING', payload: payload as Prisma.InputJsonValue } })
         })
     }
     return { liveUser, owned, status, list, create, read, submit, heartbeat, claim, renew, finish, propose }

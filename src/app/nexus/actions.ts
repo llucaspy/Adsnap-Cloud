@@ -10,6 +10,8 @@ import { enqueueCaptureJobs } from '@/lib/workerJobs'
 import { getFormatLabelMap, resolveFormatLabel } from '@/lib/formatLabels'
 import { GAM_AUTH_REQUIRED_LEVEL, GAM_JOB_LEVELS } from '@/lib/gamJobStatus'
 import { notifyGamOrderStarted } from '@/lib/gamOrderTelegram'
+import { supportIdentity } from '@/lib/supportHttp'
+import { getNexusAccess } from '@/lib/nexusPolicy'
 
 type NexusOrderDetails = Partial<GamImportDraft> & {
     orderUrl?: string
@@ -129,6 +131,8 @@ function isAutoRegisterMode(mode?: string) {
 }
 
 export async function submitNexusOrderLink(orderUrl: string) {
+    const identity = await supportIdentity()
+    const access = await getNexusAccess(prisma, identity.userId)
     const url = normalizeOrderUrl(orderUrl)
     const orderId = getOrderId(url)
     const recentCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
@@ -164,7 +168,7 @@ export async function submitNexusOrderLink(orderUrl: string) {
             jobId: existingJob.id,
             orderId,
             status: existingJob.level,
-            authWorkflowUrl: readDetails(existingJob.details).authWorkflowUrl || '',
+            authWorkflowUrl: access?.isOwner ? readDetails(existingJob.details).authWorkflowUrl || '' : '',
         }
     }
 
@@ -212,6 +216,8 @@ export async function submitNexusOrderLink(orderUrl: string) {
 }
 
 export async function getNexusOrderJobs() {
+    const identity = await supportIdentity()
+    const access = await getNexusAccess(prisma, identity.userId)
     const jobs = await prisma.nexusLog.findMany({
         where: {
             level: { in: GAM_JOB_LEVELS },
@@ -225,7 +231,7 @@ export async function getNexusOrderJobs() {
         return {
             id: job.id,
             level: job.level,
-            message: job.message,
+            message: access?.isOwner ? job.message : 'Acompanhe o cadastro na área de campanhas.',
             createdAt: job.createdAt.toISOString(),
             orderId: details.orderId || details.orderUrl?.match(/order_id=(\d+)/i)?.[1] || '',
             orderUrl: details.orderUrl || '',
@@ -235,9 +241,9 @@ export async function getNexusOrderJobs() {
             formats: details.mediaEntries?.length || 0,
             blocked: details.blockedItems?.length || 0,
             autoRegisterResult: details.autoRegisterResult || null,
-            notifications: details.notifications || null,
-            authWorkflowUrl: details.authWorkflowUrl || '',
-            executionLogs: details.executionLogs || [],
+            notifications: access?.isOwner ? details.notifications || null : null,
+            authWorkflowUrl: access?.isOwner ? details.authWorkflowUrl || '' : '',
+            executionLogs: access?.isOwner ? details.executionLogs || [] : [],
         }
     })
 }
@@ -591,6 +597,7 @@ function capabilityResponse(): NexusAssistantResponse {
 }
 
 export async function submitNexusAssistantMessage(message: string): Promise<NexusAssistantResponse> {
+    await supportIdentity()
     const input = message.trim()
     if (!input) return capabilityResponse()
 
