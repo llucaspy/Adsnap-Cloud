@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { createSupportStore, SupportError, type SupportIdentity } from './supportStore'
 import { getCampaignDateKey, getBrasiliaClock } from './campaignSchedule'
 import { getNexusAccess, publicNexusAction } from './nexusPolicy'
+import { learnNexusOutcome } from './nexusMemory'
 
 export function createSupportActions(db: PrismaClient, trigger: (ids: string[]) => Promise<boolean>) {
     const store = createSupportStore(db)
@@ -66,6 +67,7 @@ export function createSupportActions(db: PrismaClient, trigger: (ids: string[]) 
             const failed = jobs.filter(j => ['FAILED', 'CANCELLED'].includes(j.status)).length
             const finished = jobs.length === jobIds.length && success + failed === jobs.length
             await db.supportAction.updateMany({ where: { id: action.id, status: 'QUEUED' }, data: { status: finished ? failed ? 'FAILED' : 'SUCCESS' : 'QUEUED', result: { jobIds, pis: result?.pis || [], queued: jobIds.length, success, failed } } })
+            if (finished && !failed) await learnNexusOutcome(db, action.id).catch(() => {})
         }
     }
     return { confirm, refresh }

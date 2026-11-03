@@ -143,8 +143,10 @@ model User {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  memoryResetAt DateTime?
   supportConversations SupportConversation[]
   nexusPolicy SupportPolicy?
+  supportMemories SupportMemory[]
 }
 
 model SupportPolicy {
@@ -153,6 +155,21 @@ model SupportPolicy {
   owner       User @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
   version     String
   updatedAt   DateTime @updatedAt
+}
+
+model SupportMemory {
+  id           String @id @default(cuid())
+  userId       String
+  user         User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key          String
+  content      String
+  occurrences  Int @default(1)
+  sourceTurnId String
+  sourceTurn   SupportTurn @relation(fields: [sourceTurnId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, key])
 }
 
 model SupportConversation {
@@ -181,6 +198,7 @@ model SupportTurn {
   finishedAt     DateTime?
   createdAt      DateTime @default(now())
   actions        SupportAction[]
+  memories       SupportMemory[]
 
   @@unique([conversationId, requestKey])
   @@index([status, createdAt])

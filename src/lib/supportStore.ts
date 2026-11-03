@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from '@prisma/client'
 import { randomUUID } from 'node:crypto'
 import { redactLogText } from './logRedaction'
 import { getNexusAccess, NEXUS_REPAIR_SCOPE, publicNexusAction, nexusReply } from './nexusPolicy'
+import { parseGamOrderUrl } from './gamOrderUrl'
 
 export const SUPPORT_EXECUTOR = 'codex-plus'
 export const SUPPORT_LEASE_MS = 120_000
@@ -14,6 +15,8 @@ export function supportText(value: unknown, max = 6000) {
     if (typeof value !== 'string' || !value.trim() || value.length > max) throw new SupportError(`Envie um texto de até ${max} caracteres.`)
     // Preview tokens and URLs are never needed to interpret a support request.
     return redactLogText(value.trim().replace(/https?:\/\/[^\s<>]+/gi, raw => {
+        const order = parseGamOrderUrl(raw.replace(/[),.;]+$/, ''))
+        if (order) return order.url
         try { return `[link: ${new URL(raw).hostname}]` } catch { return '[link]' }
     }), max)
 }

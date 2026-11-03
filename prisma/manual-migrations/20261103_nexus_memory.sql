@@ -1,0 +1,22 @@
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+SELECT pg_advisory_xact_lock(20261103, 3);
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "memoryResetAt" TIMESTAMP(3);
+CREATE TABLE IF NOT EXISTS "SupportMemory" (
+  id TEXT PRIMARY KEY,
+  "userId" TEXT NOT NULL REFERENCES "User"(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  key TEXT NOT NULL,
+  content TEXT NOT NULL,
+  occurrences INTEGER NOT NULL DEFAULT 1,
+  "sourceTurnId" TEXT NOT NULL REFERENCES "SupportTurn"(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL,
+  UNIQUE ("userId", key)
+);
+ALTER TABLE "SupportMemory" ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE "SupportMemory" FROM PUBLIC;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN REVOKE ALL ON TABLE "SupportMemory" FROM anon; END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN REVOKE ALL ON TABLE "SupportMemory" FROM authenticated; END IF;
+END $$;
+COMMIT;

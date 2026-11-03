@@ -105,7 +105,7 @@ export function SupportChatPanel() {
             </div>
         </div>
         <div className="flex-1 overflow-y-auto min-h-0 p-5 space-y-3" aria-live="polite">
-            {!conversation?.turns.length && <p className="text-sm text-neutral-400">Sou Nexus, o guardião do Adsnap. Ajudo com campanhas, cadastro, prints e tutoriais. Informe o PI ou descreva o que precisa; vou consultar os dados e orientar a solução. O histórico fica salvo na sua conta.</p>}
+            {!conversation?.turns.length && <p className="text-sm text-neutral-400">Sou Nexus, (estou em fase de teste...) Posso ajudar com perguntas sobre campanhas, cadastros, prints e tutoriais. Informe o PI ou descreva o que precisa; vou consultar os dados e orientar a solução. O histórico fica salvo na sua conta.</p>}
             {conversation?.turns.map(turn => <div key={turn.id} className="space-y-3">
                 <div className="ml-6 bg-neutral-700 rounded-lg p-3 text-sm whitespace-pre-wrap break-words">{turn.userText}</div>
                 {turn.assistantText && <div className="mr-3 bg-white/5 rounded-lg p-3 text-sm break-words"><ReactMarkdown skipHtml components={{
@@ -116,7 +116,7 @@ export function SupportChatPanel() {
                     a: ({ href, children }) => href && /^\/(?:books|workers|campaigns|quarantine)(?:\/|[?#]|$)/.test(href) ? <Link href={href} className="underline">{children}</Link> : <span>{children}</span>,
                 }}>{turn.assistantText}</ReactMarkdown></div>}
                 {turn.status === 'QUEUED' && <p className="text-xs text-neutral-400">Mensagem recebida · aguardando atendimento</p>}
-                {turn.status === 'RUNNING' && <p className="text-xs text-neutral-400">Codex está analisando sua solicitação…</p>}
+                {turn.status === 'RUNNING' && <p className="text-xs text-neutral-400">Nexus está analisando sua solicitação…</p>}
                 {turn.actions.map(action => <div key={action.id} className="rounded-lg border border-white/20 p-3 space-y-2 text-xs">
                     <p className="font-semibold">{actionLabels[action.type] || 'Operação de atendimento'}</p>
                     <p className="whitespace-pre-wrap break-words">{action.payload.reason}</p>
@@ -133,7 +133,7 @@ export function SupportChatPanel() {
         <form className="p-5 pt-2 space-y-2" onSubmit={event => { event.preventDefault(); void send() }}>
             <label htmlFor="support-message" className="sr-only">Mensagem para o suporte Adsnap</label>
             <textarea id="support-message" value={input} maxLength={6000} onChange={e => setInput(e.target.value)} disabled={!available || busy || sending} rows={2} placeholder="Ex.: a campanha do PI 385592 está falhando…" className="w-full resize-none rounded-lg p-3 bg-white/5 border border-white/20 text-sm disabled:opacity-50" />
-            <div className="flex justify-end"><button type="submit" disabled={!available || busy || sending || !input.trim()} className="rounded-lg bg-neutral-200 text-neutral-900 px-4 py-2 text-sm disabled:opacity-40">{sending ? 'Enviando…' : busy ? 'Aguardando resposta…' : 'Enviar ao Codex'}</button></div>
+            <div className="flex justify-end"><button type="submit" disabled={!available || busy || sending || !input.trim()} className="rounded-lg bg-neutral-200 text-neutral-900 px-4 py-2 text-sm disabled:opacity-40">{sending ? 'Enviando…' : busy ? 'Aguardando resposta…' : 'Enviar ao Nexus'}</button></div>
         </form>
     </div>
 }

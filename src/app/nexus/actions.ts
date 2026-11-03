@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import prisma from '@/lib/prisma'
 import { nexusLogStore } from '@/lib/nexusLogStore'
-import { DEFAULT_GAM_SEGMENTATION, type GamImportDraft } from '@/lib/gamImportPlanner'
+import type { GamImportDraft } from '@/lib/gamImportPlanner'
 import type { GamImportWriteResult } from '@/lib/gamImportWriter'
 import { triggerGamWorker, triggerNexusWorker } from '@/app/actions'
 import { enqueueCaptureJobs } from '@/lib/workerJobs'
@@ -12,6 +12,7 @@ import { GAM_AUTH_REQUIRED_LEVEL, GAM_JOB_LEVELS } from '@/lib/gamJobStatus'
 import { notifyGamOrderStarted } from '@/lib/gamOrderTelegram'
 import { supportIdentity } from '@/lib/supportHttp'
 import { getNexusAccess } from '@/lib/nexusPolicy'
+import { registerGamOrder } from '@/lib/gamOrderRegistration'
 
 type NexusOrderDetails = Partial<GamImportDraft> & {
     orderUrl?: string
@@ -108,111 +109,13 @@ function readDetails(details: string | null): NexusOrderDetails {
     }
 }
 
-function normalizeOrderUrl(value: string) {
-    const url = value.trim()
-
-    if (!/^https:\/\/admanager\.google\.com\/.+order_id=\d+/i.test(url)) {
-        throw new Error('Cole um link valido de Order do Google Ad Manager.')
-    }
-
-    return url
-}
-
-function getOrderId(url: string) {
-    return url.match(/order_id=(\d+)/i)?.[1] || 'Unknown'
-}
-
-function isAutoRegisterMode(mode?: string) {
-    const normalized = (mode || '').trim().toLowerCase()
-    return normalized === 'auto_register'
-        || normalized === 'auto-register'
-        || normalized === 'autoregister'
-        || normalized === 'nexus-order-autoregister'
-}
-
 export async function submitNexusOrderLink(orderUrl: string) {
     const identity = await supportIdentity()
     const access = await getNexusAccess(prisma, identity.userId)
-    const url = normalizeOrderUrl(orderUrl)
-    const orderId = getOrderId(url)
-    const recentCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-
-    const recentJobs = await prisma.nexusLog.findMany({
-        where: {
-            level: { in: ['JOB_GAM_PENDING', 'JOB_GAM_RUNNING', 'JOB_GAM_REVIEW', GAM_AUTH_REQUIRED_LEVEL] },
-            createdAt: { gte: recentCutoff },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 30,
-    })
-    const existingJob = recentJobs.find(job => {
-        const details = readDetails(job.details)
-        const sameOrder = details.orderId === orderId || details.orderUrl?.includes(`order_id=${orderId}`)
-        if (!sameOrder) return false
-        if (job.level === 'JOB_GAM_REVIEW') return isAutoRegisterMode(details.mode)
-        return true
-    })
-
-    if (existingJob) {
-        const staleRunningJob = existingJob.level === 'JOB_GAM_RUNNING'
-            && existingJob.createdAt.getTime() < Date.now() - 30 * 60 * 1000
-        const shouldTrigger = existingJob.level === 'JOB_GAM_PENDING' || staleRunningJob
-        const triggered = shouldTrigger ? await triggerGamWorker(existingJob.id) : false
-
-        revalidatePath('/nexus')
-        revalidatePath('/campaigns')
-        return {
-            success: true,
-            existing: true,
-            triggered,
-            jobId: existingJob.id,
-            orderId,
-            status: existingJob.level,
-            authWorkflowUrl: access?.isOwner ? readDetails(existingJob.details).authWorkflowUrl || '' : '',
-        }
-    }
-
-    const job = await prisma.nexusLog.create({
-        data: {
-            level: 'JOB_GAM_PENDING',
-            message: `Nexus V2: Order ${orderId} recebida para cadastro automatico`,
-            details: JSON.stringify({
-                orderUrl: url,
-                orderId,
-                mode: 'AUTO_REGISTER',
-                source: 'nexus-v2-order-link',
-                requestedSegmentation: DEFAULT_GAM_SEGMENTATION,
-                requestedCaptureCadence: 'DAILY',
-                executionLogs: [{
-                    at: new Date().toISOString(),
-                    message: `Order ${orderId} recebida pelo Nexus V2 com segmentacao padrao Privado`,
-                    tone: 'info',
-                }],
-            } satisfies NexusOrderDetails),
-        },
-    })
-
-    const triggered = await triggerGamWorker(job.id)
-    await notifyGamOrderStarted(job.id)
-    if (!triggered) {
-        await nexusLogStore.addLog(
-            `Nexus V2: Order ${orderId} entrou na fila, mas o worker nao foi disparado automaticamente.`,
-            'INFO',
-            JSON.stringify({ jobId: job.id, orderId }),
-        )
-    }
-
+    const result = await registerGamOrder(prisma, orderUrl, triggerGamWorker, notifyGamOrderStarted)
     revalidatePath('/nexus')
     revalidatePath('/campaigns')
-    return {
-        success: true,
-        existing: false,
-        triggered,
-        jobId: job.id,
-        orderId,
-        status: job.level,
-        authWorkflowUrl: '',
-    }
+    return { ...result, authWorkflowUrl: access?.isOwner ? result.authWorkflowUrl : '' }
 }
 
 export async function getNexusOrderJobs() {

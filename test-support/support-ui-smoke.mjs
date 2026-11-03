@@ -52,7 +52,7 @@ try {
     await page.getByLabel('Conversa de atendimento').selectOption('')
     const message = `${marker}. Consulte a campanha do PI TESTE-LOCAL, explique a falha registrada e proponha somente RETRY_CAPTURE para eu confirmar pelo chat. Não execute captura, não altere configuração, não proponha prévia modificada.`
     await page.getByLabel('Mensagem para o suporte Adsnap').fill(message)
-    await page.getByRole('button', { name: 'Enviar ao Codex', exact: true }).click()
+    await page.getByRole('button', { name: 'Enviar ao Nexus', exact: true }).click()
     await page.getByText('Mensagem recebida · aguardando atendimento', { exact: true }).waitFor({ timeout: 20000 })
     const turn = await db.supportTurn.findFirst({ where: { userText: { startsWith: marker } }, include: { conversation: true } })
     assert(turn); conversationId = turn.conversationId
