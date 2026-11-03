@@ -1,6 +1,7 @@
 import { getSession } from './auth'
 import prisma from './prisma'
 import { createSupportStore, SupportError } from './supportStore'
+import { isSupportSameOrigin } from './supportOrigin'
 
 export const supportStore = createSupportStore(prisma)
 export const supportJson = (data: unknown, status = 200) => Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } })
@@ -15,7 +16,7 @@ export async function supportIdentity() {
     return { userId: user.id, role: user.role }
 }
 export async function supportBody(request: Request) {
-    if (request.headers.get('origin') !== new URL(request.url).origin) throw new SupportError('Origem não autorizada.', 403)
+    if (!isSupportSameOrigin(request)) throw new SupportError('Origem não autorizada.', 403)
     if (request.headers.get('content-type')?.split(';')[0].trim() !== 'application/json') throw new SupportError('Formato de solicitação inválido.')
     const reader = request.body?.getReader()
     if (!reader) throw new SupportError('Solicitação vazia.')
