@@ -14,6 +14,7 @@ import { inspectCreativeContent, type CreativeEvidence } from './captureValidati
 import { launchCaptureBrowser } from './captureBrowser';
 import { resolveCaptureDestination } from './captureNetwork';
 import { resolveConfiguredCaptureSlot } from './captureTarget';
+import { discoverSpacePackage, type VerifiedSpacePackage } from './spaceCreativePackage';
 
 export interface CaptureResult {
     success: boolean
@@ -36,6 +37,7 @@ type CaptureEvidenceMetadata = {
     finalSha256: string
     rawPreserved: false
     validation?: CreativeEvidence
+    packagePreview?: VerifiedSpacePackage
 }
 
 function isOwnershipLost(error: unknown) {
@@ -487,7 +489,7 @@ async function renderLayeredCreativeAsset(
         ).catch(() => null)
         // The portal placeholder can still have its loading height. Measure the
         // original HTML5 root itself; no format catalog or expected dimensions.
-        const rootBox = await page.locator('#banner').first().boundingBox({ timeout: 1_000 }).catch(() => null)
+        const rootBox = await page.locator('#banner, #palco').first().boundingBox({ timeout: 1_000 }).catch(() => null)
         if (rootBox && rootBox.width > 1 && rootBox.height > 1) {
             width = Math.ceil(rootBox.width)
             height = Math.ceil(rootBox.height)
@@ -685,13 +687,13 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
 
     if (!campaign) throw new Error('Campanha não encontrada');
     const composition = campaign.compositionBox && typeof campaign.compositionBox === 'object'
-        ? campaign.compositionBox as { creativeAssetUrl?: string }
+        ? campaign.compositionBox as { creativeAssetUrl?: string; allowVerifiedPackagePreview?: boolean }
         : null;
     const creativeAssetUrl = composition?.creativeAssetUrl;
     const standaloneCreativeAssetUrl = creativeAssetUrl && isStandaloneCreativeAsset(creativeAssetUrl)
         ? creativeAssetUrl
         : undefined;
-    const layeredCreativeDocumentUrl = creativeAssetUrl
+    let layeredCreativeDocumentUrl = creativeAssetUrl
         ? getLayeredCreativeDocumentUrl(creativeAssetUrl)
         : undefined;
 
@@ -899,6 +901,20 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
 
                     let captureDelaySeconds = campaign.captureDelaySeconds;
                     let screenshotAnimations: 'allow' | 'disabled' = standaloneCreativeAssetUrl ? 'disabled' : 'allow';
+                    let packagePreview: VerifiedSpacePackage | undefined;
+
+                    if (!standaloneCreativeAssetUrl && !layeredCreativeDocumentUrl && composition?.allowVerifiedPackagePreview === true) {
+                        try { creativeEvidence = await waitForCreative(creativeLocator, options.signal) }
+                        catch (nativeError) {
+                            const reason = nativeError instanceof Error ? nativeError.message : String(nativeError);
+                            if (!/^(CREATIVE_NOT_CONFIRMED|SLOT_HAS_NO_CREATIVE):/.test(reason)) throw nativeError;
+                            packagePreview = await discoverSpacePackage(locator, options.signal);
+                            if (!packagePreview) throw nativeError;
+                            layeredCreativeDocumentUrl = packagePreview.documentUrl;
+                            await nexusLogStore.addLog('Nexus: pacote do preview atual confirmado no slot selecionado', 'SYSTEM',
+                                JSON.stringify({ ...packagePreview, mode: 'MODIFIED_PREVIEW' }), campaignId);
+                        }
+                    }
 
                     if (layeredCreativeDocumentUrl && !standaloneCreativeAssetUrl) {
                         const renderedCreative = await renderLayeredCreativeAsset(
@@ -939,7 +955,8 @@ async function _executeCapture(campaignId: string, settings: any, options: Captu
                     const finalImage = await prepareFinalCaptureImage(screenshotBuffer, campaign.url, isMobile, browser, options.signal);
                     await browser.close();
                     return await saveCapture(campaignForStorage, finalImage, campaignId, options,
-                        evidenceMetadata(screenshotBuffer, finalImage, Boolean(standaloneCreativeAssetUrl || layeredCreativeDocumentUrl), creativeEvidence));
+                        { ...evidenceMetadata(screenshotBuffer, finalImage, Boolean(standaloneCreativeAssetUrl || layeredCreativeDocumentUrl), creativeEvidence),
+                            ...(packagePreview ? { packagePreview } : {}) });
                 } catch (selError) {
                     if (isCaptureAborted(selError, options.signal)) throw selError
                     const msg = selError instanceof Error ? selError.message : String(selError);
