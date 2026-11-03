@@ -36,3 +36,12 @@ Aplicar a migração aditiva `prisma/manual-migrations/20261103_shared_codex_sup
 Testes: `npm test`, `npm run typecheck:support`, `node --import tsx tests/support-store.integration.cjs <URL-do-banco-isolado>`. O smoke `node --import tsx test-support/support-ui-smoke.mjs` usa um executor sintético explícito em CI. `--real-plus` usa o Codex real e sua franquia, sempre com banco e servidor de teste locais; nunca deve apontar para produção. Os testes recusam bancos fora do loopback e do nome `adsnap_worker_test`.
 
 Referências: [Codex App Server](https://learn.chatgpt.com/docs/app-server), [configuração de ferramentas](https://learn.chatgpt.com/docs/config-file/config-reference), [autenticação](https://learn.chatgpt.com/docs/auth).
+# Consultas operacionais e tempo de resposta
+
+Cada pergunta recebe um panorama novo do banco, carregado em paralelo com a inicialização do Codex. Ele inclui perfil atual do usuário, PIs cadastrados e em veiculação, registros por formato/dispositivo, prints de hoje e históricos por status, filas e estado do executor de suporte. Os totais abrangem todos os registros, independentemente dos limites das páginas de detalhe.
+
+As consultas `adsnap_list_campaigns`, `adsnap_list_captures` e `adsnap_worker_status` aceitam filtros e paginação com total e próximo offset. Formatos usam os rótulos cadastrados, preservando o identificador para filtros, sem reintroduzir validação por dimensão. O diagnóstico mostra metadados e auditorias dos prints; não afirma inspecionar uma imagem sem vê-la. Jobs históricos não comprovam que um processo worker esteja online.
+
+Em veiculação significa PI com pelo menos um registro não arquivado, com voo vigente na data civil de Brasília e sem estado encerrado/pausado/cancelado. Falha de print não encerra o voo. Registros sem período são contados à parte. O contexto distingue PIs de registros por formato, e configuração administrativa só é retornada a admin consultado novamente no banco. Senhas, tokens, caminhos privados de armazenamento e conversas de terceiros não são expostos.
+
+O atendimento escolhe raciocínio `low` somente quando suportado pelo modelo padrão da própria conta; caso contrário mantém o padrão anunciado no catálogo. A fila é consultada a cada segundo após um ciclo vazio. Logs registram duração da execução sem conteúdo de mensagens. Os tempos dependem da rede, da fila e da disponibilidade do Plus; não há troca para API paga.

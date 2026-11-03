@@ -8,7 +8,7 @@ function fakeRpc({ account = { type: 'chatgpt', planType: 'plus' }, inherited = 
         async request(method, params) {
             calls.push({ method, params })
             if (method === 'account/read') return { account }
-            if (method === 'model/list') return { data: [{ model: 'account-default', isDefault: true }] }
+            if (method === 'model/list') return { data: [{ model: 'account-default', isDefault: true, defaultReasoningEffort: 'medium', supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'medium' }] }] }
             if (method === 'config/read') return { config: { mcp_servers: { private_database: {} }, plugins: { 'private-email@fixture': {} } } }
             if (method === 'thread/start') return { thread: { id: 'isolated-support-thread' } }
             if (method === 'mcpServerStatus/list') return { data: [{ name: 'adsnap_support', tools: { adsnap_test: tools[0] } }, ...(inherited ? [{ name: 'private_email', tools: { send_email: {} } }] : [])], nextCursor: null }
@@ -42,6 +42,7 @@ test('shared Codex preserves ChatGPT auth and disables operator connections, she
     assert.equal(start.config.mcp_servers.adsnap_support.default_tools_approval_mode, 'approve')
     assert.equal(rpc.calls.find(c => c.method === 'mcpServerStatus/list').params.threadId, 'isolated-support-thread')
     assert.equal(rpc.closed, true)
+    assert.equal(rpc.calls.find(c => c.method === 'turn/start').params.effort, 'low')
 })
 test('shared executor rejects API authentication and any inherited tool before sending a user prompt', async () => {
     for (const options of [{ account: { type: 'apiKey' } }, { inherited: true }]) {
@@ -77,4 +78,16 @@ test('turn-scoped MCP capability exposes only its allowlisted functions and reje
     } })
     const result = await run(rpc, { executeTool: async name => { assert.equal(name, 'adsnap_test'); executed++; return { ok: true } } })
     assert.equal(result.answer, 'Capability checked'); assert.equal(executed, 1)
+})
+
+test('fresh context is included before inference and an unavailable snapshot cannot produce a guessed answer', async () => {
+    const rpc = fakeRpc()
+    await run(rpc, { loadContext: async () => ({ viewer: { role: 'user' }, campaigns: { activePis: 17 } }) })
+    const input = JSON.parse(rpc.calls.find(c => c.method === 'turn/start').params.input[0].text)
+    assert.equal(input.currentAdsnapOverview.campaigns.activePis, 17)
+    assert.equal(input.currentAdsnapOverview.viewer.role, 'user')
+    const failed = fakeRpc()
+    await assert.rejects(() => run(failed, { loadContext: async () => { throw new Error('Database unavailable') } }), /Database unavailable/)
+    assert.equal(failed.calls.filter(c => c.method === 'turn/start').length, 0)
+    assert.equal(failed.closed, true)
 })

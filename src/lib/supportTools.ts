@@ -3,8 +3,17 @@ import { createSupportStore, SupportError, supportText } from './supportStore'
 import { describeCaptureFailure } from './captureFailure'
 import { GAM_JOB_LEVELS } from './gamJobStatus'
 import { getBrasiliaClock, getCampaignDateKey } from './campaignSchedule'
+import { createSupportReadModel } from './supportReadModel'
+
+const filters = { query: { type: 'string', maxLength: 100 }, pi: { type: 'string', description: 'PI exato; prefira este filtro a query para contagens de um PI.' }, campaignId: { type: 'string' }, status: { type: 'string' }, format: { type: 'string' }, device: { type: 'string' }, archived: { type: 'boolean' }, offset: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 50 } }
+const period = { from: { type: 'string', description: 'ISO 8601, inclusive' }, to: { type: 'string', description: 'ISO 8601, exclusivo' } }
 
 export const SUPPORT_TOOLS = [
+    { name: 'adsnap_system_overview', description: 'Panorama atual completo: contagem exata de PIs em veiculação, registros de formatos, dispositivos, prints por status hoje/histórico, fila, executor e perfil real do usuário. Não confundir registros de formatos com campanhas agrupadas por PI.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+    { name: 'adsnap_list_campaigns', description: 'Lista paginada de todas as campanhas e formatos com totais exatos, voo, agendamento e número de prints. Para todas use query vazia ou omitida. flightState ACTIVE significa em veiculação na data de Brasília; não é status do print. Use nextOffset para continuar.', inputSchema: { type: 'object', properties: { ...filters, flightState: { type: 'string', enum: ['ACTIVE', 'UPCOMING', 'FINISHED', 'NO_DATES', 'INACTIVE'] } }, additionalProperties: false } },
+    { name: 'adsnap_list_captures', description: 'Consulta prints reais e totais por campanha, PI, formato, status e período. Inclui auditoria, modo e link do book. Sem imagem binária; não afirme ter visto o print. Use paginação; nunca conte só uma página como total.', inputSchema: { type: 'object', properties: { ...filters, ...period }, additionalProperties: false } },
+    { name: 'adsnap_worker_status', description: 'Consulta fila e tentativas reais dos workers, timestamps, leases, heartbeats e falhas recentes. Filtros de PI/campanha/status/período e paginação. Fila vazia não comprova processo online.', inputSchema: { type: 'object', properties: { ...filters, ...period }, additionalProperties: false } },
+    { name: 'adsnap_system_settings', description: 'Consulta configurações operacionais sem segredos e totais de usuários por perfil; somente admin. Retorna o perfil atual e recusa dados administrativos para usuário comum.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
     { name: 'adsnap_search_campaigns', description: 'Busca campanhas reais por PI, cliente ou nome. Retorna no máximo 12 registros, sem links de preview.', inputSchema: { type: 'object', properties: { query: { type: 'string', maxLength: 100 } }, required: ['query'], additionalProperties: false } },
     { name: 'adsnap_diagnose_campaign', description: 'Consulta status atual, últimas tentativas e capturas de uma campanha. Motivos são evidências ou hipóteses, nunca confirmação inventada.', inputSchema: { type: 'object', properties: { campaignId: { type: 'string' } }, required: ['campaignId'], additionalProperties: false } },
     { name: 'adsnap_diagnose_registration', description: 'Consulta cadastros GAM recentes por Order, PI, cliente ou nome, inclusive quando a campanha ainda não foi criada. Query vazia retorna os recentes. Não acessa credenciais nem renova login.', inputSchema: { type: 'object', properties: { query: { type: 'string', maxLength: 100 } }, required: ['query'], additionalProperties: false } },
@@ -18,6 +27,8 @@ export const SUPPORT_SOURCE_FILES = [
     'src/lib/captureOwnership.ts', 'src/lib/campaignSchedule.ts', 'src/lib/spaceCreativePackage.ts',
     'src/lib/gamImportPlanner.ts', 'src/lib/gamImportWriter.ts', 'src/app/nexus/actions.ts',
     'src/scripts/worker.ts', 'docs/CORRECAO-DETRAN-20261103.md',
+    'prisma/schema.prisma', 'src/lib/supportReadModel.ts', 'src/lib/supportTools.ts',
+    'src/scripts/support-worker.ts', 'docs/CODEX-SUPORTE-COMPARTILHADO.md',
 ]
 
 export function createSupportTools(db: PrismaClient, turnId: string, runId: string, readSource: (file: string, start: number) => Promise<string>) {
@@ -26,8 +37,9 @@ export function createSupportTools(db: PrismaClient, turnId: string, runId: stri
     let count = 0
     return async (name: string, input: Record<string, unknown>) => {
         if (++count > 20) throw new SupportError('Limite de consultas desta resposta atingido.')
-        const turn = await db.supportTurn.findFirst({ where: { id: turnId, claimRunId: runId, status: 'RUNNING', lockedUntil: { gt: new Date() }, conversation: { user: { isActive: true } } } })
+        const turn = await db.supportTurn.findFirst({ where: { id: turnId, claimRunId: runId, status: 'RUNNING', lockedUntil: { gt: new Date() }, conversation: { user: { isActive: true, role: { in: ['user', 'admin'] } } } }, include: { conversation: { select: { userId: true } } } })
         if (!turn) throw new SupportError('Solicitação expirada.')
+        if (['adsnap_system_overview', 'adsnap_list_campaigns', 'adsnap_list_captures', 'adsnap_worker_status', 'adsnap_system_settings'].includes(name)) return createSupportReadModel(db, turn.conversation.userId)(name, input)
         if (name === 'adsnap_search_campaigns') {
             const query = supportText(input.query, 100)
             if (query.length < 2) throw new SupportError('Informe ao menos dois caracteres ou o PI.')

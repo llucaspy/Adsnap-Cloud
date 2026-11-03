@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto'
 import prisma from '../lib/prisma'
 import { createSupportStore } from '../lib/supportStore'
 import { createSupportTools, SUPPORT_TOOLS, SUPPORT_SOURCE_FILES } from '../lib/supportTools'
+import { createSupportReadModel } from '../lib/supportReadModel'
 import { redactLogText } from '../lib/logRedaction'
 import { PersonalAgent } from '../../scripts/codex-personal/bridge.mjs'
 import { runSharedCodex } from '../../scripts/codex-personal/shared-runtime.mjs'
@@ -32,7 +33,7 @@ async function main() {
     if (!await store.heartbeat(runId, 'ONLINE', plan)) throw new Error('Outro executor do atendimento está ativo.')
     console.log(JSON.stringify({ supportExecutor: 'started', auth: 'chatgpt', plan, paidApi: false }))
     let active: { id: string; controller: AbortController } | null = null
-    let state = 'ONLINE', pausedUntil = 0, stopping = false, updating = false
+    let state = 'ONLINE', pausedUntil = 0, stopping = false, updating = false, heartbeatFailed = false
     const timer = setInterval(async () => {
         if (updating) return
         updating = true
@@ -40,7 +41,7 @@ async function main() {
             if (!await store.heartbeat(runId, state, plan)) { stopping = true; active?.controller.abort() }
             const current = active
             if (current && !await store.renew(current.id, runId)) current.controller.abort()
-        } catch { stopping = true; active?.controller.abort() }
+        } catch { heartbeatFailed = true; stopping = true; active?.controller.abort() }
         finally { updating = false }
     }, 15000)
     const stop = () => { stopping = true; active?.controller.abort() }
@@ -50,10 +51,11 @@ async function main() {
             if (Date.now() < pausedUntil) { await wait(5000); continue }
             state = 'ONLINE'
             const turn = await store.claim(runId)
-            if (!turn) { if (process.argv.includes('--once')) break; await wait(5000); continue }
+            if (!turn) { if (process.argv.includes('--once')) break; await wait(1000); continue }
             const controller = new AbortController()
             active = { id: turn.id, controller }; state = 'BUSY'
             const timeout = setTimeout(() => controller.abort(), 180000)
+            const startedAt = Date.now()
             try {
                 const history = await prisma.supportTurn.findMany({ where: { conversationId: turn.conversationId, createdAt: { lte: turn.createdAt } }, orderBy: { createdAt: 'desc' }, take: 12, select: { userText: true, assistantText: true, status: true, actions: { select: { type: true, status: true, result: true } } } })
                 const messages = history.reverse().flatMap(t => [
@@ -63,10 +65,11 @@ async function main() {
                 ]).reverse().filter((() => { let remaining = 30000; return (m: { text: string }) => { remaining -= m.text.length; return remaining >= 0 } })()).reverse()
                 const executeTool = createSupportTools(prisma, turn.id, runId, readSource)
                 const result = await runSharedCodex({ messages, tools: SUPPORT_TOOLS, executeTool, signal: controller.signal,
+                    loadContext: () => createSupportReadModel(prisma, turn.conversation.user.id)('adsnap_system_overview'),
                     onReady: async (account: { plan: string }) => { plan = account.plan; if (!await store.heartbeat(runId, 'BUSY', plan)) throw new Error('Executor perdeu a posse.') },
                 })
                 await store.finish(turn.id, runId, result.answer)
-                console.log(JSON.stringify({ supportTurn: turn.id, status: 'SUCCESS' }))
+                console.log(JSON.stringify({ supportTurn: turn.id, status: 'SUCCESS', elapsedMs: Date.now() - startedAt }))
             } catch (error) {
                 const limited = !!(error as Error & { limited?: boolean }).limited
                 const message = limited ? 'O limite do plano foi atingido. O atendimento está pausado; nenhuma API paga foi utilizada.'
@@ -82,6 +85,8 @@ async function main() {
         await prisma.supportExecutor.updateMany({ where: { id: 'codex-plus', runId }, data: { state: 'OFFLINE', lockedUntil: new Date(), heartbeatAt: new Date() } }).catch(() => {})
         await prisma.$disconnect()
     }
+    // Task Scheduler restarts failed exits. A transient database loss must not silently leave support offline.
+    if (heartbeatFailed) throw new Error('Falha no heartbeat do executor.')
 }
 
 main().catch(async () => { console.error('O executor não iniciou. Confira a conexão de dados, o schema e o login ChatGPT do Codex. Nenhuma API paga foi utilizada.'); await prisma.$disconnect(); process.exitCode = 1 })
