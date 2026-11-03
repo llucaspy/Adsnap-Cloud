@@ -1,7 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { nexusAuthority, publicNexusAction, nexusReply } from '../src/lib/nexusPolicy'
-import { validateRepairEdits, applyRepairText } from '../src/lib/supportRepair'
+import { validateRepairEdits, applyRepairText, stageSupportRepairCandidate } from '../src/lib/supportRepair'
+import { mkdtemp, mkdir, writeFile, readFile, rm, realpath } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { resolve, dirname, basename } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 
 test('Nexus public authority allows only operational help and protects private technical action data', () => {
     const policy = nexusAuthority(false)
@@ -31,4 +36,26 @@ test('non-owner responses cannot relay fenced source, implementation paths, API 
     assert(!publicText.includes('PRIVATE_CODE')); assert(!publicText.includes('/api/')); assert(!publicText.includes('src/lib/')); assert(!publicText.includes('AUTH_SECRET'))
     assert.equal(nexusReply(source, true), source)
     assert.equal(nexusReply('Abra o book em /books/123 para conferir seus prints.', false), 'Abra o book em /books/123 para conferir seus prints.')
+})
+
+test('a scoped repair changes only the isolated candidate and leaves the running source untouched', async () => {
+    const directory = await mkdtemp(resolve(tmpdir(), 'adsnap-nexus-repair-test-'))
+    const root = resolve(directory, 'repo'), candidates = resolve(directory, 'candidates')
+    await mkdir(resolve(root, 'src/lib'), { recursive: true })
+    const file = 'src/lib/campaignSchedule.ts', before = 'const slot = slots[0]', after = 'const slot = slots.at(0)'
+    const original = `export function choose(slots: number[]) { ${before}; return slot }\n`
+    await writeFile(resolve(root, file), original)
+    const git = (args: string[]) => execFileSync('git', args, { cwd: root, windowsHide: true, stdio: 'pipe' })
+    try {
+        git(['init']); git(['add', '.']); git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@local.invalid', 'commit', '-m', 'fixture'])
+        const result = await stageSupportRepairCandidate(root, randomUUID(), [{ file, before, after }], candidates)
+        assert.equal(result.productionChanged, false); assert.equal(result.regressionTestRequired, true)
+        assert.equal(await readFile(resolve(root, file), 'utf8'), original)
+        assert((await readFile(resolve(result.worktree, file), 'utf8')).includes(after))
+        assert.equal(git(['status', '--porcelain']).toString().trim(), '')
+    } finally {
+        const target = await realpath(directory), temp = await realpath(tmpdir())
+        assert.equal(dirname(target), temp); assert(basename(target).startsWith('adsnap-nexus-repair-test-'))
+        await rm(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+    }
 })

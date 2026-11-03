@@ -30,7 +30,8 @@ export function applyRepairText(source: string, before: string, after: string) {
     return source.replace(before, () => after)
 }
 
-async function stageCandidate(root: string, actionId: string, edits: Edit[]) {
+export async function stageSupportRepairCandidate(root: string, actionId: string, input: unknown, destinationRoot = resolve(homedir(), '.adsnap-support', 'repairs')) {
+    const edits = validateRepairEdits(input)
     if (!/^[a-f0-9-]{36}$/i.test(actionId)) throw new Error('Ocorrência inválida.')
     const files = new Map<string, string>()
     const realRoot = await realpath(root)
@@ -42,7 +43,7 @@ async function stageCandidate(root: string, actionId: string, edits: Edit[]) {
         const source = files.get(edit.file) ?? await readFile(sourcePath, 'utf8')
         files.set(edit.file, applyRepairText(source, edit.before, edit.after))
     }
-    const parent = resolve(homedir(), '.adsnap-support', 'repairs')
+    const parent = resolve(destinationRoot)
     await mkdir(parent, { recursive: true })
     const destination = resolve(parent, actionId)
     const baseCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true }).trim()
@@ -68,7 +69,7 @@ export async function processOneSupportRepair(db: PrismaClient, root: string, ru
     if (!payload.correctionAuthorized || payload.policyVersion !== policy.version) return false
     if (!payload.campaignIds?.length) { await db.supportAction.updateMany({ where: { id: action.id, status: 'REVIEW_REQUIRED' }, data: { status: 'INTERNAL_REVIEW' } }); return true }
     if (!(await db.supportAction.updateMany({ where: { id: action.id, status: 'REVIEW_REQUIRED' }, data: { status: 'ANALYZING' } })).count) return true
-    let staged: Awaited<ReturnType<typeof stageCandidate>> | null = null
+    let staged: Awaited<ReturnType<typeof stageSupportRepairCandidate>> | null = null
     let recorded = false, reads = 0, calls = 0
     const tools = [
         { name: 'adsnap_search_internal_capture_source', description: 'Localiza texto literal nas fontes internas autorizadas e retorna linhas para este caso.', inputSchema: { type: 'object', properties: { query: { type: 'string', maxLength: 100 } }, required: ['query'], additionalProperties: false } },
@@ -104,7 +105,7 @@ export async function processOneSupportRepair(db: PrismaClient, root: string, ru
                 if (name === 'adsnap_prepare_internal_capture_fix') {
                     if (!reads || staged || recorded) throw new Error('Consulte a fonte antes de preparar uma correção única.')
                     const cause = supportText(input.cause, 1500), regression = supportText(input.regression, 1500)
-                    staged = await stageCandidate(root, action.id, validateRepairEdits(input.edits))
+                    staged = await stageSupportRepairCandidate(root, action.id, input.edits)
                     await db.supportAction.update({ where: { id: action.id }, data: { result: { internalOnly: true, cause, regression, candidate: staged } } })
                     return { prepared: true, validationRequired: true, productionChanged: false }
                 }
