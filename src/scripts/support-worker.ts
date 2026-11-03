@@ -33,7 +33,7 @@ async function main() {
     if (!await store.heartbeat(runId, 'ONLINE', plan)) throw new Error('Outro executor do atendimento está ativo.')
     console.log(JSON.stringify({ supportExecutor: 'started', auth: 'chatgpt', plan, paidApi: false }))
     let active: { id: string; controller: AbortController } | null = null
-    let state = 'ONLINE', pausedUntil = 0, stopping = false, updating = false
+    let state = 'ONLINE', pausedUntil = 0, stopping = false, updating = false, heartbeatFailed = false
     const timer = setInterval(async () => {
         if (updating) return
         updating = true
@@ -41,7 +41,7 @@ async function main() {
             if (!await store.heartbeat(runId, state, plan)) { stopping = true; active?.controller.abort() }
             const current = active
             if (current && !await store.renew(current.id, runId)) current.controller.abort()
-        } catch { stopping = true; active?.controller.abort() }
+        } catch { heartbeatFailed = true; stopping = true; active?.controller.abort() }
         finally { updating = false }
     }, 15000)
     const stop = () => { stopping = true; active?.controller.abort() }
@@ -85,6 +85,8 @@ async function main() {
         await prisma.supportExecutor.updateMany({ where: { id: 'codex-plus', runId }, data: { state: 'OFFLINE', lockedUntil: new Date(), heartbeatAt: new Date() } }).catch(() => {})
         await prisma.$disconnect()
     }
+    // Task Scheduler restarts failed exits. A transient database loss must not silently leave support offline.
+    if (heartbeatFailed) throw new Error('Falha no heartbeat do executor.')
 }
 
 main().catch(async () => { console.error('O executor não iniciou. Confira a conexão de dados, o schema e o login ChatGPT do Codex. Nenhuma API paga foi utilizada.'); await prisma.$disconnect(); process.exitCode = 1 })
