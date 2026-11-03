@@ -11,6 +11,9 @@ import { PersonalAgent } from '../../scripts/codex-personal/bridge.mjs'
 import { runSharedCodex } from '../../scripts/codex-personal/shared-runtime.mjs'
 import { getNexusAccess, publicNexusAction, nexusReply } from '../lib/nexusPolicy'
 import { processOneSupportRepair } from '../lib/supportRepair'
+import { registerGamOrder, dispatchGamImport } from '../lib/gamOrderRegistration'
+import { notifyGamOrderStarted } from '../lib/gamOrderTelegram'
+import { learnNexusQuestion, recallNexusMemory } from '../lib/nexusMemory'
 
 dotenv.config({ path: process.env.ADSNAP_SUPPORT_ENV_FILE || '.env.local' })
 const root = resolve(process.cwd())
@@ -79,12 +82,16 @@ async function main() {
                     ...(t.assistantText ? [{ role: 'assistant', text: nexusReply(t.assistantText.slice(0, 6000), access.isOwner) }] : []),
                     ...(t.actions.length ? [{ role: 'system-data', text: JSON.stringify(t.actions.map(a => publicNexusAction({ ...a, payload: {} }, access.isOwner))) }] : []),
                 ]).reverse().filter((() => { let remaining = 30000; return (m: { text: string }) => { remaining -= m.text.length; return remaining >= 0 } })()).reverse()
-                const executeTool = createSupportTools(prisma, turn.id, runId, readSource)
+                const executeTool = createSupportTools(prisma, turn.id, runId, readSource, url => registerGamOrder(prisma, url, dispatchGamImport, notifyGamOrderStarted))
                 const result = await runSharedCodex({ messages, tools: supportToolsForOwner(access.isOwner), executeTool, signal: controller.signal,
-                    loadContext: () => createSupportReadModel(prisma, turn.conversation.user.id)('adsnap_system_overview'),
+                    loadContext: async () => {
+                        const [overview, memory] = await Promise.all([createSupportReadModel(prisma, turn.conversation.user.id)('adsnap_system_overview'), recallNexusMemory(prisma, turn.conversation.user.id)])
+                        return { ...overview, memory }
+                    },
                     onReady: async (account: { plan: string }) => { plan = account.plan; if (!await store.heartbeat(runId, 'BUSY', plan)) throw new Error('Executor perdeu a posse.') },
                 })
                 await store.finish(turn.id, runId, result.answer)
+                await learnNexusQuestion(prisma, turn.id).catch(() => {})
                 console.log(JSON.stringify({ supportTurn: turn.id, status: 'SUCCESS', elapsedMs: Date.now() - startedAt }))
             } catch (error) {
                 const limited = !!(error as Error & { limited?: boolean }).limited

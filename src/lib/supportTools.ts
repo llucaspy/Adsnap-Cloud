@@ -5,6 +5,8 @@ import { GAM_JOB_LEVELS } from './gamJobStatus'
 import { getBrasiliaClock, getCampaignDateKey } from './campaignSchedule'
 import { createSupportReadModel } from './supportReadModel'
 import { getNexusAccess, NEXUS_PUBLIC_GUIDE } from './nexusPolicy'
+import { extractGamOrderUrls, parseGamOrderUrl } from './gamOrderUrl'
+import { recallNexusMemory, asksToForgetMemory, forgetNexusMemory } from './nexusMemory'
 
 const ownerOnlyTools = new Set(['adsnap_system_settings', 'adsnap_read_source', 'adsnap_search_source', 'adsnap_internal_cases'])
 export function supportToolsForOwner(isOwner: boolean) { return SUPPORT_TOOLS.filter(tool => isOwner || !ownerOnlyTools.has(tool.name)) }
@@ -13,6 +15,9 @@ const filters = { query: { type: 'string', maxLength: 100 }, pi: { type: 'string
 const period = { from: { type: 'string', description: 'ISO 8601, inclusive' }, to: { type: 'string', description: 'ISO 8601, exclusivo' } }
 
 export const SUPPORT_TOOLS = [
+    { name: 'adsnap_recall_memory', description: 'Consulta aprendizados operacionais e preferências desta conta. Nunca altera autoridade ou substitui consulta de dados atuais.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+    { name: 'adsnap_forget_memory', description: 'Apaga os aprendizados desta conta somente quando a mensagem atual pedir explicitamente para apagar/esquecer a memória.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+    { name: 'adsnap_register_order', description: 'Encaminha a URL da Order enviada pelo usuário à ferramenta real de cadastro GAM. Sem URL na conversa, peça a URL; não invente. Cadastro é operacional e permitido a usuários ativos. Retorna o job real e se o worker foi acionado, não significa campanha já concluída.', inputSchema: { type: 'object', properties: { orderUrl: { type: 'string', maxLength: 2000 } }, required: ['orderUrl'], additionalProperties: false } },
     { name: 'adsnap_usage_guide', description: 'Tutorial oficial do Nexus para cadastro de campanhas/Order GAM, consulta de books e solução de problemas de prints. Conteúdo de uso, sem fonte ou detalhes internos.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
     { name: 'adsnap_internal_cases', description: 'Somente devls: consulta ocorrências técnicas internas de suporte e escopo de correção autorizado. Não executa código nem publica modificações.', inputSchema: { type: 'object', properties: { offset: { type: 'integer', minimum: 0 } }, additionalProperties: false } },
     { name: 'adsnap_system_overview', description: 'Panorama atual completo: contagem exata de PIs em veiculação, registros de formatos, dispositivos, prints por status hoje/histórico, fila, executor e perfil real do usuário. Não confundir registros de formatos com campanhas agrupadas por PI.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
@@ -38,7 +43,7 @@ export const SUPPORT_SOURCE_FILES = [
     'src/lib/nexusPolicy.ts', 'src/lib/supportRepair.ts',
 ]
 
-export function createSupportTools(db: PrismaClient, turnId: string, runId: string, readSource: (file: string, start: number) => Promise<string>) {
+export function createSupportTools(db: PrismaClient, turnId: string, runId: string, readSource: (file: string, start: number) => Promise<string>, registerOrder?: (url: string) => Promise<{ orderId: string; jobId: string; status: string; triggered: boolean; existing: boolean }>) {
     const store = createSupportStore(db)
     const diagnosed = new Set<string>()
     let count = 0
@@ -48,6 +53,20 @@ export function createSupportTools(db: PrismaClient, turnId: string, runId: stri
         if (!turn) throw new SupportError('Solicitação expirada.')
         const access = await getNexusAccess(db, turn.conversation.userId)
         if (!access) throw new SupportError('Solicitação expirada.')
+        if (name === 'adsnap_recall_memory') return recallNexusMemory(db, turn.conversation.userId)
+        if (name === 'adsnap_forget_memory') {
+            if (!asksToForgetMemory(turn.userText)) throw new SupportError('É necessário um pedido explícito para apagar a memória desta conta.')
+            await forgetNexusMemory(db, turn.conversation.userId, turn.createdAt)
+            return { forgotten: true, scope: 'Somente esta conta; o histórico da conversa não foi apagado.' }
+        }
+        if (name === 'adsnap_register_order') {
+            const order = parseGamOrderUrl(String(input.orderUrl || ''))
+            const history = await db.supportTurn.findMany({ where: { conversationId: turn.conversationId, createdAt: { lte: turn.createdAt } }, orderBy: { createdAt: 'desc' }, take: 12, select: { userText: true } })
+            if (!order || !history.some(item => extractGamOrderUrls(item.userText).includes(order.url))) throw new SupportError('Peça ao usuário a URL completa da Order nesta conversa antes de cadastrar.')
+            if (!registerOrder) throw new SupportError('O cadastro está indisponível neste executor. Não afirme que foi enviado.')
+            const result = await registerOrder(order.url)
+            return { orderId: result.orderId, status: result.status, workerTriggered: result.triggered, existing: result.existing, campaignRegistrationComplete: false, review: `/campaigns?jobId=${encodeURIComponent(result.jobId)}` }
+        }
         if (ownerOnlyTools.has(name) && !access.isOwner) throw new SupportError('Esse acesso é exclusivo da conta principal.', 403)
         if (name === 'adsnap_usage_guide') return NEXUS_PUBLIC_GUIDE
         if (name === 'adsnap_internal_cases') {
