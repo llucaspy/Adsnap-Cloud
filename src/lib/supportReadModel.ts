@@ -34,7 +34,7 @@ function dates(input: Record<string, unknown>) {
 function queryWhere(input: Record<string, unknown>): Prisma.CampaignWhereInput {
     const query = String(input.query || '').trim().slice(0, 100)
     return { isArchived: input.archived === true, ...(query ? { OR: ['pi', 'client', 'campaignName', 'agency'].map(key => ({ [key]: { contains: query, mode: 'insensitive' } })) } : {}),
-        ...(input.campaignId ? { id: String(input.campaignId) } : {}), ...(input.status ? { status: String(input.status) } : {}),
+        ...(input.pi ? { pi: { equals: String(input.pi).trim(), mode: 'insensitive' } } : {}), ...(input.campaignId ? { id: String(input.campaignId) } : {}), ...(input.status ? { status: String(input.status) } : {}),
         ...(input.format ? { format: { in: Array.isArray(input.formatIds) ? input.formatIds.map(String) : [String(input.format)], mode: 'insensitive' } } : {}), ...(input.device ? { device: String(input.device) } : {}) }
 }
 
@@ -95,7 +95,7 @@ export function createSupportReadModel(db: PrismaClient, userId: string) {
         }
         if (name === 'adsnap_worker_status') {
             const { offset, limit } = page(input)
-            const where: Prisma.WorkerJobWhereInput = { ...(input.query || input.campaignId || input.format || input.device || input.archived !== undefined ? { campaign: queryWhere({ ...input, status: undefined }) } : {}), ...(input.status ? { status: String(input.status) } : {}), createdAt: dates(input) }
+            const where: Prisma.WorkerJobWhereInput = { ...(input.query || input.pi || input.campaignId || input.format || input.device || input.archived !== undefined ? { campaign: queryWhere({ ...input, status: undefined }) } : {}), ...(input.status ? { status: String(input.status) } : {}), createdAt: dates(input) }
             const [counts, total, jobs, processing, recentErrors] = await Promise.all([
                 db.workerJob.groupBy({ by: ['status'], _count: { _all: true } }), db.workerJob.count({ where }),
                 db.workerJob.findMany({ where, take: limit, skip: offset, orderBy: [{ createdAt: 'desc' }, { id: 'asc' }], select: { id: true, type: true, status: true, campaignId: true, attempts: true, maxAttempts: true, createdAt: true, scheduledFor: true, startedAt: true, finishedAt: true, lockedUntil: true, lastError: true, campaign: { select: { pi: true, client: true, format: true, device: true } } } }),

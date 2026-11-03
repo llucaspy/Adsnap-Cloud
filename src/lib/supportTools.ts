@@ -5,7 +5,7 @@ import { GAM_JOB_LEVELS } from './gamJobStatus'
 import { getBrasiliaClock, getCampaignDateKey } from './campaignSchedule'
 import { createSupportReadModel } from './supportReadModel'
 
-const filters = { query: { type: 'string', maxLength: 100 }, campaignId: { type: 'string' }, status: { type: 'string' }, format: { type: 'string' }, device: { type: 'string' }, archived: { type: 'boolean' }, offset: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 50 } }
+const filters = { query: { type: 'string', maxLength: 100 }, pi: { type: 'string', description: 'PI exato; prefira este filtro a query para contagens de um PI.' }, campaignId: { type: 'string' }, status: { type: 'string' }, format: { type: 'string' }, device: { type: 'string' }, archived: { type: 'boolean' }, offset: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 50 } }
 const period = { from: { type: 'string', description: 'ISO 8601, inclusive' }, to: { type: 'string', description: 'ISO 8601, exclusivo' } }
 
 export const SUPPORT_TOOLS = [
@@ -27,6 +27,8 @@ export const SUPPORT_SOURCE_FILES = [
     'src/lib/captureOwnership.ts', 'src/lib/campaignSchedule.ts', 'src/lib/spaceCreativePackage.ts',
     'src/lib/gamImportPlanner.ts', 'src/lib/gamImportWriter.ts', 'src/app/nexus/actions.ts',
     'src/scripts/worker.ts', 'docs/CORRECAO-DETRAN-20261103.md',
+    'prisma/schema.prisma', 'src/lib/supportReadModel.ts', 'src/lib/supportTools.ts',
+    'src/scripts/support-worker.ts', 'docs/CODEX-SUPORTE-COMPARTILHADO.md',
 ]
 
 export function createSupportTools(db: PrismaClient, turnId: string, runId: string, readSource: (file: string, start: number) => Promise<string>) {

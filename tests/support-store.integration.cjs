@@ -72,6 +72,8 @@ async function main() {
             assert.equal(overview.campaigns.formats.reduce((sum, f) => sum + f.records, 0), overview.campaigns.registeredFormatRecords)
             const list = await tool('adsnap_list_campaigns', { query: prefix, limit: 1 })
             assert.equal(list.totalFormatRecords, 1); assert.equal(list.totalPis, 1); assert.equal(list.items[0].flightState, 'NO_DATES')
+            assert.equal((await tool('adsnap_list_campaigns', { pi: prefix })).totalFormatRecords, 1)
+            assert.equal((await tool('adsnap_list_campaigns', { pi: prefix.slice(0, -1) })).totalFormatRecords, 0)
             assert.equal((await tool('adsnap_list_campaigns', { query: prefix, flightState: 'ACTIVE' })).totalFormatRecords, 0)
             assert(!JSON.stringify(overview).includes('password')); assert(!JSON.stringify(list).includes('PRIVATE_PREVIEW_SECRET'))
         })
