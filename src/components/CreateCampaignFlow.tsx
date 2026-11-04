@@ -565,7 +565,7 @@ function GamImportPanel({
                     </div>
                     <div className="min-w-0">
                         <h2 className="text-base font-semibold" style={{ color: '#ffffff' }}>Importacao GAM</h2>
-                        <p className="text-xs truncate" style={{ color: '#737373' }}>Informe PI, segmentacao e link da Order para preparar a revisao.</p>
+                        <p className="text-xs truncate" style={{ color: '#737373' }}>Informe PI, segmentação e link da Order para cadastrar e salvar automaticamente.</p>
                     </div>
                 </div>
                 <button
@@ -647,10 +647,9 @@ function GamImportPanel({
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-1" style={{ background: '#1a1a1a', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px' }}>
                                 {([
                                     { value: 'BOUNDARY' as const, label: 'Inicio e fim', description: 'Captura no primeiro e no ultimo dia', icon: CalendarRange },
-                                    { value: 'DAILY' as const, label: 'Diaria', description: 'Captura e envia o book do dia apos 08:00', icon: RefreshCw },
                                 ]).map(item => {
                                     const Icon = item.icon
-                                    const active = captureCadence === item.value
+                                    const active = segmentation === 'GOV_FEDERAL' || captureCadence === item.value
                                     return (
                                         <button
                                             key={item.value}
@@ -705,7 +704,7 @@ function GamImportPanel({
                             style={{ background: '#e5e5e5', color: '#0f0f0f', borderRadius: '8px' }}
                         >
                             {isPending ? <Loader2 size={16} className="animate-spin" /> : <FileCheck2 size={16} />}
-                            {isPending ? 'Enviando...' : 'Preparar revisao'}
+                            {isPending ? 'Enviando...' : 'Cadastrar e salvar'}
                         </button>
                     </div>
                 </div>
@@ -885,10 +884,11 @@ function GamJobDebugger({ job, onStop, onDelete, onRenewLogin, renewingJobId, pr
 }
 
 function debuggerPresentation(job: GamImportJob) {
+    if (job.level === 'JOB_GAM_SAVED') return { label: 'Salva e agendada', color: '#22c55e', background: 'rgba(34,197,94,0.10)' }
     if (job.level === 'JOB_GAM_RUNNING') return { label: 'Processando', color: '#e5e5e5', background: 'rgba(255,255,255,0.12)' }
     if (job.level === 'JOB_GAM_PENDING') return { label: 'Na fila', color: '#f59e0b', background: 'rgba(245,158,11,0.10)' }
     if (job.level === GAM_AUTH_REQUIRED_LEVEL) return { label: 'Login Google', color: '#f59e0b', background: 'rgba(245,158,11,0.10)' }
-    if (job.level === 'JOB_GAM_REVIEW') return { label: 'Pronto', color: '#22c55e', background: 'rgba(34,197,94,0.10)' }
+    if (job.level === 'JOB_GAM_REVIEW') return { label: 'Pendências', color: '#f59e0b', background: 'rgba(245,158,11,0.10)' }
     if (job.level === 'JOB_GAM_CANCELLED') return { label: 'Encerrado', color: '#f59e0b', background: 'rgba(245,158,11,0.10)' }
     return { label: 'Erro', color: '#ef4444', background: 'rgba(239,68,68,0.10)' }
 }

@@ -27,8 +27,12 @@ function withCreativeAsset(existing: Prisma.JsonValue | null | undefined, creati
     } satisfies Prisma.InputJsonObject
 }
 
+function creativeIdFromPreview(url: string) {
+    try { const id = new URL(url).searchParams.get('creativeId'); return id && /^\d+$/.test(id) ? id : null } catch { return null }
+}
+
 export async function createCampaignsFromGamDraft(
-    prisma: PrismaClient,
+    prisma: Pick<PrismaClient, 'campaign'>,
     draft: GamImportDraft
 ): Promise<GamImportWriteResult> {
     const campaignIds: string[] = []
@@ -49,7 +53,7 @@ export async function createCampaignsFromGamDraft(
             continue
         }
 
-        const existing = await prisma.campaign.findFirst({
+        let existing = await prisma.campaign.findFirst({
             where: {
                 externalCampaignId: entry.externalCampaignId,
                 format: entry.format,
@@ -57,16 +61,35 @@ export async function createCampaignsFromGamDraft(
                 url: entry.url,
                 isArchived: false,
             },
-            select: { id: true, compositionBox: true },
+            select: { id: true, compositionBox: true, adOpsStatus: true },
         })
 
+        // Preview tokens may rotate between imports. Match the same authoritative creative,
+        // while keeping different creatives of one line item as separate records.
+        if (!existing && creativeIdFromPreview(entry.url) === entry.creativeId) {
+            const candidates = await prisma.campaign.findMany({ where: { externalCampaignId: entry.externalCampaignId, format: entry.format, device: entry.device, isArchived: false }, select: { id: true, url: true, compositionBox: true, adOpsStatus: true } })
+            const matching = candidates.filter(c => creativeIdFromPreview(c.url) === entry.creativeId)
+            if (matching.length > 1) { blocked++; continue }
+            existing = matching[0] || null
+        }
+
         if (existing) {
+            if (['PAUSADA', 'CANCELADA', 'CONCLUIDA', 'ENCERRADA'].includes(existing.adOpsStatus)) {
+                skipped++
+                blocked++
+                continue
+            }
             const compositionBox = withCreativeAsset(existing.compositionBox, entry.creativeAssetUrl)
             await prisma.campaign.update({
                 where: { id: existing.id },
                 data: {
+                    url: entry.url,
                     segmentation,
                     captureCadence,
+                    flightStart: draft.flightStart ? new Date(`${draft.flightStart}T00:00:00-03:00`) : null,
+                    flightEnd: draft.flightEnd ? new Date(`${draft.flightEnd}T23:59:59-03:00`) : null,
+                    isScheduled: draft.isScheduled,
+                    scheduledTimes: draft.scheduledTimes,
                     ...(compositionBox ? { compositionBox } : {}),
                 },
             })

@@ -38,6 +38,7 @@ type NotifyReviewOptions = {
     draft: GamImportDraft
     reviewUrl: string
     writeResult?: GamImportWriteResult
+    automaticallySaved?: boolean
 }
 
 function readReviewReminderMinutes() {
@@ -128,15 +129,15 @@ export async function notifyGamOrderStarted(jobId: string) {
 export async function notifyGamOrderReadyForReview(options: NotifyReviewOptions) {
     const { jobId, draft, reviewUrl, writeResult } = options
     return sendTelegramAlert(
-        'Order pronta para revisao',
+        options.automaticallySaved ? 'Order salva e agendada' : 'Order com pendências',
         writeResult
-            ? `${draft.client} foi cadastrada automaticamente e precisa de conferencia.`
+            ? options.automaticallySaved ? `${draft.client} foi salva e já está com capturas automáticas: ${draft.segmentation === 'GOV_FEDERAL' ? 'Governo federal, início e fim' : 'prints diários'}.` : `${draft.client} teve os itens válidos salvos; confira os itens pendentes.`
             : `${draft.client} esta pronta para conferencia antes do cadastro.`,
         writeResult
             ? `Order ${draft.orderId} | PI ${draft.pi} | ${writeResult.created} criada(s) | ${writeResult.skipped} existente(s) | ${writeResult.blocked} pendente(s)`
             : `Order ${draft.orderId} | PI ${draft.pi} | ${draft.mediaEntries.length} formato(s) | ${draft.blockedItems.length} bloqueado(s)`,
         undefined,
-        { label: 'Abrir revisao', url: reviewUrl },
+        { label: options.automaticallySaved ? 'Ver cadastro' : 'Ver pendências', url: reviewUrl },
         { dedupeKey: `gam-order-ready:${jobId}` },
     )
 }

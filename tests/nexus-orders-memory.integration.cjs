@@ -20,7 +20,7 @@ async function main() {
         for (const id of ids) await db.user.create({ data: { id, email: id+'@local.invalid', name: 'Fixture', password: 'fixture-not-a-login' } })
         conversation = await db.supportConversation.create({ data: { userId: ids[0], title: 'Fixture' } })
         turn = await db.supportTurn.create({ data: { conversationId: conversation.id, requestKey: randomUUID(), userText: 'Quero cadastrar uma Order. Explique passo a passo.', status: 'RUNNING', claimRunId: runId, lockedUntil: new Date(Date.now()+300000), createdAt: new Date() } })
-        const tool = createSupportTools(db, turn.id, runId, async () => '', link => registerGamOrder(db, link, async () => { dispatched++; return true }, async () => { notified++ }))
+        const tool = createSupportTools(db, turn.id, runId, async () => '', (link, campaignType) => registerGamOrder(db, link, async () => { dispatched++; return true }, async () => { notified++ }, campaignType))
         await check('registration requires a real URL supplied by this user in this conversation', async () => {
             await assert.rejects(() => tool('adsnap_register_order', { orderUrl }), /URL completa/)
             assert.equal(dispatched, 0)
@@ -32,6 +32,16 @@ async function main() {
             assert(responses.every(r => r.orderId === orderId && r.campaignRegistrationComplete === false))
             assert.equal(dispatched, 1); assert.equal(notified, 1)
             assert.equal(await db.nexusLog.count({ where: { details: { contains: orderUrl } } }), 1)
+        })
+        await check('a gov request followed by its URL persists federal boundary settings and rejects a conflicting AI type', async () => {
+            await db.supportTurn.create({ data: { conversationId: conversation.id, requestKey: randomUUID(), userText: 'Quero cadastrar esta Order como campanha de gov', status: 'SUCCESS', createdAt: new Date(turn.createdAt.getTime()-1000) } })
+            await db.supportTurn.update({ where: { id: turn.id }, data: { userText: orderUrl } })
+            await assert.rejects(() => tool('adsnap_register_order', { orderUrl, campaignType: 'PRIVADO' }), /tipo informado/)
+            const response = await tool('adsnap_register_order', { orderUrl, campaignType: 'GOV_FEDERAL' })
+            assert.equal(response.segmentation, 'GOV_FEDERAL'); assert.equal(response.captureCadence, 'BOUNDARY')
+            const saved = await db.nexusLog.findFirst({ where: { details: { contains: orderUrl } } })
+            assert.equal(JSON.parse(saved.details).requestedCaptureCadence, 'BOUNDARY')
+            await db.supportTurn.update({ where: { id: turn.id }, data: { userText: 'Quero cadastrar esta Order passo a passo: '+orderUrl } })
         })
         await check('only completed answers create bounded learning and repeated processing is idempotent', async () => {
             await learnNexusQuestion(db, turn.id); assert.equal((await recallNexusMemory(db, ids[0])).items.length, 0)
@@ -60,7 +70,7 @@ async function main() {
             const action = await db.supportAction.create({ data: { turnId: turn.id, type: 'RETRY_CAPTURE', status: 'SUCCESS', payload: {} } })
             await learnNexusOutcome(db, action.id)
             assert.equal((await recallNexusMemory(db, ids[0])).items.length, 0)
-            assert.equal(await db.supportTurn.count({ where: { conversationId: conversation.id } }), 3)
+            assert.equal(await db.supportTurn.count({ where: { conversationId: conversation.id } }), 4)
         })
         await check('memory migration is idempotent and browser roles cannot access the table', async () => {
             const client = new pg.Client({ connectionString: url.toString() }); await client.connect()
