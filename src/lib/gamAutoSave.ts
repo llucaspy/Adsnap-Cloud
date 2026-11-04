@@ -24,5 +24,5 @@ export async function finalizeAutomaticGamOrder(db: PrismaClient, jobId: string,
             executionLogs: [...(Array.isArray(details.executionLogs) ? details.executionLogs : []), { at: new Date().toISOString(), message: saved ? `Campanhas salvas e agendadas automaticamente (${policy.segmentation}, ${policy.captureCadence})` : `Campanhas válidas salvas; ${writeResult.blocked} item(ns) precisam de correção`, tone: saved ? 'success' : 'info' }].slice(-100) }
         await tx.nexusLog.update({ where: { id: jobId }, data: { level, message: saved ? `Cadastro GAM salvo: ${draft.client} (${writeResult.created} criada(s), ${writeResult.skipped} existente(s))` : `Cadastro GAM parcial: ${draft.client} (${writeResult.blocked} item(ns) pendente(s))`, details: JSON.stringify(completedDetails) } })
         return { draft, writeResult, completedDetails, level, saved }
-    }, { maxWait: 10000, timeout: 20000 })
+    }, { maxWait: 10000, timeout: 120000 })
 }

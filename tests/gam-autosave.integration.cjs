@@ -47,6 +47,14 @@ async function main(){
    assert.equal((await db.nexusLog.findUnique({where:{id:invalid.id}})).level,'JOB_GAM_RUNNING')
    assert.equal(await db.campaign.count({where:{client:prefix}}),1)
   })
+  await check('rotated preview tokens update the same creative instead of duplicating its format',async()=>{
+   const j=await job('GOV_FEDERAL')
+   const changed={...draft,mediaEntries:[{...entry,url:entry.url.replace('google_preview=fixture','google_preview=rotated')}]}
+   const r=await finalizeAutomaticGamOrder(db,j.id,changed)
+   assert.equal(r.writeResult.created,0);assert.equal(r.writeResult.skipped,1)
+   assert.equal(await db.campaign.count({where:{client:prefix}}),1)
+   const c=await db.campaign.findFirst({where:{client:prefix}});assert(c.url.includes('google_preview=rotated'));assert.equal(c.captureCadence,'BOUNDARY')
+  })
   await check('blocked items retain a partial issue while valid formats are already saved and enabled',async()=>{
    const j=await job();const r=await finalizeAutomaticGamOrder(db,j.id,{...draft,blockedItems:[{sourceLineItemId:'bad',reason:'Missing preview'}]})
    assert.equal(r.level,'JOB_GAM_REVIEW');assert.equal(r.saved,false);assert.equal(r.writeResult.blocked,1)
