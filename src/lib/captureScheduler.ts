@@ -38,7 +38,7 @@ export async function runCaptureScheduler(db: PrismaClient, authorization: strin
         const due = campaigns.some(c => shouldQueueScheduledCampaign(c, now))
         const pending = await tx.$queryRawUnsafe<{ id: string }[]>(`SELECT j.id FROM "WorkerJob" j
             JOIN "Campaign" c ON c.id=j."campaignId"
-            WHERE j.type='CAPTURE' AND j.status='QUEUED' AND j."scheduledFor" <= $1
+            WHERE j.type='CAPTURE' AND j.status='QUEUED' AND j."scheduledFor" <= ($1::timestamptz AT TIME ZONE 'UTC')
               AND j.attempts < j."maxAttempts" AND NOT c."isArchived" AND c.status='QUEUED' LIMIT 1`, now)
         const stale = await tx.campaign.count({ where: {
             isArchived: false, status: 'PROCESSING', lockedUntil: { lt: now },
