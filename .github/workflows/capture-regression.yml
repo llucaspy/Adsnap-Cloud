@@ -46,6 +46,7 @@ jobs:
       - run: node --import tsx tests/support-store.integration.cjs "$DATABASE_URL"
       - run: node --import tsx tests/nexus-orders-memory.integration.cjs "$DATABASE_URL"
       - run: node --import tsx tests/gam-autosave.integration.cjs "$DATABASE_URL"
+      - run: node --import tsx tests/capture-scheduler.integration.cjs "$DATABASE_URL"
       - run: npm run typecheck:worker
       - run: npm run typecheck:support
       - run: npm run build
