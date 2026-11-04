@@ -4,12 +4,13 @@ const fs = require('node:fs')
 const vm = require('node:vm')
 const { stripTypeScriptTypes } = require('node:module')
 const { setTimeout: waitForStorage } = require('node:timers/promises')
+const { supabaseObjectKey } = require('../src/lib/storageObjectKey.ts')
 
 function load(extra = {}) {
     const source = fs.readFileSync(require('node:path').join(__dirname, '../src/lib/captureStorage.ts'), 'utf8')
         .replace(/^import[\s\S]*?from\s+['"][^'"]+['"];?[^\S\r\n]*[\r\n]+/gm, '').replace(/^export\s+/gm, '')
     const context = vm.createContext({ Buffer, Error, Date, AbortSignal, AbortController, setTimeout, clearTimeout,
-        crypto: require('node:crypto'), Readable: require('node:stream').Readable, waitForStorage,
+        crypto: require('node:crypto'), Readable: require('node:stream').Readable, waitForStorage, supabaseObjectKey,
         console: { warn() {}, log() {}, error() {} }, process: { env: { NEXUS_CAPTURE_STORAGE_PROVIDER: 'google-drive' } }, ...extra })
     vm.runInContext(stripTypeScriptTypes(source) + `
         globalThis.unit = { withDriveRetry, uploadCaptureImage, withDriveFolderLock,
@@ -56,4 +57,29 @@ test('an already cancelled upload never opens a provider request', async () => {
     controller.abort(new Error('SYNTHETIC_CANCELLED'))
     const unit = load()
     await assert.rejects(unit.uploadCaptureImage(Buffer.from('png'), { campaignId: 'fixture', campaign: {}, signal: controller.signal }), /SYNTHETIC_CANCELLED/)
+})
+
+test('Drive failure uploads accented campaign evidence to Supabase using the same valid key for upload and URL', async () => {
+    let uploadedKey, publicKey
+    const provider = { storage: { from: () => ({
+        upload: async (key, _buffer, options) => {
+            uploadedKey = key
+            assert.match(key, /^[a-zA-Z0-9_./ -]+$/)
+            assert.equal(options.upsert, false)
+            return { error: null }
+        },
+        getPublicUrl: key => { publicKey = key; return { data: { publicUrl: 'https://fixture.invalid/' + encodeURI(key) } } },
+    }) } }
+    const unit = load({ getSupabaseForSignal: () => provider, supabase: provider })
+    unit.setDrive({ files: { create: async () => { throw Error('Fixture Drive failure') } } })
+    unit.skipFolderResolution()
+    const result = await unit.uploadCaptureImage(Buffer.from('png'), {
+        campaign: { client: 'FEMINICÍDIO', campaignName: 'Saúde e ação', pi: '355' },
+        fileName: 'evidence-unique-id.png',
+    })
+    assert.equal(result.provider, 'supabase')
+    assert.equal(result.requestedProvider, 'google-drive')
+    assert( uploadedKey.includes('/FEMINICIDIO/PI 355 - Saude e acao/evidence-unique-id.png'))
+    assert.equal(publicKey, uploadedKey)
+    assert.equal(result.path, uploadedKey)
 })
