@@ -4,6 +4,7 @@ import path from 'path'
 import { Readable } from 'stream'
 import { google } from 'googleapis'
 import { supabase, getSupabaseForSignal } from './supabase'
+import { supabaseObjectKey } from './storageObjectKey'
 import { setTimeout as waitForStorage } from 'node:timers/promises'
 import prisma from './prisma'
 import { fetchPublicCaptureBuffer } from './captureNetwork'
@@ -466,7 +467,7 @@ async function ensureDriveCaptureFolder(campaign: CampaignStorageInfo, folderSeg
 }
 
 async function uploadToSupabase(imageBuffer: Buffer, input: UploadCaptureInput): Promise<StoredCapture> {
-    const storagePath = buildStoragePath(input)
+    const storagePath = supabaseObjectKey(buildStoragePath(input))
 
     input.signal?.throwIfAborted()
     const { error: uploadError } = await getSupabaseForSignal(input.signal).storage
