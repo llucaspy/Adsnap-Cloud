@@ -13,6 +13,7 @@ import { notifyGamOrderStarted } from '@/lib/gamOrderTelegram'
 import { deleteCaptureFile, loadCaptureFile } from '@/lib/captureStorage'
 import { getSession } from '@/lib/auth'
 import { sanitizeLogRecord } from '@/lib/logRedaction'
+import { orderRegistrationPolicy } from '@/lib/gamRegistrationPolicy'
 
 export async function getNexusActivity() {
     const session = await getSession()
@@ -302,7 +303,7 @@ export async function requestGamImportDraft(input: {
     const url = input.orderUrl.trim()
     const requestedPi = input.pi.trim()
     const requestedSegmentation = normalizeGamRequestedSegmentation(input.segmentation)
-    const requestedCaptureCadence = normalizeCaptureCadence(requestedSegmentation, input.captureCadence)
+    const requestedCaptureCadence = orderRegistrationPolicy(requestedSegmentation).captureCadence
 
     if (!/^https:\/\/admanager\.google\.com\/.+order_id=\d+/i.test(url)) {
         throw new Error('Informe um link de Order valido do Google Ad Manager.')
@@ -369,7 +370,7 @@ export async function requestGamImportDraft(input: {
             details: JSON.stringify({
                 orderUrl: url,
                 orderId,
-                mode: 'draft',
+                mode: 'AUTO_REGISTER',
                 requestedPi,
                 requestedSegmentation,
                 requestedCaptureCadence,

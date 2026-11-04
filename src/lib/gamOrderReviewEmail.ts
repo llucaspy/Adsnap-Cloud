@@ -17,6 +17,7 @@ interface SendGamOrderReviewEmailOptions {
     jobId: string
     reviewUrl: string
     writeResult?: GamImportWriteResult
+    automaticallySaved?: boolean
 }
 
 function parseRecipients(value: string | null | undefined) {
@@ -90,21 +91,22 @@ function brDate(value: string | null | undefined) {
     return `${parts[2]}/${parts[1]}/${parts[0]}`
 }
 
-function buildSubject(draft: GamImportDraft) {
+function buildSubject(draft: GamImportDraft, automaticallySaved = false) {
     const client = draft.client || 'Cliente'
-    return `[Adsnap] Order GAM pronta para revisão - ${client} - PI ${draft.pi}`
+    return `[Adsnap] Order GAM ${automaticallySaved ? 'salva e agendada' : 'com pendências'} - ${client} - PI ${draft.pi}`
 }
 
 function buildText(options: SendGamOrderReviewEmailOptions) {
     const { draft, reviewUrl, writeResult } = options
     const rows = [
-        'Order GAM pronta para revisão.',
+        options.automaticallySaved ? 'Order GAM salva e agendada automaticamente; não precisa de aprovação para operar.' : 'Itens válidos salvos; há pendências para conferir.',
         '',
         `Cliente: ${draft.client}`,
         `Campanha: ${draft.campaignName || '-'}`,
         `PI: ${draft.pi}`,
         `Order: ${draft.orderId}`,
         `Período: ${brDate(draft.flightStart)} até ${brDate(draft.flightEnd)}`,
+        `Segmentação: ${draft.segmentation} | Capturas: ${draft.captureCadence === 'BOUNDARY' ? 'início e fim' : 'diárias'}`,
         `Formatos identificados: ${draft.mediaEntries.length}`,
         `Itens bloqueados: ${draft.blockedItems.length}`,
     ]
@@ -117,7 +119,7 @@ function buildText(options: SendGamOrderReviewEmailOptions) {
         )
     }
 
-    rows.push('', `Revisar order: ${reviewUrl}`)
+    rows.push('', `Ver cadastro: ${reviewUrl}`)
     return rows.join('\n')
 }
 
@@ -144,8 +146,8 @@ function buildHtml(options: SendGamOrderReviewEmailOptions) {
     <tr>
       <td style="padding:28px 28px 18px;border-bottom:1px solid #e4e4e7;">
         <div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;color:#71717a;">Adsnap Cloud</div>
-        <h1 style="margin:10px 0 0;font-size:24px;line-height:1.2;color:#18181b;">Order pronta para revisão</h1>
-        <p style="margin:10px 0 0;font-size:14px;line-height:1.6;color:#52525b;">O Nexus cadastrou a order do GAM e deixou a revisão pronta para conferência operacional.</p>
+        <h1 style="margin:10px 0 0;font-size:24px;line-height:1.2;color:#18181b;">${options.automaticallySaved ? 'Order salva e agendada' : 'Cadastro com pendências'}</h1>
+        <p style="margin:10px 0 0;font-size:14px;line-height:1.6;color:#52525b;">${options.automaticallySaved ? 'Campanhas salvas, sem aprovação adicional. Capturas automáticas conforme o período e a segmentação.' : 'Os itens válidos foram salvos; confira os itens pendentes.'}</p>
       </td>
     </tr>
     <tr>
@@ -170,7 +172,7 @@ function buildHtml(options: SendGamOrderReviewEmailOptions) {
         </div>
 
         <div style="margin-top:22px;">
-          <a href="${escapeHtml(reviewUrl)}" style="display:inline-block;background:#18181b;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 18px;border-radius:8px;">Abrir revisão da order</a>
+          <a href="${escapeHtml(reviewUrl)}" style="display:inline-block;background:#18181b;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 18px;border-radius:8px;">Ver cadastro</a>
         </div>
       </td>
     </tr>
@@ -202,7 +204,7 @@ export async function sendGamOrderReviewEmail(options: SendGamOrderReviewEmailOp
         const info = await transporter.sendMail({
             from: smtp.from,
             to: recipients,
-            subject: buildSubject(options.draft),
+            subject: buildSubject(options.draft, options.automaticallySaved),
             html: buildHtml(options),
             text: buildText(options),
         })

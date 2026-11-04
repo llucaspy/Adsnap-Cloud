@@ -28,7 +28,7 @@ function withCreativeAsset(existing: Prisma.JsonValue | null | undefined, creati
 }
 
 export async function createCampaignsFromGamDraft(
-    prisma: PrismaClient,
+    prisma: Pick<PrismaClient, 'campaign'>,
     draft: GamImportDraft
 ): Promise<GamImportWriteResult> {
     const campaignIds: string[] = []
@@ -57,16 +57,25 @@ export async function createCampaignsFromGamDraft(
                 url: entry.url,
                 isArchived: false,
             },
-            select: { id: true, compositionBox: true },
+            select: { id: true, compositionBox: true, adOpsStatus: true },
         })
 
         if (existing) {
+            if (['PAUSADA', 'CANCELADA', 'CONCLUIDA', 'ENCERRADA'].includes(existing.adOpsStatus)) {
+                skipped++
+                blocked++
+                continue
+            }
             const compositionBox = withCreativeAsset(existing.compositionBox, entry.creativeAssetUrl)
             await prisma.campaign.update({
                 where: { id: existing.id },
                 data: {
                     segmentation,
                     captureCadence,
+                    flightStart: draft.flightStart ? new Date(`${draft.flightStart}T00:00:00-03:00`) : null,
+                    flightEnd: draft.flightEnd ? new Date(`${draft.flightEnd}T23:59:59-03:00`) : null,
+                    isScheduled: draft.isScheduled,
+                    scheduledTimes: draft.scheduledTimes,
                     ...(compositionBox ? { compositionBox } : {}),
                 },
             })

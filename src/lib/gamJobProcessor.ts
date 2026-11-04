@@ -1,7 +1,8 @@
 import prisma from './prisma'
 import { gamCrawler } from './gamCrawlerService'
 import { buildGamImportDraft, normalizeGamRequestedSegmentation, type GamImportDraft } from './gamImportPlanner'
-import { createCampaignsFromGamDraft, type GamImportWriteResult } from './gamImportWriter'
+import type { GamImportWriteResult } from './gamImportWriter'
+import { finalizeAutomaticGamOrder } from './gamAutoSave'
 import { sendGamOrderReviewEmail } from './gamOrderReviewEmail'
 import { sendTelegramAlert } from './telegram'
 import { normalizeCaptureCadence, type CaptureCadence } from './governmentReportScope'
@@ -57,14 +58,6 @@ function withEvent(details: GamJobDetails, message: string, tone: GamJobEvent['t
     ].slice(-MAX_JOB_EVENTS)
 
     return { ...details, executionLogs }
-}
-
-function isAutoRegisterMode(mode?: string) {
-    const normalized = (mode || '').trim().toLowerCase()
-    return normalized === 'auto_register'
-        || normalized === 'auto-register'
-        || normalized === 'autoregister'
-        || normalized === 'nexus-order-autoregister'
 }
 
 function normalizeRepo(value: string | undefined) {
@@ -224,55 +217,20 @@ export async function processPendingGamJobs(limit = 5, targetJobId?: string) {
                 throw new Error('GAM_RASCUNHO_VAZIO: nenhum formato ou bloqueio foi identificado.')
             }
 
-            let writeResult: GamImportWriteResult | undefined
-            if (isAutoRegisterMode(initialDetails.mode)) {
-                await updateProgress(job.id, 'Rascunho validado; cadastrando campanhas automaticamente')
-                writeResult = await createCampaignsFromGamDraft(prisma, draft)
-                await updateProgress(
-                    job.id,
-                    `Cadastro automatico concluido: ${writeResult.created} criada(s), ${writeResult.skipped} existente(s), ${writeResult.blocked} pendente(s)`,
-                    'success',
-                )
-            }
-
-            const current = await prisma.nexusLog.findUnique({ where: { id: job.id } })
-            if (!current || current.level !== 'JOB_GAM_RUNNING') throw new Error('GAM_JOB_CANCELLED')
-            const completedDetails = withEvent(
-                {
-                    ...draft,
-                    requestedPi: initialDetails.requestedPi || draft.pi,
-                    requestedSegmentation,
-                    requestedCaptureCadence: initialDetails.requestedCaptureCadence || draft.captureCadence,
-                    autoRegisterResult: writeResult,
-                    executionLogs: readDetails(current.details).executionLogs,
-                },
-                writeResult
-                    ? `Cadastro pronto para revisao com ${writeResult.created} campanha(s) criada(s)`
-                    : `Rascunho pronto com ${draft.mediaEntries.length} formato(s)`,
-                'success',
-            )
-            const completed = await prisma.nexusLog.updateMany({
-                where: { id: job.id, level: 'JOB_GAM_RUNNING' },
-                data: {
-                    level: 'JOB_GAM_REVIEW',
-                    message: writeResult
-                        ? `Cadastro GAM pronto para revisao: ${draft.client} (${writeResult.created} criada(s), ${writeResult.skipped} existente(s), ${writeResult.blocked} pendente(s))`
-                        : `Rascunho GAM pronto: ${draft.client} (${draft.mediaEntries.length} formato(s), ${draft.blockedItems.length} bloqueado(s))`,
-                    details: JSON.stringify(completedDetails),
-                },
-            })
-
-            if (completed.count > 0) {
+            await updateProgress(job.id, 'Salvando e agendando campanhas automaticamente')
+            const completion = await finalizeAutomaticGamOrder(prisma, job.id, draft)
+            const { writeResult, completedDetails, saved } = completion
+            {
                 const reviewUrl = buildGamReviewUrl(job.id)
                 const reviewReadyAt = new Date().toISOString()
-                const telegramSent = await notifyGamOrderReadyForReview({ jobId: job.id, draft, reviewUrl, writeResult })
+                const telegramSent = await notifyGamOrderReadyForReview({ jobId: job.id, draft: completion.draft, reviewUrl, writeResult, automaticallySaved: saved })
 
                 const emailSent = writeResult
-                    ? await sendGamOrderReviewEmail({ draft, jobId: job.id, reviewUrl, writeResult })
+                    ? await sendGamOrderReviewEmail({ draft: completion.draft, jobId: job.id, reviewUrl, writeResult, automaticallySaved: saved })
                     : false
 
                 await prisma.nexusLog.updateMany({
-                    where: { id: job.id, level: 'JOB_GAM_REVIEW' },
+                    where: { id: job.id, level: completion.level },
                     data: {
                         details: JSON.stringify({
                             ...completedDetails,
@@ -291,6 +249,10 @@ export async function processPendingGamJobs(limit = 5, targetJobId?: string) {
             }
         } catch (error) {
             const current = await prisma.nexusLog.findUnique({ where: { id: job.id } })
+            if (current?.level === 'JOB_GAM_SAVED') {
+                console.error('[Nexus GAM] Cadastro salvo; notificação não concluída.')
+                continue
+            }
             if (!current || current.level === 'JOB_GAM_CANCELLED') {
                 console.log(`[Nexus GAM] Job ${job.id} encerrado pelo usuario.`)
                 continue

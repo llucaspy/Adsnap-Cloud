@@ -48,7 +48,8 @@ const quickActions = [
 const statusMap: Record<string, { label: string; color: string; icon: typeof Clock3 }> = {
     JOB_GAM_PENDING: { label: 'Fila', color: '#f59e0b', icon: Clock3 },
     JOB_GAM_RUNNING: { label: 'Rodando', color: '#93c5fd', icon: Loader2 },
-    JOB_GAM_REVIEW: { label: 'Revisao', color: '#22c55e', icon: CheckCircle2 },
+    JOB_GAM_REVIEW: { label: 'Pendências', color: '#f59e0b', icon: AlertTriangle },
+    JOB_GAM_SAVED: { label: 'Salva e agendada', color: '#22c55e', icon: CheckCircle2 },
     JOB_GAM_ERROR: { label: 'Erro', color: '#ef4444', icon: AlertTriangle },
     JOB_GAM_CANCELLED: { label: 'Cancelado', color: '#a3a3a3', icon: Clock3 },
     [GAM_AUTH_REQUIRED_LEVEL]: { label: 'Login', color: '#f59e0b', icon: AlertTriangle },
@@ -204,6 +205,7 @@ function RecentJobs({ jobs, onRefresh, isRefreshing }: {
         pending: jobs.filter(job => job.level === 'JOB_GAM_PENDING').length,
         running: jobs.filter(job => job.level === 'JOB_GAM_RUNNING').length,
         review: jobs.filter(job => job.level === 'JOB_GAM_REVIEW').length,
+        saved: jobs.filter(job => job.level === 'JOB_GAM_SAVED').length,
         error: jobs.filter(job => job.level === 'JOB_GAM_ERROR').length,
         auth: jobs.filter(job => job.level === GAM_AUTH_REQUIRED_LEVEL).length,
     }), [jobs])
@@ -231,7 +233,8 @@ function RecentJobs({ jobs, onRefresh, isRefreshing }: {
                     {[
                         ['Fila', metrics.pending],
                         ['Exec.', metrics.running],
-                        ['Rev.', metrics.review],
+                        ['Salvas', metrics.saved],
+                        ['Pend.', metrics.review],
                         ['Login', metrics.auth],
                     ].map(([label, value]) => (
                         <div key={label} className="px-3 py-2" style={{ background: '#0f0f0f', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
@@ -246,7 +249,7 @@ function RecentJobs({ jobs, onRefresh, isRefreshing }: {
                 {jobs.slice(0, 7).map(job => (
                     <Link
                         key={job.id}
-                        href={job.level === 'JOB_GAM_REVIEW' ? `/campaigns?jobId=${encodeURIComponent(job.id)}` : '/workers'}
+                        href={['JOB_GAM_REVIEW', 'JOB_GAM_SAVED'].includes(job.level) ? `/campaigns?jobId=${encodeURIComponent(job.id)}` : '/workers'}
                         className="block p-3 transition-colors hover:bg-white/[0.07]"
                         style={{ background: '#141414', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px' }}
                     >

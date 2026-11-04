@@ -13,6 +13,7 @@ import { notifyGamOrderStarted } from '@/lib/gamOrderTelegram'
 import { supportIdentity } from '@/lib/supportHttp'
 import { getNexusAccess } from '@/lib/nexusPolicy'
 import { registerGamOrder } from '@/lib/gamOrderRegistration'
+import { inferOrderCampaignType, type OrderCampaignType } from '@/lib/gamRegistrationPolicy'
 
 type NexusOrderDetails = Partial<GamImportDraft> & {
     orderUrl?: string
@@ -109,10 +110,10 @@ function readDetails(details: string | null): NexusOrderDetails {
     }
 }
 
-export async function submitNexusOrderLink(orderUrl: string) {
+export async function submitNexusOrderLink(orderUrl: string, campaignType: OrderCampaignType = 'PRIVADO') {
     const identity = await supportIdentity()
     const access = await getNexusAccess(prisma, identity.userId)
-    const result = await registerGamOrder(prisma, orderUrl, triggerGamWorker, notifyGamOrderStarted)
+    const result = await registerGamOrder(prisma, orderUrl, triggerGamWorker, notifyGamOrderStarted, campaignType)
     revalidatePath('/nexus')
     revalidatePath('/campaigns')
     return { ...result, authWorkflowUrl: access?.isOwner ? result.authWorkflowUrl : '' }
@@ -506,19 +507,21 @@ export async function submitNexusAssistantMessage(message: string): Promise<Nexu
 
     const orderUrl = extractGamOrderUrl(input)
     if (orderUrl) {
-        const result = await submitNexusOrderLink(orderUrl)
+        const result = await submitNexusOrderLink(orderUrl, inferOrderCampaignType([input]))
         const authRequired = result.status === GAM_AUTH_REQUIRED_LEVEL
         return {
             tone: authRequired ? 'warning' : result.existing ? 'warning' : 'success',
             text: authRequired
                 ? `Essa Order ${result.orderId} esta aguardando renovacao do login Google para o Nexus entrar no GAM.`
+                : result.status === 'JOB_GAM_SAVED'
+                    ? `A Order ${result.orderId} já está salva e agendada, sem aprovação adicional.`
                 : result.existing
                     ? `Essa Order ${result.orderId} ja estava no fluxo Nexus. Mantive o job ${result.jobId} e tentei acionar o worker quando aplicavel.`
-                : `Recebi a Order ${result.orderId}. Enfileirei o cadastro automatico e acionei o worker GAM para preparar a revisao.`,
+                : `Recebi a Order ${result.orderId}. Enfileirei o cadastro e salvamento automático. Worker ${result.triggered ? 'acionado' : 'não acionado; solicitação mantida na fila'}.`,
             actions: [
                 authRequired && result.authWorkflowUrl
                     ? { label: 'Renovar login Google', href: result.authWorkflowUrl, variant: 'primary' as const }
-                    : { label: 'Ver revisao', href: `/campaigns?jobId=${encodeURIComponent(result.jobId)}`, variant: 'primary' as const },
+                    : { label: 'Ver cadastro', href: `/campaigns?jobId=${encodeURIComponent(result.jobId)}`, variant: 'primary' as const },
                 { label: 'Ver fila Nexus', command: 'mostrar jobs nexus' },
             ],
         }
@@ -706,7 +709,7 @@ export async function submitNexusAssistantMessage(message: string): Promise<Nexu
                 meta: job.pi ? `PI ${job.pi} | ${job.formats} formato(s)` : `${job.formats} formato(s)`,
                 href: job.level === GAM_AUTH_REQUIRED_LEVEL && job.authWorkflowUrl
                     ? job.authWorkflowUrl
-                    : job.level === 'JOB_GAM_REVIEW'
+                    : ['JOB_GAM_REVIEW', 'JOB_GAM_SAVED'].includes(job.level)
                         ? `/campaigns?jobId=${encodeURIComponent(job.id)}`
                         : undefined,
             })),
