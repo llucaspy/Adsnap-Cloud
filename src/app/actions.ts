@@ -491,14 +491,16 @@ export async function cancelGamImportJob(jobId: string) {
         { at: new Date().toISOString(), message: 'Execucao encerrada pelo usuario', tone: 'error' },
     ].slice(-100)
 
-    await prisma.nexusLog.update({
-        where: { id: jobId },
+    const cancelled = await prisma.nexusLog.updateMany({
+        where: { id: jobId, level: { in: ['JOB_GAM_PENDING', 'JOB_GAM_RUNNING'] } },
         data: {
             level: 'JOB_GAM_CANCELLED',
             message: 'Nexus GAM: execucao encerrada pelo usuario',
             details: JSON.stringify(details),
         },
     })
+
+    if (cancelled.count === 0) return { success: true, cancelledRun: false }
 
     const cancelledRun = await cancelGamWorkflowRun(jobId)
     revalidatePath('/campaigns')
