@@ -7,7 +7,8 @@ export async function GET(_request: Request, context: Context) {
     try {
         const identity = await supportIdentity(), id = (await context.params).id
         await createSupportActions(prisma, async () => false).refresh(id, identity)
-        return supportJson({ conversation: await supportStore.read(id, identity), executor: await supportStore.status() })
+        const [conversation, executor] = await Promise.all([supportStore.read(id, identity), supportStore.status()])
+        return supportJson({ conversation, executor })
     }
     catch (error) { return supportFailure(error) }
 }

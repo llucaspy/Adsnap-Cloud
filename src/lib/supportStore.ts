@@ -58,7 +58,7 @@ export function createSupportStore(db: PrismaClient) {
         // A dead executor never silently replays a turn that may already have taken actions.
         await db.supportTurn.updateMany({ where: { conversationId: id, status: 'RUNNING', lockedUntil: { lt: new Date() } }, data: { status: 'FAILED', finishedAt: new Date(), assistantText: 'A execução foi interrompida. Confira as ações registradas antes de solicitar outra tentativa.' } })
         const turns = await db.supportTurn.findMany({ where: { conversationId: id }, orderBy: { createdAt: 'desc' }, take: 40, include: { actions: { orderBy: { createdAt: 'asc' } } } })
-        return { ...conversation, turns: turns.reverse().map(t => ({ id: t.id, userText: t.userText, assistantText: nexusReply(t.assistantText, access?.isOwner === true), status: t.status, createdAt: t.createdAt, actions: t.status === 'SUCCESS' ? t.actions.map(action => publicNexusAction(action, access?.isOwner === true)) : [] })) }
+        return { ...conversation, turns: turns.reverse().map(t => ({ id: t.id, requestId: t.requestKey, userText: t.userText, assistantText: nexusReply(t.assistantText, access?.isOwner === true), status: t.status, createdAt: t.createdAt, actions: t.status === 'SUCCESS' ? t.actions.map(action => publicNexusAction(action, access?.isOwner === true)) : [] })) }
     }
     async function submit(id: string, identity: SupportIdentity, requestKey: string, input: unknown) {
         await owned(id, identity)

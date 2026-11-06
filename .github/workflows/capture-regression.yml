@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   regression:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # Compatible with the pinned Playwright browser/dependency build.
     timeout-minutes: 20
     services:
       postgres:
@@ -62,3 +62,4 @@ jobs:
           done
           node test-support/worker-ui-smoke.mjs
           node --import tsx test-support/support-ui-smoke.mjs
+          node test-support/support-chat-latency.mjs

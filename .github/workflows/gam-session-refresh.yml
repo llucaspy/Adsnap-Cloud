@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   refresh-session:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # Compatible with the pinned Playwright browser/dependency build.
     timeout-minutes: 20
 
     steps:
