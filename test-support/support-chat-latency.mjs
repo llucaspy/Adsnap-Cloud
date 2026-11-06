@@ -30,6 +30,7 @@ try {
         if (route.request().method() === 'POST') {
             const body = route.request().postDataJSON(); submissions.push(body)
             postCount++
+            if (postCount === 3) return route.fulfill({ status: 429, json: { error: 'Limite sintético do atendimento.' } })
             if (!message) message = { id: 'latency-turn', requestId: body.requestId, userText: body.message, assistantText: '', status: 'RUNNING', actions: [] }
             assert.equal(body.requestId, message.requestId, 'Retry must reuse the idempotency key')
             if (postCount === 1) { await sleep(1800); return route.abort('failed') }
@@ -79,6 +80,12 @@ try {
     assert.equal(await input.inputValue(), 'Rascunho da próxima pergunta')
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
     checks.push('Response completion preserves the next draft and mobile layout')
+    await page.getByRole('button', { name: 'Enviar ao Nexus', exact: true }).click()
+    await page.getByRole('alert').filter({ hasText: 'Limite sintético do atendimento.' }).waitFor()
+    assert.equal(await input.inputValue(), 'Rascunho da próxima pergunta')
+    assert(await input.isEnabled())
+    assert(await page.getByRole('button', { name: 'Enviar ao Nexus', exact: true }).isEnabled())
+    checks.push('Explicit API rejection preserves the message and leaves the composer usable')
     assert.deepEqual(errors, [])
     await fs.mkdir('.test-infra/support-ui', { recursive: true })
     await page.screenshot({ path: '.test-infra/support-ui/responsiveness-mobile.png', fullPage: true, animations: 'disabled' })

@@ -9,12 +9,15 @@ type Turn = { id: string; requestId?: string; userText: string; assistantText: s
 type Conversation = { id: string; title: string; turns: Turn[] }
 type Summary = { id: string; title: string }
 type Executor = { online: boolean; state: string }
-type Outgoing = { conversationId: string; requestId: string; text: string; state: 'sending' | 'received' | 'unconfirmed'; id?: string }
+type Outgoing = { conversationId: string; requestId: string; text: string; state: 'sending' | 'received' | 'unconfirmed' | 'rejected'; id?: string }
+class SupportApiError extends Error {
+    constructor(message: string, readonly status: number) { super(message) }
+}
 async function api<T>(path: string, body?: object, signal?: AbortSignal): Promise<T> {
     const timeout = AbortSignal.timeout(25000)
     const response = await fetch(`/api/support${path}`, { method: body ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store', headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined, signal: signal ? AbortSignal.any([signal, timeout]) : timeout })
     const result = await response.json()
-    if (!response.ok) throw new Error(result.error || 'Não foi possível acessar o atendimento.')
+    if (!response.ok) throw new SupportApiError(result.error || 'Não foi possível acessar o atendimento.', response.status)
     return result as T
 }
 
@@ -42,7 +45,7 @@ export function SupportChatPanel() {
     const busy = !!conversation?.turns.some(t => ['QUEUED', 'RUNNING'].includes(t.status))
     const lastTurnStatus = conversation?.turns.at(-1)?.status
     const outgoingVisible = outgoing && !conversation?.turns.some(t => t.id === outgoing.id || t.requestId === outgoing.requestId)
-    const waitingForReceipt = !!outgoingVisible
+    const waitingForReceipt = !!outgoingVisible && outgoing?.state !== 'rejected'
     const loadingConversation = !!selected && conversation?.id !== selected
 
     useEffect(() => {
@@ -107,9 +110,16 @@ export function SupportChatPanel() {
             }
             const received = await api<{ id: string; status: string }>(`/${id}`, { requestId: message.requestId, message: message.text })
             setOutgoing({ ...message, id: received.id, state: 'received' }); setRefresh(n => n + 1)
-        } catch {
-            setOutgoing({ ...message, state: 'unconfirmed' })
-            if (pending.current?.requestId === message.requestId) setError('Não foi possível confirmar o envio. Sua mensagem está aqui; tente novamente sem duplicá-la.')
+        } catch (cause) {
+            if (cause instanceof SupportApiError && cause.status >= 400 && cause.status < 500) {
+                pending.current = null
+                setOutgoing({ ...message, state: 'rejected' })
+                setInput(current => current || message.text)
+                setError(cause.message)
+            } else {
+                setOutgoing({ ...message, state: 'unconfirmed' })
+                if (pending.current?.requestId === message.requestId) setError('Não foi possível confirmar o envio. Sua mensagem está aqui; tente novamente sem duplicá-la.')
+            }
         }
         finally { sendingRef.current = false; setSending(false) }
     }
@@ -156,7 +166,7 @@ export function SupportChatPanel() {
             </div>)}
             {outgoingVisible && outgoing && <div className="space-y-2" data-testid="outgoing-message">
                 <div className="ml-6 bg-neutral-700 rounded-lg p-3 text-sm whitespace-pre-wrap break-words">{outgoing.text}</div>
-                <p role="status" className="text-xs text-neutral-400">{outgoing.state === 'sending' ? 'Enviando mensagem…' : outgoing.state === 'unconfirmed' ? 'Envio não confirmado · mensagem preservada' : 'Mensagem recebida · aguardando atendimento'}</p>
+                <p role="status" className="text-xs text-neutral-400">{outgoing.state === 'sending' ? 'Enviando mensagem…' : outgoing.state === 'unconfirmed' ? 'Envio não confirmado · mensagem preservada' : outgoing.state === 'rejected' ? 'Mensagem não enviada' : 'Mensagem recebida · aguardando atendimento'}</p>
                 {outgoing.state === 'unconfirmed' && <button type="button" onClick={() => void deliver(outgoing)} className="text-xs underline">Tentar enviar novamente</button>}
             </div>}
             {error && <p role="alert" className="text-sm text-amber-300">{error}</p>}
