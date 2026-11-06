@@ -37,7 +37,7 @@ jobs:
     permissions:
       contents: read
       actions: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # Compatible with the pinned Playwright browser/dependency build.
     if: github.event.schedule != '0 3 1 * *'
     timeout-minutes: 30
 
