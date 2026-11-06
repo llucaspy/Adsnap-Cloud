@@ -62,3 +62,4 @@ jobs:
           done
           node test-support/worker-ui-smoke.mjs
           node --import tsx test-support/support-ui-smoke.mjs
+          node test-support/support-chat-latency.mjs
