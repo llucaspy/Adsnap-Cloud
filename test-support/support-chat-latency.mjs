@@ -74,7 +74,7 @@ try {
     assert(await input.isEnabled())
     checks.push('Lost acknowledgement retries the same message without duplicate bubbles or draft loss')
     message.status = 'SUCCESS'; message.assistantText = 'Resposta sintética de teste.'
-    await page.getByRole('button', { name: 'Atualizar', exact: true }).click()
+    await page.getByLabel('Conversa de atendimento').locator('..').getByRole('button', { name: 'Atualizar', exact: true }).click()
     await page.getByText('Resposta sintética de teste.', { exact: true }).waitFor()
     await page.waitForFunction(() => !document.querySelector('#support-message').closest('form').querySelector('button[type=submit]').disabled)
     assert.equal(await input.inputValue(), 'Rascunho da próxima pergunta')
