@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 30
     container:
       # Playwright 1.58.1 and its browser dependencies are preinstalled.
-      image: mcr.microsoft.com/playwright:v1.58.1-noble@sha256:56c7596ddb170280f4dd811226777ad0eaec1df8869cc1f90cbdd399d2dc3491
+      image: mcr.microsoft.com/playwright:v1.58.1-noble@sha256:feae0b1581609d3dc2ba22567b4703dd6a3e7a219984bb86a19ed35007148a91
       options: --ipc=host
 
     steps:
