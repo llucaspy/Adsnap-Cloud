@@ -118,7 +118,7 @@ export async function notifyGamOrderStarted(jobId: string) {
         )
 
         await prisma.nexusLog.updateMany({
-            where: { id: job.id, level: { in: [GAM_PENDING_LEVEL, GAM_RUNNING_LEVEL] } },
+            where: { id: job.id, level: job.level, details: job.details },
             data: { details: JSON.stringify(nextDetails) },
         })
     }

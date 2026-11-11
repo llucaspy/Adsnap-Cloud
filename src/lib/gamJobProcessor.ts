@@ -9,7 +9,6 @@ import { normalizeCaptureCadence, type CaptureCadence } from './governmentReport
 import { GAM_AUTH_REQUIRED_LEVEL } from './gamJobStatus'
 import { buildGamReviewUrl, notifyGamOrderReadyForReview, notifyGamOrderStarted } from './gamOrderTelegram'
 
-const STALE_JOB_MINUTES = 30
 const MAX_JOB_EVENTS = 100
 
 export interface GamJobEvent {
@@ -94,7 +93,7 @@ export async function releaseGamAuthRequiredJobs() {
             data: {
                 level: 'JOB_GAM_PENDING',
                 message: 'Nexus GAM: sessao renovada; job liberado para processamento',
-                details: JSON.stringify(details),
+                details: JSON.stringify({ ...details, workflowRunId: undefined, workflowCheckedAt: undefined }),
             },
         })
     }
@@ -152,23 +151,6 @@ async function updateProgress(jobId: string, message: string, tone: GamJobEvent[
 }
 
 export async function processPendingGamJobs(limit = 5, targetJobId?: string) {
-    const staleBefore = new Date(Date.now() - STALE_JOB_MINUTES * 60 * 1000)
-    const recovered = await prisma.nexusLog.updateMany({
-        where: {
-            level: 'JOB_GAM_RUNNING',
-            createdAt: { lt: staleBefore },
-            ...(targetJobId ? { id: targetJobId } : {}),
-        },
-        data: {
-            level: 'JOB_GAM_PENDING',
-            message: 'Nexus GAM: retomando uma execucao interrompida',
-        },
-    })
-
-    if (recovered.count > 0) {
-        console.log(`[Nexus GAM] ${recovered.count} job(s) interrompido(s) voltaram para a fila.`)
-    }
-
     const jobs = await prisma.nexusLog.findMany({
         where: {
             level: 'JOB_GAM_PENDING',
@@ -253,7 +235,7 @@ export async function processPendingGamJobs(limit = 5, targetJobId?: string) {
                 console.error('[Nexus GAM] Cadastro salvo; notificação não concluída.')
                 continue
             }
-            if (!current || current.level === 'JOB_GAM_CANCELLED') {
+            if (!current || current.level !== 'JOB_GAM_RUNNING') {
                 console.log(`[Nexus GAM] Job ${job.id} encerrado pelo usuario.`)
                 continue
             }
@@ -272,14 +254,15 @@ export async function processPendingGamJobs(limit = 5, targetJobId?: string) {
                     authRequiredAt,
                     authWorkflowUrl: workflowUrl || undefined,
                 }
-                await prisma.nexusLog.update({
-                    where: { id: job.id },
+                const paused = await prisma.nexusLog.updateMany({
+                    where: { id: job.id, level: 'JOB_GAM_RUNNING' },
                     data: {
                         level: GAM_AUTH_REQUIRED_LEVEL,
                         message: 'Nexus GAM: autenticacao supervisionada necessaria',
                         details: JSON.stringify(details),
                     },
                 })
+                if (!paused.count) continue
                 const pausedCount = await pausePendingGamJobsForAuth(workflowUrl, authRequiredAt)
                 await sendTelegramAlert(
                     'Sessao GAM expirada',
@@ -291,8 +274,8 @@ export async function processPendingGamJobs(limit = 5, targetJobId?: string) {
                 break
             }
 
-            await prisma.nexusLog.update({
-                where: { id: job.id },
+            await prisma.nexusLog.updateMany({
+                where: { id: job.id, level: 'JOB_GAM_RUNNING' },
                 data: {
                     level: 'JOB_GAM_ERROR',
                     message: `Erro: ${message}`,
