@@ -185,7 +185,7 @@ export async function processPendingGamJobs(limit = 5, targetJobId?: string) {
             data: {
                 level: 'JOB_GAM_RUNNING',
                 message: 'Nexus GAM: preparando o navegador',
-                details: JSON.stringify(initialDetails),
+                details: JSON.stringify({ ...initialDetails, workflowRunId: process.env.GITHUB_RUN_ID }),
             },
         })
         if (claim.count === 0) continue

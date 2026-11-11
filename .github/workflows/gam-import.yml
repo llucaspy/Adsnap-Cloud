@@ -19,6 +19,10 @@ jobs:
   gam-import:
     runs-on: ubuntu-24.04 # Compatible with the pinned Playwright browser/dependency build.
     timeout-minutes: 30
+    container:
+      # Playwright 1.58.1 and its browser dependencies are preinstalled.
+      image: mcr.microsoft.com/playwright:v1.58.1-noble@sha256:feae0b1581609d3dc2ba22567b4703dd6a3e7a219984bb86a19ed35007148a91
+      options: --ipc=host
 
     steps:
       - name: Checkout Repository
@@ -27,18 +31,17 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
-
       - name: Create environment file
+        env:
+          ADSNAP_CLOUD_KEYS: ${{ secrets.ADSNAP_CLOUD_KEYS }}
         run: |
-          echo "${{ secrets.ADSNAP_CLOUD_KEYS }}" > .env
+          printf '%s\n' "$ADSNAP_CLOUD_KEYS" > .env
           cp .env .env.local
 
       - name: Process GAM imports
@@ -46,3 +49,24 @@ jobs:
         env:
           GITHUB_ACTIONS: "true"
           GAM_JOB_ID: ${{ inputs.job_id || github.event.client_payload.job_id }}
+
+  report-failure:
+    needs: gam-import
+    if: ${{ always() && (needs.gam-import.result == 'failure' || needs.gam-import.result == 'cancelled') && (inputs.job_id || github.event.client_payload.job_id) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Record interrupted import
+        env:
+          ADSNAP_CLOUD_KEYS: ${{ secrets.ADSNAP_CLOUD_KEYS }}
+          GAM_JOB_ID: ${{ inputs.job_id || github.event.client_payload.job_id }}
+        run: |
+          printf '%s\n' "$ADSNAP_CLOUD_KEYS" > .env
+          cp .env .env.local
+          npx tsx src/scripts/gam-worker.ts --record-workflow-failure
