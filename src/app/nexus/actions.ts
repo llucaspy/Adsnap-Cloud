@@ -13,6 +13,7 @@ import { notifyGamOrderStarted } from '@/lib/gamOrderTelegram'
 import { supportIdentity } from '@/lib/supportHttp'
 import { getNexusAccess } from '@/lib/nexusPolicy'
 import { registerGamOrder } from '@/lib/gamOrderRegistration'
+import { reconcileGamJob } from '@/lib/gamWorkflow'
 import { inferOrderCampaignType, type OrderCampaignType } from '@/lib/gamRegistrationPolicy'
 
 type NexusOrderDetails = Partial<GamImportDraft> & {
@@ -130,12 +131,13 @@ export async function getNexusOrderJobs() {
         take: 12,
     })
 
-    return jobs.map(job => {
+    const currentJobs = await Promise.all(jobs.map(job => reconcileGamJob(prisma, job)))
+    return currentJobs.map(job => {
         const details = readDetails(job.details)
         return {
             id: job.id,
             level: job.level,
-            message: access?.isOwner ? job.message : 'Acompanhe o cadastro na área de campanhas.',
+            message: access?.isOwner ? job.message : job.level === 'JOB_GAM_ERROR' ? 'Cadastro interrompido. Tente cadastrar a Order novamente.' : 'Acompanhe o cadastro na área de campanhas.',
             createdAt: job.createdAt.toISOString(),
             orderId: details.orderId || details.orderUrl?.match(/order_id=(\d+)/i)?.[1] || '',
             orderUrl: details.orderUrl || '',

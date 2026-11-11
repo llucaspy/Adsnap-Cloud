@@ -1,4 +1,6 @@
 import type { PrismaClient } from '@prisma/client'
+import prisma from './prisma'
+import { dispatchGamWorkflow, reconcileGamJob } from './gamWorkflow'
 import { parseGamOrderUrl } from './gamOrderUrl'
 import { GAM_AUTH_REQUIRED_LEVEL } from './gamJobStatus'
 import { orderRegistrationPolicy, type OrderCampaignType } from './gamRegistrationPolicy'
@@ -8,6 +10,11 @@ export async function registerGamOrder(db: PrismaClient, value: string, trigger:
     const policy = orderRegistrationPolicy(campaignType)
     const order = parseGamOrderUrl(value)
     if (!order) throw new Error('Envie a URL completa e válida da Order do Google Ad Manager.')
+    const active = await db.nexusLog.findMany({
+        where: { level: { in: ['JOB_GAM_PENDING', 'JOB_GAM_RUNNING'] }, details: { contains: order.orderId } },
+        orderBy: { createdAt: 'desc' }, take: 10,
+    })
+    await Promise.all(active.map(job => reconcileGamJob(db, job)))
     const result = await db.$transaction(async tx => {
         // All entry points share this lock: browser commands and the Nexus tool cannot duplicate a pending order.
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`gam-order:${order.network}:${order.orderId}`}))`
@@ -28,7 +35,7 @@ export async function registerGamOrder(db: PrismaClient, value: string, trigger:
             if (different && current.level === 'JOB_GAM_RUNNING') throw new Error('Esta Order já está em processamento com outro tipo de campanha. Aguarde a conclusão antes de solicitar a mudança.')
             const requeue = current.level === 'JOB_GAM_REVIEW' || (current.level === 'JOB_GAM_SAVED' && different)
             const requested = Date.parse(details.dispatchRequestedAt || '')
-            const eligible = requeue || current.level === 'JOB_GAM_PENDING' || (current.level === 'JOB_GAM_RUNNING' && current.createdAt.getTime() < Date.now() - 30 * 60000)
+            const eligible = requeue || current.level === 'JOB_GAM_PENDING'
             const shouldTrigger = eligible && (requeue || !Number.isFinite(requested) || Date.now() - requested > 60000)
             const updated = current.level !== 'JOB_GAM_SAVED' || requeue ? await tx.nexusLog.update({ where: { id: current.id }, data: { ...(requeue ? { level: 'JOB_GAM_PENDING' } : {}), details: JSON.stringify({ ...details, mode: 'AUTO_REGISTER', requestedSegmentation: policy.segmentation, requestedCaptureCadence: policy.captureCadence, ...(shouldTrigger ? { dispatchRequestedAt: new Date().toISOString() } : {}) }) } }) : current
             return { job: updated, existing: true, shouldTrigger, authWorkflowUrl: details.authWorkflowUrl || '' }
@@ -38,16 +45,11 @@ export async function registerGamOrder(db: PrismaClient, value: string, trigger:
     }, { maxWait: 10000, timeout: 15000 })
     const triggered = result.shouldTrigger ? await trigger(result.job.id).catch(() => false) : false
     if (!result.existing) await notify(result.job.id).catch(() => {})
-    return { success: true, existing: result.existing, triggered, jobId: result.job.id, orderId: order.orderId, status: result.job.level, authWorkflowUrl: result.authWorkflowUrl }
+    const current = result.shouldTrigger && !triggered ? await db.nexusLog.findUnique({ where: { id: result.job.id } }) : result.job
+    return { success: true, existing: result.existing, triggered, jobId: result.job.id, orderId: order.orderId, status: current?.level || result.job.level, authWorkflowUrl: result.authWorkflowUrl }
 }
 
 /** Host-only capability: fixed workflow, configured repository; credentials never enter the model environment. */
 export async function dispatchGamImport(jobId: string) {
-    const token = process.env.GITHUB_TOKEN
-    const repo = (process.env.GITHUB_REPO || '').replace(/^https:\/\/github.com\//, '').replace(/\.git\/?$/, '').replace(/\/$/, '')
-    if (!token || !/^[\w.-]+\/[\w.-]+$/.test(repo)) return false
-    try {
-        const response = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/gam-import.yml/dispatches`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'Adsnap-Nexus' }, body: JSON.stringify({ ref: 'main', inputs: { job_id: jobId } }), signal: AbortSignal.timeout(15000) })
-        return response.ok
-    } catch { return false }
+    return dispatchGamWorkflow(prisma, jobId)
 }

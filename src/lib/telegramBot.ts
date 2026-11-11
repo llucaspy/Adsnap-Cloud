@@ -1,4 +1,5 @@
 import prisma from './prisma'
+import { dispatchGamWorkflow } from './gamWorkflow'
 import { enqueueCaptureJobs, WORKER_JOB_TYPE_CAPTURE } from './workerJobs'
 import { getFormatLabelMap, resolveFormatLabel } from './formatLabels'
 import { nexusLogStore } from './nexusLogStore'
@@ -110,7 +111,7 @@ async function triggerNexusWorker(campaignIds: string[]) {
 }
 
 async function triggerGamWorker(jobId?: string) {
-    return triggerWorkflow('gam-import.yml', jobId ? { job_id: jobId } : {})
+    return dispatchGamWorkflow(prisma, jobId)
 }
 
 function html(value: unknown) {

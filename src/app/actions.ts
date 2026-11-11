@@ -14,6 +14,7 @@ import { deleteCaptureFile, loadCaptureFile } from '@/lib/captureStorage'
 import { getSession } from '@/lib/auth'
 import { sanitizeLogRecord } from '@/lib/logRedaction'
 import { orderRegistrationPolicy } from '@/lib/gamRegistrationPolicy'
+import { dispatchGamWorkflow, reconcileGamJob } from '@/lib/gamWorkflow'
 
 export async function getNexusActivity() {
     const session = await getSession()
@@ -318,12 +319,12 @@ export async function requestGamImportDraft(input: {
 
     const orderId = url.match(/order_id=(\d+)/i)?.[1] || 'Unknown'
 
-    const activeJobs = await prisma.nexusLog.findMany({
+    const candidates = await prisma.nexusLog.findMany({
         where: { level: { in: ['JOB_GAM_PENDING', 'JOB_GAM_RUNNING', GAM_AUTH_REQUIRED_LEVEL] } },
         orderBy: { createdAt: 'desc' },
         take: 20,
     })
-    const existingJob = activeJobs.find(job => {
+    const matchingJob = candidates.find(job => {
         try {
             const details = JSON.parse(job.details || '{}') as { orderUrl?: string; orderId?: string }
             return details.orderId === orderId || details.orderUrl?.includes(`order_id=${orderId}`)
@@ -331,6 +332,9 @@ export async function requestGamImportDraft(input: {
             return false
         }
     })
+
+    const checkedJob = matchingJob ? await reconcileGamJob(prisma, matchingJob) : null
+    const existingJob = checkedJob && (isGamActiveJobLevel(checkedJob.level) || checkedJob.level === GAM_AUTH_REQUIRED_LEVEL) ? checkedJob : null
 
     if (existingJob) {
         const existingDetails = JSON.parse(existingJob.details || '{}') as {
@@ -346,9 +350,7 @@ export async function requestGamImportDraft(input: {
         ) {
             throw new Error(`Esta Order ja esta em processamento com o PI ${existingDetails.requestedPi || 'informado anteriormente'}.`)
         }
-        const staleRunningJob = existingJob.level === 'JOB_GAM_RUNNING'
-            && existingJob.createdAt.getTime() < Date.now() - 30 * 60 * 1000
-        const shouldTrigger = existingJob.level === 'JOB_GAM_PENDING' || staleRunningJob
+        const shouldTrigger = existingJob.level === 'JOB_GAM_PENDING'
         const triggered = shouldTrigger
             ? await triggerGamWorker(existingJob.id)
             : false
@@ -408,7 +410,8 @@ export async function getGamImportDrafts() {
         take: 10,
     })
 
-    return logs.map(log => {
+    const currentLogs = await Promise.all(logs.map(log => reconcileGamJob(prisma, log)))
+    return currentLogs.map(log => {
         let draft: GamImportDraft | null = null
         let orderUrl = ''
         let orderId = ''
@@ -816,48 +819,7 @@ export async function triggerNexusWorker(campaignIds: string[] = []) {
 }
 
 export async function triggerGamWorker(jobId?: string) {
-    const token = process.env.GITHUB_TOKEN
-    let repo = process.env.GITHUB_REPO
-
-    if (!token || !repo) {
-        console.warn('[Nexus GAM] GITHUB_TOKEN ou GITHUB_REPO ausente; job mantido na fila.')
-        return false
-    }
-
-    if (repo.includes('github.com/')) {
-        repo = repo.split('github.com/')[1].replace(/\/$/, '').replace(/\.git$/, '')
-    }
-
-    try {
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 15000)
-        const response = await fetch(
-            `https://api.github.com/repos/${repo}/actions/workflows/gam-import.yml/dispatches`,
-            {
-                method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    Accept: 'application/vnd.github+json',
-                    'X-GitHub-Api-Version': '2022-11-28',
-                    'User-Agent': 'Adsnap-GAM-Agent',
-                },
-                body: JSON.stringify({
-                    ref: 'main',
-                    inputs: jobId ? { job_id: jobId } : {},
-                }),
-                signal: controller.signal,
-            },
-        )
-        clearTimeout(timeoutId)
-
-        if (response.ok) return true
-
-        console.error('[Nexus GAM] Falha ao disparar worker dedicado:', response.status, await response.text())
-        return false
-    } catch (error) {
-        console.error('[Nexus GAM] Erro ao disparar worker dedicado:', error)
-        return false
-    }
+    return dispatchGamWorkflow(prisma, jobId)
 }
 
 function normalizeGithubRepo(value: string | undefined) {
