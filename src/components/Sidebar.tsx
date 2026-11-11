@@ -2,6 +2,7 @@
 
 import { LayoutDashboard, Library, Archive, Settings, Instagram, Linkedin, Github, ShieldCheck, LogOut, Database, MessageCircle, Menu, X, Landmark } from 'lucide-react'
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { getStorageUsage } from '@/app/actions'
@@ -147,10 +148,13 @@ export function Sidebar() {
 
                         <div className="rounded-xl p-4 flex flex-col items-center gap-3 shadow-[rgba(0,0,0,0.30)_0px_8px_24px_0px]" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
                             <div className="w-full rounded-lg bg-white px-4 py-3 flex items-center justify-center">
-                                <img
-                                src="https://assets.metroimg.com/images/logo-maisacessado.gif"
-                                alt="Metrópoles"
-                                className="h-9 w-auto object-contain"
+                                <Image
+                                    src="/logo-metropoles.webp"
+                                    alt="Metrópoles"
+                                    width={280}
+                                    height={50}
+                                    unoptimized
+                                    className="h-auto w-full max-w-[202px]"
                                 />
                             </div>
                             <div className="h-px w-8 bg-white/10" />
